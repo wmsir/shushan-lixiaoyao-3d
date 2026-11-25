@@ -1,0 +1,37 @@
+{
+  "name": "li-xiaoyao-shushan-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "build:single": "tsc --noEmit && node -e \"process.env.SINGLE_FILE='1'; import('node:child_process').then(m => m.execSync('npx vite build', { stdio: 'inherit', env: process.env }))\"",
+    "preview": "vite preview --host 127.0.0.1",
+    "share": "node scripts/share-lan.mjs",
+    "cap:sync": "npm run build && npx cap sync android",
+    "deploy:fwpt": "node scripts/deploy-fwpt.mjs",
+    "test": "playwright test",
+    "verify:visual": "playwright test tests/visual.spec.ts",
+    "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4",
+    "lil-gui": "^0.21.0",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/three": "^0.184.1",
+    "pngjs": "^7.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13",
+    "vite-plugin-singlefile": "^2.3.4"
+  }
+}

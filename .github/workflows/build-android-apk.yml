@@ -1,0 +1,111 @@
+name: Build Android APK (仙剑·锁妖剑台)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Capacitor Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle caching
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build production Three.js WebGL2 bundle
+        run: npm run build
+
+      - name: Sync Capacitor Android assets & plugins
+        run: npx cap sync android
+
+      - name: Prepare Android signing keystore
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          KS_FILE="$RUNNER_TEMP/lixiaoyao-release.jks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > "$KS_FILE"
+            echo "ANDROID_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_PASSWORD=${KEYSTORE_PASS}" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_PASSWORD=${KEY_PASS}" >> "$GITHUB_ENV"
+          else
+            # Auto-generate deterministic self-signed release keystore so APK installs directly on Android phones
+            keytool -genkeypair -v \
+              -keystore "$KS_FILE" \
+              -storepass "lixiaoyao2026" \
+              -keypass "lixiaoyao2026" \
+              -alias "lixiaoyao" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Shushan Court, OU=Game, O=FWPT, L=Shanghai, ST=SH, C=CN"
+            echo "ANDROID_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_PASSWORD=lixiaoyao2026" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_ALIAS=lixiaoyao" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_PASSWORD=lixiaoyao2026" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compile Release & Debug APKs via Gradle
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease assembleDebug --no-daemon
+
+      - name: Collect & rename APK deliverables
+        run: |
+          mkdir -p apk-out
+          cp android/app/build/outputs/apk/release/app-release.apk apk-out/lixiaoyao-3d-release.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk apk-out/lixiaoyao-3d-debug.apk
+          ls -lh apk-out
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lixiaoyao-android-apk
+          path: apk-out/*.apk
+          retention-days: 30
+
+      - name: Publish GitHub Release on Tag or Manual Dispatch
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('apk-build-{0}', github.run_number) }}
+          name: "仙剑·锁妖剑台 Android APK (${{ github.run_number }})"
+          body: |
+            ### 仙剑 · 锁妖剑台 — Android 客户端（Capacitor + Three.js WebGL2）
+            - 原生横屏沉浸锁 + 触觉震动反馈 + 移动端自适应 DPR 60fps
+            - 王者荣耀式悬浮摇杆与物理浮雕技能轮盘
+            - 与网页版 https://fwpt.cn/lixiaoyao/ 跨端同房联机（双人组队刷怪 + 双人 1v1 Solo）
+
+            直接下载下方 `lixiaoyao-3d-release.apk` 到安卓手机安装即可游玩。
+          files: |
+            apk-out/lixiaoyao-3d-release.apk
+            apk-out/lixiaoyao-3d-debug.apk

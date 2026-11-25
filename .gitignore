@@ -1,0 +1,28 @@
+# Dependencies & Build Outputs
+node_modules/
+dist/
+dist-single/
+artifacts/
+apk-out/
+*.log
+
+# Secrets & Keystores
+.secrets/
+*.jks
+*.keystore
+local.properties
+
+# Android Gradle Build Cache (keep android/ source & wrapper committed for CI!)
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/public/
+android/capacitor-cordova-android-plugins/build/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+test-results/
+playwright-report/

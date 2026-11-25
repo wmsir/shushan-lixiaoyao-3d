@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1420" />
+    <link rel="icon" href="data:," />
+    <title>仙剑 · 锁妖剑台 — 李逍遥 3D 动作游戏</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="game-canvas" aria-label="仙剑锁妖剑台 3D 动作游戏画面"></canvas>
+
+      <!-- Floating World Damage & Parry Callouts -->
+      <div id="callout-layer" aria-hidden="true"></div>
+
+      <!-- Cinematic Stage Transition Banner -->
+      <div id="stage-banner" role="status" aria-live="polite">
+        <div id="stage-banner-kicker" class="stage-kicker">第一关</div>
+        <div id="stage-banner-title" class="stage-title">蜀山山门 · 妖兵破关</div>
+      </div>
+
+      <!-- Literary Dialogue / Event Subtitle Banner -->
+      <div id="subtitle-banner" role="status" aria-live="polite"></div>
+
+      <!-- Title Overlay over Live 3D Moonlit Shushan Courtyard -->
+      <section id="title-overlay" class="overlay visible">
+        <div class="title-card">
+          <div class="title-kicker">SHUSHAN DEMON-LOCK COURT</div>
+          <div class="title-heading-wrap">
+            <h1 class="game-title">仙剑 · 锁妖剑台</h1>
+            <span class="chop-seal" aria-hidden="true">逍遥</span>
+          </div>
+          <p class="title-tagline">写实三关闯关 · 王者轮盘手感 · 支持双人组队刷怪与 1v1 联网 Solo 切磋。</p>
+
+          <!-- 3-Stage Selector -->
+          <div class="stage-picker" role="group" aria-label="关卡选择">
+            <button id="stage-btn-1" class="stage-pill active" data-stage="1" type="button">一 · 蜀山山门</button>
+            <button id="stage-btn-2" class="stage-pill" data-stage="2" type="button">二 · 剑冢魔将</button>
+            <button id="stage-btn-3" class="stage-pill" data-stage="3" type="button">三 · 镇狱妖王</button>
+          </div>
+
+          <button id="btn-start" class="xianxia-btn primary" type="button">单人仗剑入台</button>
+
+          <!-- 2-Player Online Multiplayer Lobby -->
+          <div class="mp-lobby">
+            <div class="mp-lobby-head">
+              <span class="mp-badge">联机阁 · 跨端互通</span>
+              <span class="mp-dot-wrap"><span id="mp-conn-dot" class="mp-dot"></span><span class="mp-dot-lbl">联机就绪</span></span>
+            </div>
+            <div class="mp-btn-row">
+              <button id="btn-mp-coop" class="xianxia-btn mp-btn" type="button">双人组队刷怪</button>
+              <button id="btn-mp-solo" class="xianxia-btn mp-btn solo" type="button">双人单挑 Solo</button>
+            </div>
+            <div class="mp-join-row">
+              <input id="mp-code-input" class="mp-input" type="text" inputmode="numeric" maxlength="6" placeholder="输入4位房间码" autocomplete="off" />
+              <button id="btn-mp-join" class="mp-mini-btn" type="button">加入房间</button>
+              <button id="btn-mp-quick" class="mp-mini-btn gold" type="button">快速匹配</button>
+            </div>
+            <div id="mp-status-bar" class="mp-status-bar">
+              <span id="mp-status-text"></span>
+              <button id="btn-mp-leave" class="mp-leave-btn" type="button">退出</button>
+            </div>
+          </div>
+
+          <div class="title-controls-grid">
+            <span><b>WASD / 摇杆</b> 移动</span>
+            <span><b>左键 / J</b> 三段剑招</span>
+            <span><b>右键 / K</b> 格挡弹反</span>
+            <span><b>Space</b> 踏云闪避</span>
+            <span><b>Q/E/R</b> 御剑·万剑·天剑</span>
+            <span><b>F</b> 灵葫回春</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Active Gameplay Xianxia HUD -->
+      <section id="game-hud" aria-live="polite">
+        <!-- Top-Left: Li Xiaoyao Hero Vitality Cluster -->
+        <div class="hero-cluster">
+          <div class="hero-nameplate">
+            <span class="hero-seal">李</span>
+            <div class="hero-name-col">
+              <strong id="hero-title-name">李逍遥</strong>
+              <span class="hero-sub">蜀山剑侠 · 剑意 <b id="ult-pct">35%</b></span>
+            </div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">气血</span>
+            <div class="bar-track hp-track">
+              <div id="hp-delay" class="bar-delay"></div>
+              <div id="hp-fill" class="bar-fill hp-fill"></div>
+              <span id="hp-text" class="bar-value">180 / 180</span>
+            </div>
+          </div>
+          <div class="bar-row compact">
+            <span class="bar-label">真气</span>
+            <div class="bar-track spirit-track">
+              <div id="spirit-fill" class="bar-fill spirit-fill"></div>
+            </div>
+          </div>
+          <div class="bar-row compact">
+            <span class="bar-label">体势</span>
+            <div class="bar-track stamina-track">
+              <div id="stamina-fill" class="bar-fill stamina-fill"></div>
+            </div>
+          </div>
+          <!-- Co-op Teammate Mini Status -->
+          <div id="ally-mini" class="ally-mini">
+            <span id="ally-mini-name">同伴 · 玄影剑侠</span>
+            <div class="bar-track ally-track"><div id="ally-hp-fill" class="bar-fill ally-fill"></div></div>
+          </div>
+        </div>
+
+        <!-- Top-Center: Objective & Boss / Elite / PvP Rival Bar -->
+        <div class="top-center-stack">
+          <div id="objective-text" class="objective-pill">第一关 · 肃清山门妖煞</div>
+          <div id="boss-bar" class="boss-bar">
+            <div id="boss-name" class="boss-name">九幽剑煞 · 镇狱妖王</div>
+            <div class="boss-hp-track">
+              <div id="boss-hp-fill" class="boss-hp-fill"></div>
+            </div>
+            <div class="boss-poise-track" title="破势条">
+              <div id="boss-poise-fill" class="boss-poise-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top-Right: Utility Actions, Online Room Badge & Combo Counter -->
+        <div class="top-right-stack">
+          <div class="util-row">
+            <button id="btn-wheel-toggle" class="util-btn" type="button" title="切换手游王者轮盘 / 键鼠栏">轮盘</button>
+            <button id="btn-mute" class="util-btn" type="button">音律</button>
+            <button id="btn-pause" class="util-btn" type="button">暂停</button>
+          </div>
+          <span id="mp-hud-badge" class="mp-hud-badge"></span>
+          <div id="combo-box" class="combo-box">
+            <span id="combo-num" class="combo-num">0</span>
+            <span class="combo-lbl">连击</span>
+          </div>
+        </div>
+
+        <!-- Center-Bottom Counter-Execution Prompt -->
+        <div id="counter-prompt" class="counter-prompt">
+          <span class="counter-key">出剑 / J</span> 破势处决
+        </div>
+
+        <!-- Bottom-Center: High-Simulation Sculpted Bronze-Jade Skill Medallions (Desktop Mode) -->
+        <div class="skill-bar" id="desktop-skill-bar">
+          <button id="slot-q" class="skill-slot medal-btn" type="button" title="御剑术 (耗20真气)">
+            <span class="medal-frame"><img id="img-q" alt="御剑术" /><span id="sweep-q" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="cd-q" class="skill-cd"></span>
+            <span class="skill-key">Q</span>
+            <span class="skill-cost">20气</span>
+            <span class="skill-name">御剑术</span>
+          </button>
+          <button id="slot-e" class="skill-slot medal-btn" type="button" title="万剑诀 (耗45真气)">
+            <span class="medal-frame"><img id="img-e" alt="万剑诀" /><span id="sweep-e" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="cd-e" class="skill-cd"></span>
+            <span class="skill-key">E</span>
+            <span class="skill-cost">45气</span>
+            <span class="skill-name">万剑诀</span>
+          </button>
+          <button id="slot-r" class="skill-slot ult-slot medal-btn" type="button" title="天剑 (剑意满100%)">
+            <span class="medal-frame"><img id="img-r" alt="天剑" /><span id="sweep-r" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="cd-r" class="skill-cd"></span>
+            <span class="skill-key">R</span>
+            <span class="skill-cost">剑意</span>
+            <span class="skill-name">天剑</span>
+          </button>
+          <button id="slot-f" class="skill-slot medal-btn" type="button" title="灵葫酒回春">
+            <span class="medal-frame"><img id="img-f" alt="灵葫酒" /><span id="sweep-f" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="gourd-count" class="gourd-badge">3</span>
+            <span class="skill-key">F</span>
+            <span class="skill-name">灵葫酒</span>
+          </button>
+        </div>
+
+        <div class="bottom-hint">左键连招 · 右键弹反 · 空格闪避 · Q/E/R 物理浮雕剑诀（可直点释放）· F 灵葫</div>
+      </section>
+
+      <!-- Honor-of-Kings Style Tactile Bronze-Jade Touch & Mobile Action Wheel -->
+      <div id="touch-controls" aria-hidden="true">
+        <div id="touch-stick-zone">
+          <div id="touch-stick">
+            <div class="stick-ring-inner"></div>
+            <div id="touch-knob"><span class="knob-core"></span></div>
+          </div>
+        </div>
+        <div class="touch-actions">
+          <button id="btn-skill-q" class="t-btn t-skill medal-btn" type="button" aria-label="御剑术">
+            <span class="medal-frame"><img id="t-img-q" alt="御剑术" /><span id="t-sweep-q" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="t-cd-q" class="skill-cd"></span>
+            <span class="t-lbl">御剑</span>
+          </button>
+          <button id="btn-skill-e" class="t-btn t-skill medal-btn" type="button" aria-label="万剑诀">
+            <span class="medal-frame"><img id="t-img-e" alt="万剑诀" /><span id="t-sweep-e" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="t-cd-e" class="skill-cd"></span>
+            <span class="t-lbl">万剑</span>
+          </button>
+          <button id="btn-skill-r" class="t-btn t-skill t-ult medal-btn" type="button" aria-label="天剑">
+            <span class="medal-frame"><img id="t-img-r" alt="天剑" /><span id="t-sweep-r" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="t-cd-r" class="skill-cd"></span>
+            <span class="t-lbl">天剑</span>
+          </button>
+          <button id="btn-heal" class="t-btn t-util medal-btn" type="button" aria-label="灵葫回春">
+            <span class="medal-frame"><img id="t-img-f" alt="灵葫" /><span id="t-sweep-f" class="cd-sweep"></span><span class="medal-sheen"></span></span>
+            <span id="t-gourd-count" class="gourd-badge">3</span>
+            <span class="t-lbl">灵葫</span>
+          </button>
+          <button id="btn-block" class="t-btn t-mid medal-btn" type="button" aria-label="剑格弹反">
+            <span class="medal-frame"><img id="t-img-parry" alt="弹反" /><span class="medal-sheen"></span></span>
+            <span class="t-lbl">弹反</span>
+          </button>
+          <button id="btn-dodge" class="t-btn t-mid medal-btn" type="button" aria-label="踏云闪避">
+            <span class="medal-frame"><img id="t-img-dodge" alt="闪避" /><span class="medal-sheen"></span></span>
+            <span class="t-lbl">闪避</span>
+          </button>
+          <button id="btn-attack" class="t-btn t-atk medal-btn" type="button" aria-label="普攻出剑">
+            <span class="medal-frame"><img id="t-img-atk" alt="出剑" /><span class="medal-sheen"></span></span>
+            <span class="t-lbl atk-lbl">出剑</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Pause Overlay -->
+      <section id="pause-overlay" class="overlay">
+        <div class="modal-card">
+          <h2 class="modal-title">暂歇剑势</h2>
+          <p class="modal-desc">按 Esc 或点击继续回到锁妖剑台。</p>
+          <div class="modal-actions">
+            <button id="btn-resume" class="xianxia-btn primary" type="button">继续试剑</button>
+            <button id="btn-restart-pause" class="xianxia-btn" type="button">重开本局</button>
+            <button id="btn-pause-title" class="xianxia-btn" type="button">返回大厅</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Victory / Defeat Result Overlay -->
+      <section id="result-overlay" class="overlay">
+        <div class="modal-card">
+          <h2 id="result-title" class="result-title win">降 妖 凯 旋</h2>
+          <p id="result-sub" class="modal-desc"></p>
+          <div id="result-stats" class="result-stats"></div>
+          <div class="modal-actions">
+            <button id="btn-retry" class="xianxia-btn primary" type="button">再战剑台</button>
+            <button id="btn-result-title" class="xianxia-btn" type="button">返回大厅</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
