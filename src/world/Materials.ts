@@ -304,6 +304,7 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
       uPanorama: { value: null as THREE.Texture | null },
       uHasPanorama: { value: 0 },
       uMoonDir: { value: new THREE.Vector3(-0.35, 0.32, -0.88).normalize() },
+      uSkyTint: { value: new THREE.Color('#ffffff') },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -319,6 +320,7 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
       uniform sampler2D uPanorama;
       uniform float uHasPanorama;
       uniform vec3 uMoonDir;
+      uniform vec3 uSkyTint;
       varying vec3 vDir;
       varying vec2 vUv;
 
@@ -373,7 +375,7 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
           col += vec3(0.42, 0.65, 0.78) * moonHalo * 0.28;
         }
 
-        gl_FragColor = vec4(col, 1.0);
+        gl_FragColor = vec4(col * uSkyTint, 1.0);
       }
     `,
   });

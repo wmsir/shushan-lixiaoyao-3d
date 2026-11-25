@@ -53,6 +53,7 @@ export class ShushanArena {
   private readonly rng: () => number;
 
   private bossIntensity = 0;
+  private floorMat!: THREE.MeshStandardMaterial;
 
   constructor(rng: () => number) {
     this.rng = rng;
@@ -66,7 +67,7 @@ export class ShushanArena {
     const carvedTex = createCarvedStoneTexture();
     const lacquerTex = createLacquerWoodTexture();
 
-    const floorMat = new THREE.MeshStandardMaterial({
+    this.floorMat = new THREE.MeshStandardMaterial({
       map: stoneMaps.map,
       bumpMap: stoneMaps.bumpMap,
       bumpScale: 0.08,
@@ -76,7 +77,7 @@ export class ShushanArena {
       color: new THREE.Color('#aab9ca'),
     });
 
-    const terrace = new THREE.Mesh(new THREE.CylinderGeometry(19.6, 20.8, 1.4, 32), floorMat);
+    const terrace = new THREE.Mesh(new THREE.CylinderGeometry(19.6, 20.8, 1.4, 32), this.floorMat);
     terrace.position.y = -0.7;
     terrace.receiveShadow = true;
     this.group.add(terrace);
@@ -1102,18 +1103,62 @@ export class ShushanArena {
   }
 
   setBossMode(active: boolean): void {
-    this.setStageTheme(active ? 3 : 1);
+    this.setStageTheme(active ? 20 : 1);
   }
 
-  /** Shifts courtyard seal glow & stone-lantern atmosphere across the 3 campaign stages. */
-  setStageTheme(stageNum: 1 | 2 | 3): void {
-    this.bossIntensity = stageNum === 3 ? 1.0 : stageNum === 2 ? 0.52 : 0.0;
-    const lightHex = stageNum === 3 ? '#ff5844' : stageNum === 2 ? '#c06cff' : '#ffb86b';
-    const flameHex = stageNum === 3 ? '#ff825c' : stageNum === 2 ? '#d892ff' : '#ffd89a';
+  /** Shifts courtyard seal glow, stone-lantern flame palette & sky sword array across all 4 chapters (20 stages). */
+  setStageTheme(stageNum: number, overrideChapter?: {
+    baguaBase: number;
+    lanternLightHex: string;
+    lanternFlameHex: string;
+    skySwordRgb: [number, number, number];
+  }): void {
+    const ch = stageNum <= 5 ? 1 : stageNum <= 10 ? 2 : stageNum <= 15 ? 3 : 4;
+    const isBoss = stageNum % 5 === 0 || stageNum === 19;
+    const bagua = overrideChapter
+      ? Math.min(1.0, overrideChapter.baguaBase + (isBoss ? 0.14 : 0))
+      : ch === 4
+        ? 1.0
+        : ch === 3
+          ? 0.8
+          : ch === 2
+            ? 0.52
+            : isBoss
+              ? 0.42
+              : 0.08;
+    const lightHex =
+      overrideChapter?.lanternLightHex ??
+      (ch === 4 ? '#ff424c' : ch === 3 ? '#ff6e3a' : ch === 2 ? '#b96cff' : '#ffb86b');
+    const flameHex =
+      overrideChapter?.lanternFlameHex ??
+      (ch === 4 ? '#ff8278' : ch === 3 ? '#ffae70' : ch === 2 ? '#e1a8ff' : '#ffd89a');
+    this.bossIntensity = bagua;
     for (const l of this.lanterns) {
       l.light.color.set(lightHex);
       const fm = l.flame.material as THREE.MeshBasicMaterial;
       if (fm && fm.color) fm.color.set(flameHex);
+    }
+    if (overrideChapter?.skySwordRgb) {
+      const [r, g, b] = overrideChapter.skySwordRgb;
+      this.skySwordRing.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh && mesh.material && (mesh.material as THREE.MeshBasicMaterial).color) {
+          const mat = mesh.material as THREE.MeshBasicMaterial;
+          if (mat.blending === THREE.AdditiveBlending) {
+            mat.color.setRGB(r, g, b);
+          }
+        }
+      });
+    }
+    // Distinct 4-chapter sky & courtyard stone atmosphere tinting (Ch1 Frost Moon -> Ch2 Violet Dusk -> Ch3 Crimson Magma -> Ch4 Abyssal Crimson-Indigo)
+    const skyUniforms = (this.skyDome.material as THREE.ShaderMaterial).uniforms;
+    if (skyUniforms?.uSkyTint) {
+      const skyTintHex = ch === 4 ? '#c46c86' : ch === 3 ? '#d88b68' : ch === 2 ? '#a88ce0' : '#ffffff';
+      (skyUniforms.uSkyTint.value as THREE.Color).set(skyTintHex);
+    }
+    if (this.floorMat) {
+      const floorHex = ch === 4 ? '#9e7e92' : ch === 3 ? '#b89484' : ch === 2 ? '#9c92bc' : '#aab9ca';
+      this.floorMat.color.set(floorHex);
     }
   }
 

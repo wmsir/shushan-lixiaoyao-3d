@@ -6,22 +6,46 @@ import medalAttack from '../assets/medal-attack.jpg';
 import medalDodge from '../assets/medal-dodge.jpg';
 import medalParry from '../assets/medal-parry.jpg';
 import type { HeroState, EnemyEntity, PeerHeroState } from '../game/CombatEntities';
+import {
+  CAMPAIGN_STAGES,
+  CHAPTERS,
+  type BlessingDef,
+  type CampaignSaveStore,
+  type StageDef,
+  getChapterDef,
+  getStageDef,
+  getSwordRealm,
+} from '../game/CampaignData';
 import { clamp } from '../utils/math';
 import { isNativeAndroidApp } from '../core/NativeBridge';
 
 export type ScreenMode = 'title' | 'playing' | 'cutscene' | 'paused' | 'victory' | 'defeat' | 'showcase';
 
 export interface HudCallbacks {
-  onStart: (stage: 1 | 2 | 3) => void;
+  onStart: (stageId: number) => void;
+  onNextStage: (nextStageId: number, selectedBlessingId?: string) => void;
   onRetry: () => void;
   onBackToTitle: () => void;
   onToggleMute: () => boolean;
   onTogglePause: () => void;
   onToggleLolMode: () => boolean;
-  onMpCreate: (mode: 'coop' | 'solo', stage: 1 | 2 | 3) => void;
+  onMpCreate: (mode: 'coop' | 'solo', stageId: number) => void;
   onMpJoin: (code: string) => void;
-  onMpQuick: (mode: 'coop' | 'solo', stage: 1 | 2 | 3) => void;
+  onMpQuick: (mode: 'coop' | 'solo', stageId: number) => void;
   onMpLeave: () => void;
+}
+
+export interface ResultDisplayOptions {
+  stageDef?: StageDef;
+  starResult?: {
+    stars: 1 | 2 | 3;
+    checks: [boolean, boolean, boolean];
+    labels: [string, string, string];
+  };
+  blessingChoices?: BlessingDef[];
+  nextStageId?: number | null;
+  customTitle?: string;
+  customSub?: string;
 }
 
 const SKILL_MAX_CD = {
@@ -34,6 +58,7 @@ const SKILL_MAX_CD = {
 export class HudController {
   private readonly appRoot = this.q('#app');
   private readonly titleOverlay = this.q('#title-overlay');
+  private readonly campaignOverlay = this.q('#campaign-overlay');
   private readonly hudRoot = this.q('#game-hud');
   private readonly touchRoot = this.q('#touch-controls');
   private readonly resultOverlay = this.q('#result-overlay');
@@ -46,6 +71,8 @@ export class HudController {
   private readonly staminaFill = this.q('#stamina-fill');
   private readonly ultPctText = this.q('#ult-pct');
   private readonly heroTitleName = this.q('#hero-title-name');
+  private readonly hudRealmName = this.q('#hud-realm-name');
+  private readonly hudBlessingPill = this.q('#hud-blessing-pill');
 
   private readonly allyMini = this.q('#ally-mini');
   private readonly allyMiniName = this.q('#ally-mini-name');
@@ -94,9 +121,35 @@ export class HudController {
   private readonly stageBannerTitle = this.q('#stage-banner-title');
   private readonly calloutContainer = this.q('#callout-layer');
 
+  // Title & 20-Stage Campaign Map elements
+  private readonly titleRealmBadge = this.q('#title-realm-badge');
+  private readonly titleStarsText = this.q('#title-stars-text');
+  private readonly titleClearText = this.q('#title-clear-text');
+  private readonly titleSelectedStage = this.q('#title-selected-stage');
+  private readonly titleSelectedMeta = this.q('#title-selected-meta');
+  private readonly startBtn = this.q('#btn-start');
+
+  private readonly mapRealmPill = this.q('#map-realm-pill');
+  private readonly mapRealmBuff = this.q('#map-realm-buff');
+  private readonly mapStarsPill = this.q('#map-stars-pill');
+  private readonly chapterTabsEl = this.q('#chapter-tabs');
+  private readonly chapterLoreEl = this.q('#chapter-lore-bar');
+  private readonly stageGridEl = this.q('#stage-card-grid');
+  private readonly campaignDetailEl = this.q('#campaign-detail-box');
+  private readonly mapLaunchBtn = this.q('#btn-map-launch');
+  private readonly mapCoopBtn = this.q('#btn-map-coop');
+
+  // Result modal elements
   private readonly resultTitle = this.q('#result-title');
+  private readonly resultStarsRow = this.q('#result-stars-row');
   private readonly resultSub = this.q('#result-sub');
+  private readonly resultStarChecks = this.q('#result-star-checks');
   private readonly resultStats = this.q('#result-stats');
+  private readonly resultBlessingWrap = this.q('#result-blessing-wrap');
+  private readonly resultBlessingGrid = this.q('#result-blessing-grid');
+  private readonly nextStageBtn = this.q('#btn-next-stage');
+  private readonly retryBtn = this.q('#btn-retry');
+
   private readonly muteBtn = this.q('#btn-mute');
   private readonly wheelToggleBtn = this.q('#btn-wheel-toggle');
   private readonly lolToggleBtn = this.q('#btn-lol-toggle');
@@ -108,13 +161,16 @@ export class HudController {
   private readonly mpStatusText = this.q('#mp-status-text');
   private readonly mpConnDot = this.q('#mp-conn-dot');
 
-  private selectedStage: 1 | 2 | 3 = 1;
+  private selectedStage = 1;
+  private activeChapter: 1 | 2 | 3 | 4 = 1;
+  private saveStore: CampaignSaveStore | null = null;
+  private selectedBlessingId: string | undefined;
+  private pendingNextStageId: number | null = null;
   private subtitleTimer = 0;
   private stageBannerTimer = 0;
   private wheelForced = false;
 
   constructor(private readonly callbacks: HudCallbacks) {
-    // Bind photorealistic embossed bronze/jade medallion art to BOTH desktop bar & Honor-of-Kings wheel
     const bindImg = (id: string, src: string) => {
       (this.q(id) as HTMLImageElement).src = src;
     };
@@ -130,23 +186,41 @@ export class HudController {
     bindImg('#t-img-dodge', medalDodge);
     bindImg('#t-img-parry', medalParry);
 
-    // Auto-enable Honor-of-Kings wheel on Android Capacitor APK or ?wheel query param
     const params = new URLSearchParams(window.location.search);
     if (isNativeAndroidApp() || params.has('wheel')) {
       this.setWheelForced(true);
     }
 
-    // 3-Stage selector pills
-    for (const s of [1, 2, 3] as const) {
-      this.q(`#stage-btn-${s}`).addEventListener('click', () => this.selectStage(s));
-    }
+    this.startBtn.addEventListener('click', () => this.callbacks.onStart(this.selectedStage));
+    this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
+    this.q('#btn-close-campaign').addEventListener('click', () => this.closeCampaignMap());
+    this.mapLaunchBtn.addEventListener('click', () => {
+      this.closeCampaignMap();
+      this.callbacks.onStart(this.selectedStage);
+    });
+    this.mapCoopBtn.addEventListener('click', () => {
+      this.closeCampaignMap();
+      this.callbacks.onMpCreate('coop', this.selectedStage);
+    });
 
-    this.q('#btn-start').addEventListener('click', () => this.callbacks.onStart(this.selectedStage));
-    this.q('#btn-retry').addEventListener('click', () => this.callbacks.onRetry());
+    this.nextStageBtn.addEventListener('click', () => {
+      if (this.pendingNextStageId) {
+        this.callbacks.onNextStage(this.pendingNextStageId, this.selectedBlessingId);
+      }
+    });
+    this.retryBtn.addEventListener('click', () => this.callbacks.onRetry());
     this.q('#btn-resume').addEventListener('click', () => this.callbacks.onTogglePause());
     this.q('#btn-restart-pause').addEventListener('click', () => this.callbacks.onRetry());
     this.q('#btn-pause').addEventListener('click', () => this.callbacks.onTogglePause());
+    this.q('#btn-pause-map').addEventListener('click', () => {
+      this.callbacks.onBackToTitle();
+      this.openCampaignMap();
+    });
     this.q('#btn-pause-title').addEventListener('click', () => this.callbacks.onBackToTitle());
+    this.q('#btn-result-map').addEventListener('click', () => {
+      this.callbacks.onBackToTitle();
+      this.openCampaignMap();
+    });
     this.q('#btn-result-title').addEventListener('click', () => this.callbacks.onBackToTitle());
 
     this.wheelToggleBtn.addEventListener('click', () => {
@@ -164,9 +238,8 @@ export class HudController {
       this.muteBtn.textContent = muted ? '静音' : '音律';
     });
 
-    // Multiplayer Lobby bindings
     this.q('#btn-mp-coop').addEventListener('click', () => this.callbacks.onMpCreate('coop', this.selectedStage));
-    this.q('#btn-mp-solo').addEventListener('click', () => this.callbacks.onMpCreate('solo', 3));
+    this.q('#btn-mp-solo').addEventListener('click', () => this.callbacks.onMpCreate('solo', 20));
     this.q('#btn-mp-join').addEventListener('click', () => {
       const code = this.mpCodeInput.value.trim();
       if (code.length >= 4) {
@@ -179,10 +252,151 @@ export class HudController {
     this.q('#btn-mp-leave').addEventListener('click', () => this.callbacks.onMpLeave());
   }
 
-  selectStage(stage: 1 | 2 | 3): void {
-    this.selectedStage = stage;
-    for (const s of [1, 2, 3] as const) {
-      this.q(`#stage-btn-${s}`).classList.toggle('active', s === stage);
+  syncCampaignProgress(store: CampaignSaveStore, focusStage?: number): void {
+    this.saveStore = store;
+    const totalStars = store.getTotalStars();
+    const clearedCount = store.getClearedCount();
+    const realm = getSwordRealm(totalStars);
+    const targetStage = focusStage ?? this.selectedStage ?? store.getRecommendedStage();
+    this.selectedStage = clamp(Math.floor(targetStage), 1, CAMPAIGN_STAGES.length);
+    const stDef = getStageDef(this.selectedStage);
+    this.activeChapter = stDef.chapter;
+
+    this.titleRealmBadge.textContent = realm.title;
+    this.titleStarsText.textContent = `★ ${totalStars} / 60`;
+    this.titleClearText.textContent = `已破 ${clearedCount} / 20 关`;
+    this.hudRealmName.textContent = realm.title;
+
+    this.mapRealmPill.textContent = realm.title;
+    this.mapRealmBuff.textContent = `气血+${realm.hpBonus} · 剑伤+${Math.round((realm.dmgMult - 1) * 100)}%`;
+    this.mapStarsPill.textContent = `★ ${totalStars} / 60`;
+
+    this.updateSelectedStageLabels();
+    this.renderCampaignModal();
+  }
+
+  openCampaignMap(chapterId?: 1 | 2 | 3 | 4): void {
+    if (chapterId) this.activeChapter = chapterId;
+    else this.activeChapter = getStageDef(this.selectedStage).chapter;
+    this.renderCampaignModal();
+    this.campaignOverlay.classList.add('visible');
+  }
+
+  closeCampaignMap(): void {
+    this.campaignOverlay.classList.remove('visible');
+  }
+
+  selectStage(stageId: number): void {
+    this.selectedStage = clamp(Math.floor(stageId), 1, CAMPAIGN_STAGES.length);
+    const st = getStageDef(this.selectedStage);
+    this.activeChapter = st.chapter;
+    this.updateSelectedStageLabels();
+    this.renderCampaignModal();
+  }
+
+  private updateSelectedStageLabels(): void {
+    const st = getStageDef(this.selectedStage);
+    const ch = getChapterDef(st.chapter);
+    this.titleSelectedStage.textContent = `当前目标：第 ${st.id} 关 · ${st.name}`;
+    this.titleSelectedMeta.textContent = `${ch.roman} ${ch.name} · ${st.badge}`;
+    this.startBtn.textContent = `仗剑出征 · 第 ${st.id} 关`;
+    this.mapLaunchBtn.textContent = `单人挑战第 ${st.id} 关`;
+    this.mapCoopBtn.textContent = `双人组队第 ${st.id} 关`;
+  }
+
+  private renderCampaignModal(): void {
+    const store = this.saveStore;
+    const recommended = store?.getRecommendedStage() ?? 1;
+
+    // 1. Render 4 Chapter Tabs
+    this.chapterTabsEl.innerHTML = '';
+    for (const ch of CHAPTERS) {
+      let chStars = 0;
+      for (let id = ch.stageRange[0]; id <= ch.stageRange[1]; id++) {
+        chStars += store?.getStageRecord(id)?.stars ?? 0;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `chapter-tab${ch.id === this.activeChapter ? ' active' : ''}`;
+      btn.style.setProperty('--ch-accent', ch.accentHex);
+      btn.innerHTML = `<span class="ch-roman">${ch.roman}</span><strong>${ch.name}</strong><span class="ch-stars">★ ${chStars}/15</span>`;
+      btn.addEventListener('click', () => {
+        this.activeChapter = ch.id;
+        // If current selectedStage isn't in this chapter, auto-focus first stage of chapter
+        const cur = getStageDef(this.selectedStage);
+        if (cur.chapter !== ch.id) {
+          this.selectedStage = ch.stageRange[0];
+          this.updateSelectedStageLabels();
+        }
+        this.renderCampaignModal();
+      });
+      this.chapterTabsEl.appendChild(btn);
+    }
+
+    // 2. Chapter Lore Strip
+    const activeCh = getChapterDef(this.activeChapter);
+    this.chapterLoreEl.style.setProperty('--ch-accent', activeCh.accentHex);
+    this.chapterLoreEl.innerHTML = `<b>${activeCh.roman} · ${activeCh.name}（第 ${activeCh.stageRange[0]}–${activeCh.stageRange[1]} 关）</b><span>${activeCh.lore}</span>`;
+
+    // 3. Render 5 Stage Cards for Active Chapter
+    this.stageGridEl.innerHTML = '';
+    const chapterStages = CAMPAIGN_STAGES.filter((s) => s.chapter === this.activeChapter);
+    for (const st of chapterStages) {
+      const rec = store?.getStageRecord(st.id) ?? null;
+      const earned = rec?.stars ?? 0;
+      const isSelected = st.id === this.selectedStage;
+      const isRec = st.id === recommended;
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.dataset.stageId = String(st.id);
+      card.className = `stage-card${isSelected ? ' selected' : ''}${st.isBossStage ? ' boss-card' : ''}${earned > 0 ? ' cleared' : ''}`;
+      const starHtml = [1, 2, 3]
+        .map((n) => `<span class="sc-star${n <= earned ? ' lit' : ''}">★</span>`)
+        .join('');
+      const hazardChip = st.hazardLabel ? `<span class="sc-hazard">${st.hazardLabel}</span>` : '';
+      const recTag = isRec ? '<span class="sc-rec">推荐</span>' : '';
+      card.innerHTML = `
+        <div class="sc-top">
+          <span class="sc-num">第 ${st.id} 关</span>
+          <span class="sc-badge${st.isBossStage ? ' boss' : ''}">${st.badge}</span>
+          ${recTag}
+        </div>
+        <div class="sc-name">${st.name}</div>
+        <div class="sc-sub">${st.subtitle}</div>
+        <div class="sc-tags">
+          <span class="sc-wave">${st.waves.length}波</span>
+          <span class="sc-time">${st.parTimeSec}s</span>
+          ${hazardChip}
+        </div>
+        <div class="sc-stars">${starHtml}</div>
+      `;
+      card.addEventListener('click', () => {
+        this.selectedStage = st.id;
+        this.updateSelectedStageLabels();
+        this.renderCampaignModal();
+      });
+      this.stageGridEl.appendChild(card);
+    }
+
+    // 4. Selected Stage Detail Footer
+    const sel = getStageDef(this.selectedStage);
+    const totalEnemies = sel.waves.reduce((acc, w) => acc + w.enemies.length, 0);
+    const rec = store?.getStageRecord(sel.id);
+    const bestStr = rec ? `最佳 ${Math.round(rec.bestTime)}s · ${rec.maxCombo}连` : '尚未首通';
+    this.campaignDetailEl.innerHTML = `
+      <div class="cd-title">第 ${sel.id} 关 · ${sel.name} <span>（推荐：${sel.recommendedRealm}）</span></div>
+      <div class="cd-sub">${sel.waves.length} 波共 ${totalEnemies} 敌 · 三星时限 ${sel.parTimeSec}s${sel.hazardLabel ? ` · 场地机制：${sel.hazardLabel}` : ''} · ${bestStr}</div>
+    `;
+  }
+
+  setRealmAndBlessings(realmTitle: string, blessingCount: number): void {
+    this.hudRealmName.textContent = realmTitle;
+    if (blessingCount > 0) {
+      this.hudBlessingPill.textContent = `赐福×${blessingCount}`;
+      this.hudBlessingPill.classList.add('visible');
+    } else {
+      this.hudBlessingPill.textContent = '';
+      this.hudBlessingPill.classList.remove('visible');
     }
   }
 
@@ -236,6 +450,7 @@ export class HudController {
 
   setMode(mode: ScreenMode): void {
     this.titleOverlay.classList.toggle('visible', mode === 'title');
+    if (mode !== 'title') this.campaignOverlay.classList.remove('visible');
     this.hudRoot.classList.toggle('visible', mode === 'playing');
     this.touchRoot.classList.toggle('visible', mode === 'playing');
     this.pauseOverlay.classList.toggle('visible', mode === 'paused');
@@ -291,18 +506,38 @@ export class HudController {
     window.setTimeout(() => el.remove(), 880);
   }
 
-  showResult(victory: boolean, elapsedSec: number, hero: HeroState, customTitle?: string, customSub?: string): void {
+  showResult(victory: boolean, elapsedSec: number, hero: HeroState, opts?: ResultDisplayOptions): void {
     const mins = Math.floor(elapsedSec / 60);
     const secs = Math.floor(elapsedSec % 60);
     const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
-    this.resultTitle.textContent = customTitle ?? (victory ? '降 妖 凯 旋' : '身 陨 剑 台');
+    const stageDef = opts?.stageDef;
+    const isFinalWin = victory && stageDef?.id === 20;
+    this.resultTitle.textContent =
+      opts?.customTitle ??
+      (isFinalWin ? '二 十 劫 破 · 剑 圣 加 冕' : victory ? `第 ${stageDef?.id ?? ''} 关 凯 旋` : '身 陨 剑 台');
     this.resultTitle.className = victory ? 'result-title win' : 'result-title lose';
     this.resultSub.textContent =
-      customSub ??
+      opts?.customSub ??
       (victory
-        ? '三关俱破，剑光破晓。锁妖剑台重归清明。'
+        ? stageDef?.victoryLine ?? '妖煞已除，剑台重归清明。'
         : '妖气反噬，剑势折戟。整顿心神，再试剑锋。');
+
+    // 3-Star Rating Display
+    if (victory && opts?.starResult) {
+      const { stars, checks, labels } = opts.starResult;
+      this.resultStarsRow.style.display = 'flex';
+      this.resultStarsRow.innerHTML = [1, 2, 3]
+        .map((n) => `<span class="big-star${n <= stars ? ' lit' : ''}">★</span>`)
+        .join('');
+      this.resultStarChecks.style.display = 'flex';
+      this.resultStarChecks.innerHTML = labels
+        .map((lbl, i) => `<div class="star-check${checks[i] ? ' pass' : ''}">${checks[i] ? '✓' : '○'} ${lbl}</div>`)
+        .join('');
+    } else {
+      this.resultStarsRow.style.display = 'none';
+      this.resultStarChecks.style.display = 'none';
+    }
 
     this.resultStats.innerHTML = `
       <div class="stat-item"><span>用时</span><strong>${timeStr}</strong></div>
@@ -310,6 +545,46 @@ export class HudController {
       <div class="stat-item"><span>最高连击</span><strong>${hero.maxCombo} 连</strong></div>
       <div class="stat-item"><span>总剑伤</span><strong>${Math.round(hero.totalDamage)}</strong></div>
     `;
+
+    // 3-Pick-1 Xianxia Blessing Cards when advancing to next stage
+    this.pendingNextStageId = victory && opts?.nextStageId ? opts.nextStageId : null;
+    const choices = victory && this.pendingNextStageId ? opts?.blessingChoices ?? [] : [];
+    if (choices.length > 0) {
+      this.selectedBlessingId = choices[0].id;
+      this.resultBlessingWrap.style.display = 'block';
+      this.resultBlessingGrid.innerHTML = '';
+      for (const b of choices) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `blessing-card${b.id === this.selectedBlessingId ? ' active' : ''}`;
+        card.innerHTML = `
+          <span class="bl-tag">${b.tag}</span>
+          <strong class="bl-name">${b.name}</strong>
+          <span class="bl-desc">${b.desc}</span>
+        `;
+        card.addEventListener('click', () => {
+          this.selectedBlessingId = b.id;
+          for (const sib of Array.from(this.resultBlessingGrid.children)) {
+            sib.classList.remove('active');
+          }
+          card.classList.add('active');
+        });
+        this.resultBlessingGrid.appendChild(card);
+      }
+    } else {
+      this.selectedBlessingId = undefined;
+      this.resultBlessingWrap.style.display = 'none';
+    }
+
+    if (this.pendingNextStageId) {
+      const nextDef = getStageDef(this.pendingNextStageId);
+      this.nextStageBtn.style.display = 'inline-flex';
+      this.nextStageBtn.textContent = `下一关 · 第 ${nextDef.id} 关 ${nextDef.name}`;
+      this.retryBtn.classList.remove('primary');
+    } else {
+      this.nextStageBtn.style.display = 'none';
+      this.retryBtn.classList.add('primary');
+    }
   }
 
   update(hero: HeroState, objective: string, boss: EnemyEntity | null, peer: PeerHeroState | null = null): void {
@@ -328,7 +603,6 @@ export class HudController {
 
     this.objectiveText.textContent = objective;
 
-    // Co-op teammate mini HP bar
     if (peer && !peer.isEnemy) {
       this.allyMini.classList.add('visible');
       this.allyMiniName.textContent = peer.dead ? `${peer.name}（重伤待援）` : `同伴 · ${peer.name}`;
@@ -337,7 +611,6 @@ export class HudController {
       this.allyMini.classList.remove('visible');
     }
 
-    // Top-center Boss / Elite / Solo PvP Rival bar
     if (peer && peer.isEnemy) {
       this.objectiveText.style.display = 'none';
       this.bossBar.classList.add('visible');
@@ -345,7 +618,7 @@ export class HudController {
       this.bossHpFill.style.width = `${(clamp(peer.hp / peer.maxHp, 0, 1) * 100).toFixed(1)}%`;
       this.bossPoiseFill.style.width = `${clamp(peer.ult, 0, 100).toFixed(1)}%`;
     } else if (boss && boss.aiState !== 'dead') {
-      this.objectiveText.style.display = 'none';
+      this.objectiveText.style.display = '';
       this.bossBar.classList.add('visible');
       this.bossName.textContent = boss.phase === 2 ? `${boss.name} · 魔剑狂化` : boss.name;
       this.bossHpFill.style.width = `${(clamp(boss.hp / boss.maxHp, 0, 1) * 100).toFixed(1)}%`;
@@ -355,7 +628,6 @@ export class HudController {
       this.bossBar.classList.remove('visible');
     }
 
-    // Update BOTH Desktop and Honor-of-Kings Wheel Sculpted Medallions with live conic cooldown sweep!
     this.updateSkillPair(this.slotQ, this.tSlotQ, this.sweepQ, this.tSweepQ, this.cdQEl, this.tCdQEl, hero.cdQ, SKILL_MAX_CD.Q, hero.spirit >= 20, false);
     this.updateSkillPair(this.slotE, this.tSlotE, this.sweepE, this.tSweepE, this.cdEEl, this.tCdEEl, hero.cdE, SKILL_MAX_CD.E, hero.spirit >= 45, false);
     this.updateSkillPair(this.slotR, this.tSlotR, this.sweepR, this.tSweepR, this.cdREl, this.tCdREl, hero.cdR, SKILL_MAX_CD.R, hero.ult >= 100, hero.ult >= 100 && hero.cdR <= 0);
@@ -369,10 +641,8 @@ export class HudController {
     this.gourdCountEl.textContent = `${hero.gourds}`;
     this.tGourdCountEl.textContent = `${hero.gourds}`;
 
-    // Counter-Execution Prompt
     this.counterPrompt.classList.toggle('visible', hero.counterWindowTimer > 0 && hero.counterTargetId !== null);
 
-    // Combo badge
     if (hero.comboCount >= 2 && hero.comboDecayTimer > 0) {
       this.comboBox.classList.add('visible');
       this.comboNum.textContent = `${hero.comboCount}`;

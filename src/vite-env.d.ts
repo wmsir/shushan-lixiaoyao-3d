@@ -42,12 +42,17 @@ interface GuizangDebugApi {
   enemies(): Array<Record<string, number | string>>;
   spawn(kind: 'bladesman' | 'caster' | 'elite' | 'boss', x?: number, z?: number): void;
   toBoss(): void;
-  toStage(stage: 1 | 2 | 3): void;
+  toStage(stage: number): void;
+  stageNum(): number;
+  wave(): number;
+  totalStars(): number;
+  openMap(chapterId?: 1 | 2 | 3 | 4): void;
+  clearCurrentStage(): void;
   god(on?: boolean): void;
   mode(): string;
   stage(): string;
   peer(): Record<string, number | string | boolean> | null;
-  mpCreate(mode: 'coop' | 'solo', stage?: 1 | 2 | 3): Promise<void>;
+  mpCreate(mode: 'coop' | 'solo', stage?: number): Promise<void>;
   mpJoin(code: string): Promise<void>;
   mpRoom(): string;
 }

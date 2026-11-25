@@ -90,6 +90,9 @@ export interface EnemyEntity {
   id: number;
   kind: Exclude<CharacterArchetype, 'xiaoyao' | 'ally'>;
   name: string;
+  affix?: 'swift' | 'vampiric' | 'ironclad' | 'storm';
+  speedMult: number;
+  damageMult: number;
   rig: CharacterRig;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
@@ -259,27 +262,58 @@ export function createPeerHero(name: string, isEnemy: boolean): PeerHeroState {
   };
 }
 
+export interface EnemyCreateOverrides {
+  name?: string;
+  hpMult?: number;
+  poiseMult?: number;
+  dmgMult?: number;
+  speedMult?: number;
+  scaleMult?: number;
+  affix?: 'swift' | 'vampiric' | 'ironclad' | 'storm';
+}
+
+const AFFIX_LABEL: Record<NonNullable<EnemyCreateOverrides['affix']>, string> = {
+  swift: '疾风',
+  vampiric: '嗜血',
+  ironclad: '霸体',
+  storm: '狂雷',
+};
+
 export function createEnemy(
   id: number,
   kind: Exclude<CharacterArchetype, 'xiaoyao' | 'ally'>,
   spawnPos: THREE.Vector3,
   rng: () => number,
+  overrides?: EnemyCreateOverrides,
 ): EnemyEntity {
   const rig = new CharacterRig(kind);
   rig.root.position.copy(spawnPos);
+  const scaleMult = overrides?.scaleMult ?? 1.0;
+  if (Math.abs(scaleMult - 1.0) > 0.01) {
+    rig.root.scale.setScalar(scaleMult);
+  }
 
+  const affix = overrides?.affix;
   const isBoss = kind === 'boss';
   const isElite = kind === 'elite';
-  const maxHp = isBoss ? 520 : isElite ? 280 : kind === 'bladesman' ? 145 : 112;
-  const maxPoise = isBoss ? 125 : isElite ? 82 : kind === 'bladesman' ? 46 : 32;
-  const radius = isBoss ? 0.96 : isElite ? 0.72 : 0.58;
-  const name = isBoss
-    ? '九幽剑煞 · 镇狱妖王'
-    : isElite
-      ? '血甲剑魔 · 剑冢魔将'
-      : kind === 'bladesman'
-        ? '玄铁魔兵'
-        : '幽冥玄道';
+  const baseHp = isBoss ? 520 : isElite ? 275 : kind === 'bladesman' ? 140 : 108;
+  const basePoise = isBoss ? 125 : isElite ? 82 : kind === 'bladesman' ? 46 : 32;
+  const ironcladBonus = affix === 'ironclad' ? 1.38 : 1.0;
+  const maxHp = Math.round(baseHp * (overrides?.hpMult ?? 1.0));
+  const maxPoise = Math.round(basePoise * (overrides?.poiseMult ?? 1.0) * ironcladBonus);
+  const radius = (isBoss ? 0.96 : isElite ? 0.72 : 0.58) * Math.min(1.18, Math.max(0.88, scaleMult));
+  const baseName =
+    overrides?.name ??
+    (isBoss
+      ? '九幽剑煞 · 镇狱妖王'
+      : isElite
+        ? '血甲剑魔 · 剑冢魔将'
+        : kind === 'bladesman'
+          ? '玄铁魔兵'
+          : '幽冥玄道');
+  const name = affix ? `【${AFFIX_LABEL[affix]}】${baseName}` : baseName;
+  const speedMult = (overrides?.speedMult ?? 1.0) * (affix === 'swift' ? 1.22 : 1.0);
+  const damageMult = overrides?.dmgMult ?? 1.0;
 
   // Golden counter-execution highlight ring under enemy feet
   const counterRing = new THREE.Mesh(
@@ -309,7 +343,7 @@ export function createEnemy(
   hpFillGeo.translate(0.55, 0, 0);
   const hpFillMesh = new THREE.Mesh(
     hpFillGeo,
-    new THREE.MeshBasicMaterial({ color: '#df4548', side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color: affix === 'vampiric' ? '#b82a5a' : affix === 'storm' ? '#e89c32' : '#df4548', side: THREE.DoubleSide }),
   );
   hpFillMesh.position.set(-0.55, 0, 0.005);
   hpBarGroup.add(bg, hpFillMesh);
@@ -320,6 +354,9 @@ export function createEnemy(
     id,
     kind,
     name,
+    affix,
+    speedMult,
+    damageMult,
     rig,
     pos: spawnPos.clone(),
     vel: new THREE.Vector3(),
@@ -337,12 +374,12 @@ export function createEnemy(
     moveKind: 'cleave',
     moveHasHit: false,
     moveRange: isBoss ? 3.8 : isElite ? 3.0 : 2.4,
-    moveDamage: isBoss ? 26 : isElite ? 21 : 16,
+    moveDamage: Math.round((isBoss ? 26 : isElite ? 21 : 16) * damageMult),
     moveUnblockable: false,
     comboFollowup: false,
 
     orbitDir: rng() > 0.5 ? 1 : -1,
-    attackCooldown: isBoss ? 1.2 : 0.9 + rng() * 1.1,
+    attackCooldown: (isBoss ? 1.15 : 0.9 + rng() * 1.05) / speedMult,
     hitstopTimer: 0,
     shakeTimer: 0,
     deathTimer: 0,

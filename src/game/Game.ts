@@ -13,11 +13,26 @@ import {
   createEnemy,
   createHero,
   createPeerHero,
+  type EnemyCreateOverrides,
   type EnemyEntity,
   type HeroState,
   type PeerHeroState,
   type ProjectileEntity,
 } from './CombatEntities';
+import {
+  BLESSINGS,
+  CampaignSaveStore,
+  applyBlessingToRun,
+  createEmptyBlessings,
+  evaluateStageStars,
+  getChapterDef,
+  getStageDef,
+  getSwordRealm,
+  pickBlessingChoices,
+  type BlessingDef,
+  type RunBlessingState,
+  type StageHazardType,
+} from './CampaignData';
 import { MultiplayerClient, type EnemyNetSnapshot, type PeerTransformPacket } from '../net/MultiplayerClient';
 import { isNativeAndroidApp, triggerHaptic } from '../core/NativeBridge';
 import { angleDiff, clamp, dampAngle } from '../utils/math';
@@ -47,9 +62,23 @@ export class Game {
   private nextEntityId = 1;
 
   private mode: ScreenMode = 'title';
-  private stage: 'wave1' | 'stage2Transition' | 'stage2' | 'bossTransition' | 'boss' | 'soloPvp' | 'done' = 'wave1';
-  private currentStageNum: 1 | 2 | 3 = 1;
+  private stage: 'combat' | 'waveTransition' | 'soloPvp' | 'done' = 'combat';
+  private currentStageNum = 1;
+  private currentWaveIdx = 0;
   private stageTimer = 0;
+  private readonly saveStore = new CampaignSaveStore();
+  private blessings: RunBlessingState = createEmptyBlessings();
+  private pendingBlessings: BlessingDef[] = [];
+  private hazardTimer = 4.2;
+  private activeHazards: Array<{
+    pos: THREE.Vector3;
+    radius: number;
+    damage: number;
+    timer: number;
+    duration: number;
+    telegraph: ReturnType<VfxSystem['createTelegraph']>;
+    type: StageHazardType;
+  }> = [];
 
   private frame = 0;
   private elapsed = 0;
@@ -158,17 +187,16 @@ export class Game {
       },
       onStageSync: (stageNum, bossIntro) => {
         if (this.mp.role === 'guest') {
-          this.currentStageNum = (stageNum === 3 ? 3 : stageNum === 2 ? 2 : 1) as 1 | 2 | 3;
-          this.arena.setStageTheme(this.currentStageNum);
-          if (this.currentStageNum === 2) {
-            this.stage = 'stage2';
-            this.hud.showStageBanner('第二关', '剑冢残碑 · 血甲剑魔');
-          } else if (this.currentStageNum === 3) {
-            this.stage = 'boss';
+          this.currentStageNum = clamp(Math.floor(stageNum), 1, 20);
+          const stDef = getStageDef(this.currentStageNum);
+          const chDef = getChapterDef(stDef.chapter);
+          this.applyChapterAtmosphere(this.currentStageNum);
+          this.stage = 'combat';
+          if (stDef.isBossStage || bossIntro) {
             this.audio.setMood('boss1');
-            this.hud.showStageBanner('第三关 · 终局', '锁妖剑台 · 镇狱妖王');
-            if (bossIntro) this.hud.showSubtitle('镇狱妖王：「双侠并至，正好一并镇入九幽！」', 3.0);
           }
+          this.hud.showStageBanner(`${chDef.roman} · 第 ${stDef.id} 关`, `${stDef.name} · ${stDef.subtitle}`);
+          if (bossIntro) this.hud.showSubtitle(stDef.introLine, 3.2);
         }
       },
       onPeerRevive: () => {
@@ -192,7 +220,7 @@ export class Game {
         if (this.stage === 'soloPvp' && this.mode === 'playing') {
           this.mode = 'victory';
           this.hud.setMode('victory');
-          this.hud.showResult(true, this.runElapsed, this.hero, '不 战 而 胜', reason);
+          this.hud.showResult(true, this.runElapsed, this.hero, { customTitle: '不 战 而 胜', customSub: reason });
         }
       },
       onError: (msg) => {
@@ -201,18 +229,30 @@ export class Game {
     });
 
     this.hud = new HudController({
-      onStart: (stage) => {
+      onStart: (stageId) => {
         this.mp.leave();
         this.removePeerHero();
         this.hud.setMpHudBadge('');
-        this.startNewRun(stage);
+        this.startNewRun(stageId, false);
+      },
+      onNextStage: (nextStageId, selectedBlessingId) => {
+        if (selectedBlessingId) {
+          const b = BLESSINGS.find((x) => x.id === selectedBlessingId);
+          if (b) this.blessings = applyBlessingToRun(this.blessings, b);
+        }
+        if (this.mp.isOnline() && this.mp.peerConnected && this.mp.mode === 'coop') {
+          this.currentStageNum = clamp(nextStageId, 1, 20);
+          this.restartActiveMpMatch();
+        } else {
+          this.startNewRun(nextStageId, true);
+        }
       },
       onRetry: () => {
         if (this.mp.isOnline() && this.mp.peerConnected) {
           this.mp.sendRematch();
           this.restartActiveMpMatch();
         } else {
-          this.startNewRun(this.currentStageNum);
+          this.startNewRun(this.currentStageNum, this.blessings.ids.length > 0);
         }
       },
       onBackToTitle: () => {
@@ -259,19 +299,23 @@ export class Game {
     window.addEventListener('keydown', this.onGlobalKey);
     canvas.addEventListener('webglcontextlost', this.onContextLost);
 
+    this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
     this.installTestHooks();
 
     const stageParam = Number(params.get('stage') || '0');
     if (params.get('show') === 'char') {
       this.enterShowcaseMode();
-    } else if (params.has('boss') || stageParam === 3) {
-      this.startNewRun(3);
-    } else if (stageParam === 2) {
-      this.startNewRun(2);
-    } else if (params.has('auto') || stageParam === 1) {
-      this.startNewRun(1);
+    } else if (params.has('boss')) {
+      this.startNewRun(20, false);
+    } else if (stageParam >= 1 && stageParam <= 20) {
+      this.startNewRun(stageParam, false);
+    } else if (params.has('auto')) {
+      this.startNewRun(1, false);
     } else {
       this.enterTitleMode();
+      if (params.has('map')) {
+        this.hud.openCampaignMap();
+      }
     }
 
     this.publishDiagnostics();
@@ -371,12 +415,13 @@ export class Game {
 
   private enterTitleMode(): void {
     this.clearCombatEntities();
+    this.applyChapterAtmosphere(1);
     this.resetHero(new THREE.Vector3(0, 0, 2.2), Math.PI);
     this.hero.rig.setWeaponDrawn(false);
-    this.arena.setBossMode(false);
     this.mode = 'title';
-    this.stage = 'wave1';
+    this.stage = 'combat';
     this.hud.setMode('title');
+    this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
     this.audio.setMood('title');
     this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed);
   }
@@ -414,10 +459,32 @@ export class Game {
     this.cameraRig.updateShowcase(new THREE.Vector3(0.08, 0, 0.25), 0);
   }
 
-  private startNewRun(stageOrBoss: 1 | 2 | 3 | boolean = 1): void {
-    const startStage: 1 | 2 | 3 =
-      typeof stageOrBoss === 'boolean' ? (stageOrBoss ? 3 : 1) : stageOrBoss;
+  private applyChapterAtmosphere(stageNum: number): void {
+    const st = getStageDef(stageNum);
+    const ch = getChapterDef(st.chapter);
+    this.scene.background = new THREE.Color(ch.bgHex);
+    this.scene.fog = new THREE.FogExp2(ch.fogHex, st.chapter >= 3 ? 0.0148 : 0.0136);
+    this.arena.setStageTheme(stageNum, ch);
+  }
+
+  private getHeroDamageMult(): number {
+    const realm = getSwordRealm(this.saveStore.getTotalStars());
+    return realm.dmgMult * this.blessings.dmgMult;
+  }
+
+  private startNewRun(stageOrBoss: number | boolean = 1, keepBlessings = false): void {
+    const startStage =
+      typeof stageOrBoss === 'boolean'
+        ? stageOrBoss
+          ? 20
+          : 1
+        : clamp(Math.floor(stageOrBoss), 1, 20);
+    if (!keepBlessings) {
+      this.blessings = createEmptyBlessings();
+    }
     this.currentStageNum = startStage;
+    this.currentWaveIdx = 0;
+    this.saveStore.setLastPlayed(startStage);
     this.audio.unlock();
     this.clearCombatEntities();
     this.resetHero(new THREE.Vector3(0, 0, 8.8), Math.PI);
@@ -426,34 +493,30 @@ export class Game {
     this.runElapsed = 0;
     this.timeScale = 1;
     this.slowMoTimer = 0;
-    this.arena.setStageTheme(startStage);
 
-    if (startStage === 3) {
-      this.spawnBossEncounter(false);
-    } else if (startStage === 2) {
-      this.mode = 'playing';
-      this.stage = 'stage2';
-      this.hud.setMode('playing');
-      this.audio.setMood('skirmish');
-      this.spawnStage2();
-      this.cameraRig.snapTo(this.hero.pos);
-      this.hud.showStageBanner('第二关', '剑冢残碑 · 血甲剑魔');
-      this.hud.showSubtitle('剑冢杀气腾空，血甲剑魔率部截杀！', 3.2);
-    } else {
-      this.mode = 'playing';
-      this.stage = 'wave1';
-      this.hud.setMode('playing');
-      this.audio.setMood('skirmish');
-      this.spawnWave1();
-      this.cameraRig.snapTo(this.hero.pos);
-      this.hud.showStageBanner('第一关', '蜀山山门 · 妖兵破关');
-      this.hud.showSubtitle('月色如霜，锁妖台外妖煞已动。先清山门。', 3.4);
-    }
+    const stDef = getStageDef(startStage);
+    const chDef = getChapterDef(stDef.chapter);
+    this.applyChapterAtmosphere(startStage);
+    this.hazardTimer = (stDef.hazardIntervalSec ?? 5.5) * 0.72;
+
+    this.mode = 'playing';
+    this.stage = 'combat';
+    this.hud.setMode('playing');
+    this.audio.setMood(stDef.isBossStage ? 'boss1' : 'skirmish');
+    this.spawnCurrentWave(false);
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.showStageBanner(`${chDef.roman} · 第 ${stDef.id} 关`, `${stDef.name} · ${stDef.subtitle}`);
+    this.hud.showSubtitle(stDef.introLine, 3.4);
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peerHero);
   }
 
   private resetHero(pos: THREE.Vector3, yaw: number): void {
     const h = this.hero;
+    const realm = getSwordRealm(this.saveStore.getTotalStars());
+    h.maxHp = 180 + realm.hpBonus + this.blessings.maxHpBonus;
+    h.maxGourds = 3 + this.blessings.extraGourds;
+    this.hud.setRealmAndBlessings(realm.title, this.blessings.ids.length);
+
     h.pos.copy(pos);
     h.vel.set(0, 0, 0);
     h.yaw = yaw;
@@ -503,15 +566,25 @@ export class Game {
       this.scene.remove(p.mesh);
     }
     this.projectiles = [];
+    for (const hz of this.activeHazards) {
+      hz.telegraph.dispose();
+    }
+    this.activeHazards = [];
     this.vfx.clearAll();
   }
 
-  private spawnEnemy(kind: 'bladesman' | 'caster' | 'elite' | 'boss', x: number, z: number, forceId?: number): EnemyEntity {
+  private spawnEnemy(
+    kind: 'bladesman' | 'caster' | 'elite' | 'boss',
+    x: number,
+    z: number,
+    forceId?: number,
+    overrides?: EnemyCreateOverrides,
+  ): EnemyEntity {
     const pos = new THREE.Vector3(x, 0, z);
     this.arena.constrainPosition(pos, kind === 'boss' ? 1.0 : kind === 'elite' ? 0.74 : 0.6);
     const id = forceId ?? this.nextEntityId++;
     if (forceId !== undefined && forceId >= this.nextEntityId) this.nextEntityId = forceId + 1;
-    const enemy = createEnemy(id, kind, pos, this.rng);
+    const enemy = createEnemy(id, kind, pos, this.rng, overrides);
     enemy.yaw = Math.atan2(this.hero.pos.x - pos.x, this.hero.pos.z - pos.z);
     enemy.rig.root.rotation.y = enemy.yaw;
     this.scene.add(enemy.rig.root);
@@ -519,73 +592,135 @@ export class Game {
     return enemy;
   }
 
-  private spawnWave1(): void {
-    this.currentStageNum = 1;
-    this.arena.setStageTheme(1);
-    this.spawnEnemy('bladesman', -4.2, -3.5);
-    this.spawnEnemy('bladesman', 4.4, -3.2);
-    this.spawnEnemy('caster', 0.0, -7.8);
+  private spawnCurrentWave(allowCutscene: boolean): void {
+    const stDef = getStageDef(this.currentStageNum);
+    const waveDef = stDef.waves[clamp(this.currentWaveIdx, 0, stDef.waves.length - 1)];
+    this.stage = 'combat';
+
+    let spawnedBoss: EnemyEntity | null = null;
+    for (const spec of waveDef.enemies) {
+      const e = this.spawnEnemy(spec.kind, spec.x, spec.z, undefined, {
+        name: spec.name,
+        hpMult: spec.hpMult,
+        poiseMult: spec.poiseMult,
+        dmgMult: spec.dmgMult,
+        speedMult: spec.speedMult,
+        scaleMult: spec.scaleMult,
+        affix: spec.affix,
+      });
+      if (spec.kind === 'boss') {
+        spawnedBoss = e;
+      }
+    }
+
+    // Dramatic summon VFX when elites/bosses or wave reinforcements arrive
+    const hasHeavy = waveDef.enemies.some((s) => s.kind === 'boss' || s.kind === 'elite');
+    if (hasHeavy || this.currentWaveIdx > 0) {
+      const focusPos = spawnedBoss?.pos ?? new THREE.Vector3(0, 0, -5.0);
+      const col = spawnedBoss ? new THREE.Color(1.85, 0.28, 0.45) : new THREE.Color(1.4, 0.48, 1.9);
+      this.vfx.spawnBaguaArray({
+        pos: new THREE.Vector3(focusPos.x, 0.08, focusPos.z),
+        radius: spawnedBoss ? 5.6 : 4.6,
+        color: col,
+        duration: 2.2,
+      });
+      this.vfx.spawnShockRing(new THREE.Vector3(focusPos.x, 0.1, focusPos.z), col, 0.5, spawnedBoss ? 8.2 : 6.2, 0.65);
+      if (spawnedBoss) this.cameraRig.addShake(0.6);
+    }
+
+    if (spawnedBoss) {
+      this.audio.setMood('boss1');
+      if (allowCutscene && stDef.bossCutscene && !this.mp.isOnline()) {
+        if (this.hero.pos.z < 4.5) {
+          this.hero.pos.set(0, 0, 8.2);
+          this.hero.rig.root.position.copy(this.hero.pos);
+        }
+        this.hero.yaw = Math.PI;
+        this.hero.rig.root.rotation.y = this.hero.yaw;
+        this.mode = 'cutscene';
+        this.hud.setMode('cutscene');
+        this.audio.setDucked(true);
+        this.cameraRig.startCutscene(spawnedBoss.pos, 2.35);
+        this.hud.showSubtitle(waveDef.subtitle ?? stDef.introLine, 3.0);
+      } else {
+        spawnedBoss.aiState = 'orbit';
+        spawnedBoss.stateTime = 0;
+        if (waveDef.subtitle) this.hud.showSubtitle(waveDef.subtitle, 2.8);
+      }
+    } else if (waveDef.subtitle) {
+      this.hud.showSubtitle(waveDef.subtitle, 2.8);
+    }
+
+    if (this.mp.isOnline() && this.mp.role === 'host') {
+      this.mp.sendStageSync(this.currentStageNum, Boolean(spawnedBoss));
+    }
   }
 
-  private spawnStage2(): void {
-    this.currentStageNum = 2;
-    this.stage = 'stage2';
-    this.arena.setStageTheme(2);
-    this.spawnEnemy('elite', 0.0, -5.2);
-    this.spawnEnemy('bladesman', -5.2, -2.4);
-    this.spawnEnemy('caster', 5.2, -6.4);
-    this.vfx.spawnBaguaArray({
-      pos: new THREE.Vector3(0, 0.08, -5.2),
-      radius: 4.8,
-      color: new THREE.Color(1.45, 0.42, 1.85),
-      duration: 2.0,
-    });
-    this.vfx.spawnShockRing(new THREE.Vector3(0, 0.1, -5.2), new THREE.Color(1.85, 0.45, 1.95), 0.5, 6.4, 0.6);
-    if (this.mp.isOnline() && this.mp.role === 'host') {
-      this.mp.sendStageSync(2, false);
+  private updateStageHazards(dt: number): void {
+    const stDef = getStageDef(this.currentStageNum);
+    // Tick active telegraphed ground hazards
+    for (let i = this.activeHazards.length - 1; i >= 0; i--) {
+      const hz = this.activeHazards[i];
+      hz.timer += dt;
+      const p = clamp(hz.timer / hz.duration, 0, 1);
+      hz.telegraph.updateProgress(p);
+      if (p >= 1) {
+        hz.telegraph.dispose();
+        this.activeHazards.splice(i, 1);
+        const col =
+          hz.type === 'lightning'
+            ? new THREE.Color(1.45, 0.65, 2.4)
+            : hz.type === 'ember'
+              ? new THREE.Color(2.4, 0.72, 0.25)
+              : new THREE.Color(2.4, 0.28, 0.55);
+        this.vfx.spawnShockRing(hz.pos, col, 0.3, hz.radius, 0.42);
+        this.vfx.spawnGroundCrater(hz.pos, hz.radius * 0.72, col, 3.0);
+        if (hz.type === 'abyss') {
+          this.vfx.spawnFallingSword({ targetPos: hz.pos.clone(), delay: 0.02 });
+        }
+        this.audio.playHit(true);
+        this.cameraRig.addShake(0.28);
+        if (Math.hypot(this.hero.pos.x - hz.pos.x, this.hero.pos.z - hz.pos.z) <= hz.radius) {
+          this.tryHitHero(null, hz.damage, true);
+        }
+      }
     }
-  }
 
-  private spawnBossEncounter(withCutscene: boolean): void {
-    this.currentStageNum = 3;
-    this.stage = 'boss';
-    this.arena.setStageTheme(3);
-    this.audio.setMood('boss1');
-    this.hud.showStageBanner('第三关 · 终局', '锁妖剑台 · 镇狱妖王');
-    if (this.mp.isOnline() && this.mp.role === 'host') {
-      this.mp.sendStageSync(3, withCutscene);
-    }
+    if (stDef.hazard === 'none' || this.stage !== 'combat') return;
+    if (!this.enemies.some((e) => e.aiState !== 'dead')) return;
+    if (this.mp.isOnline() && this.mp.role === 'guest') return;
 
-    // Keep hero in guaranteed safe south half before Boss awakens at central Bagua seal
-    if (this.hero.pos.z < 4.5) {
-      this.hero.pos.set(0, 0, 8.2);
-      this.hero.rig.root.position.copy(this.hero.pos);
-    }
-    this.hero.yaw = Math.PI;
-    this.hero.rig.root.rotation.y = this.hero.yaw;
-
-    const boss = this.spawnEnemy('boss', 0, -4.5);
-    this.vfx.spawnBaguaArray({
-      pos: new THREE.Vector3(0, 0.08, -4.5),
-      radius: 5.4,
-      color: new THREE.Color(1.4, 0.25, 0.45),
-      duration: 2.5,
-    });
-    this.vfx.spawnShockRing(new THREE.Vector3(0, 0.1, -4.5), new THREE.Color(2.0, 0.35, 0.55), 0.6, 8.5, 0.7);
-    this.cameraRig.addShake(0.65);
-
-    if (withCutscene) {
-      this.mode = 'cutscene';
-      this.hud.setMode('cutscene');
-      this.audio.setDucked(true);
-      this.cameraRig.startCutscene(boss.pos, 2.55);
-      this.hud.showSubtitle('镇狱妖王：「蜀山小辈，也敢踏足锁妖剑台。」', 3.0);
-    } else {
-      boss.aiState = 'orbit';
-      boss.stateTime = 0;
-      this.mode = 'playing';
-      this.hud.setMode('playing');
-      this.cameraRig.snapTo(this.hero.pos);
+    this.hazardTimer -= dt;
+    if (this.hazardTimer <= 0) {
+      this.hazardTimer = (stDef.hazardIntervalSec ?? 5.2) * (0.85 + this.rng() * 0.3);
+      const count = stDef.chapter >= 4 ? 2 : 1;
+      const col =
+        stDef.hazard === 'lightning'
+          ? new THREE.Color(1.35, 0.55, 2.35)
+          : stDef.hazard === 'ember'
+            ? new THREE.Color(2.35, 0.68, 0.22)
+            : new THREE.Color(2.35, 0.25, 0.52);
+      for (let k = 0; k < count; k++) {
+        const offsetAng = this.rng() * Math.PI * 2;
+        const offsetR = k === 0 ? this.rng() * 1.1 : 2.6 + this.rng() * 2.4;
+        const pos = new THREE.Vector3(
+          this.hero.pos.x + Math.cos(offsetAng) * offsetR,
+          0,
+          this.hero.pos.z + Math.sin(offsetAng) * offsetR,
+        );
+        this.arena.constrainPosition(pos, 1.4);
+        const radius = stDef.hazard === 'abyss' ? 2.85 : 2.55;
+        const telegraph = this.vfx.createTelegraph('circle', pos, 0, radius, radius, col);
+        this.activeHazards.push({
+          pos,
+          radius,
+          damage: stDef.hazardDamage ?? 24,
+          timer: 0,
+          duration: 1.38,
+          telegraph,
+          type: stDef.hazard,
+        });
+      }
     }
   }
 
@@ -602,13 +737,17 @@ export class Game {
     if (this.stage === 'soloPvp') {
       return `1v1 联机单挑 · 房${this.mp.roomCode}`;
     }
+    const stDef = getStageDef(this.currentStageNum);
     const alive = this.enemies.filter((e) => e.aiState !== 'dead').length;
-    if (this.stage === 'wave1') return `第一关 蜀山山门 · 剩余妖兵 ${alive}`;
-    if (this.stage === 'stage2Transition') return '山门已清 · 剑冢封印震动';
-    if (this.stage === 'stage2') return `第二关 剑冢残碑 · 剩余 ${alive}`;
-    if (this.stage === 'bossTransition') return '锁妖阵异动 · 妖王将醒';
-    if (this.stage === 'boss') return '第三关 锁妖剑台 · 镇狱妖王';
-    return '锁妖剑台已定';
+    const waveStr = stDef.waves.length > 1 ? ` · 第${this.currentWaveIdx + 1}/${stDef.waves.length}波` : '';
+    const hzStr = stDef.hazardLabel ? ` · ${stDef.hazardLabel}` : '';
+    if (this.stage === 'waveTransition') {
+      return `第 ${stDef.id} 关 ${stDef.name} · 下一波援军即将现身`;
+    }
+    if (this.stage === 'done') {
+      return `第 ${stDef.id} 关 ${stDef.name} · 剑台已定`;
+    }
+    return `第 ${stDef.id} 关 ${stDef.name}${waveStr} · 剩余 ${alive}${hzStr}`;
   }
 
   /**
@@ -700,6 +839,7 @@ export class Game {
         }
       }
       this.updateProjectiles(dt);
+      this.updateStageHazards(dt);
       this.resolveEntitySeparation();
       this.updateStageProgression(dt);
       this.tickMultiplayerSync(dt);
@@ -989,7 +1129,7 @@ export class Game {
 
     // State execution
     if (h.state === 'idle' || h.state === 'run') {
-      const speed = 7.4;
+      const speed = 7.4 * this.blessings.speedMult;
       const moving = Math.hypot(this.moveVec.x, this.moveVec.z) > 0.05;
       if (moving) {
         h.state = 'run';
@@ -1310,7 +1450,7 @@ export class Game {
   private startSkillQ(): void {
     const h = this.hero;
     h.spirit -= 20;
-    h.cdQ = 3.2;
+    h.cdQ = 3.2 * this.blessings.cdMult;
     h.state = 'skillQ';
     h.stateTime = 0;
     h.stateDuration = 0.34;
@@ -1336,7 +1476,7 @@ export class Game {
   private startSkillE(): void {
     const h = this.hero;
     h.spirit -= 45;
-    h.cdE = 7.5;
+    h.cdE = 7.5 * this.blessings.cdMult;
     h.state = 'skillE';
     h.stateTime = 0;
     h.stateDuration = 0.52;
@@ -1357,7 +1497,7 @@ export class Game {
   private startSkillR(): void {
     const h = this.hero;
     h.ult = 0;
-    h.cdR = 10.0;
+    h.cdR = 10.0 * this.blessings.cdMult;
     h.state = 'skillR';
     h.stateTime = 0;
     h.stateDuration = 0.85;
@@ -1549,13 +1689,14 @@ export class Game {
       interrupted = true;
     }
 
-    const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0));
+    const scaledRaw = fromRemoteGuest ? rawDmg : Math.round(rawDmg * this.getHeroDamageMult());
+    const dmg = Math.round(scaledRaw * (interrupted ? 1.35 : 1.0));
     e.hp = Math.max(0, e.hp - dmg);
     e.poise = Math.min(e.maxPoise, e.poise + poiseGain * (interrupted ? 1.6 : 1.0));
 
     if (!fromRemoteGuest) {
       h.spirit = Math.min(h.maxSpirit, h.spirit + (heavy ? 12 : 7));
-      h.ult = Math.min(100, h.ult + (heavy ? 12 : 6));
+      h.ult = Math.min(100, h.ult + (heavy ? 12 : 6) * this.blessings.ultGainMult);
       h.comboCount += 1;
       h.comboDecayTimer = 3.2;
       h.maxCombo = Math.max(h.maxCombo, h.comboCount);
@@ -1745,7 +1886,7 @@ export class Game {
         e.yaw = dampAngle(e.yaw, toHeroYaw, 8, dt);
         const preferred = e.kind === 'caster' ? 8.2 : e.kind === 'boss' ? 5.2 : 4.6;
         const radial = clamp((dist - preferred) * 0.75, -1, 1);
-        const moveSpeed = e.kind === 'boss' ? (e.phase === 2 ? 4.4 : 3.5) : 3.1;
+        const moveSpeed = (e.kind === 'boss' ? (e.phase === 2 ? 4.4 : 3.5) : 3.1) * e.speedMult;
         const nx = dist > 0.01 ? dx / dist : 0;
         const nz = dist > 0.01 ? dz / dist : 1;
         // Strafe tangentially around hero + gentle radial spacing
@@ -1773,7 +1914,7 @@ export class Game {
         }
       } else if (e.aiState === 'chase') {
         e.yaw = dampAngle(e.yaw, toHeroYaw, 10, dt);
-        const spd = e.kind === 'boss' ? (e.phase === 2 ? 6.2 : 5.1) : 4.8;
+        const spd = (e.kind === 'boss' ? (e.phase === 2 ? 6.2 : 5.1) : 4.8) * e.speedMult;
         if (dist > 0.01) {
           e.pos.x += (dx / dist) * spd * dt;
           e.pos.z += (dz / dist) * spd * dt;
@@ -1881,24 +2022,24 @@ export class Game {
       customWindup === undefined &&
       (((e.kind === 'boss' || e.kind === 'elite') && move === 'cleave') || (e.kind === 'bladesman' && this.rng() < 0.35));
 
-    const fast = e.kind === 'boss' && e.phase === 2 ? 0.82 : e.kind === 'elite' ? 0.92 : 1.0;
+    const fast = (e.kind === 'boss' && e.phase === 2 ? 0.82 : e.kind === 'elite' ? 0.92 : 1.0) / Math.max(0.8, e.speedMult);
 
     if (move === 'cleave') {
-      e.stateDuration = customWindup ?? (e.kind === 'boss' ? 0.72 : e.kind === 'elite' ? 0.66 : 0.62) * fast;
+      e.stateDuration = (customWindup ?? (e.kind === 'boss' ? 0.72 : e.kind === 'elite' ? 0.66 : 0.62)) * fast;
       e.moveRange = e.kind === 'boss' ? 4.3 : e.kind === 'elite' ? 3.4 : 2.85;
-      e.moveDamage = e.kind === 'boss' ? 24 : e.kind === 'elite' ? 20 : 15;
+      e.moveDamage = Math.round((e.kind === 'boss' ? 24 : e.kind === 'elite' ? 20 : 15) * e.damageMult);
       e.moveUnblockable = false;
       e.telegraph = this.vfx.createTelegraph('fan', e.pos, e.yaw, e.moveRange * 1.45, e.moveRange);
     } else if (move === 'lunge') {
       e.stateDuration = 0.74 * fast;
       e.moveRange = 2.6;
-      e.moveDamage = e.kind === 'elite' ? 23 : 28;
+      e.moveDamage = Math.round((e.kind === 'elite' ? 23 : 28) * e.damageMult);
       e.moveUnblockable = false;
       e.telegraph = this.vfx.createTelegraph('line', e.pos, e.yaw, 2.3, e.kind === 'elite' ? 7.2 : 8.8);
     } else if (move === 'slam') {
       e.stateDuration = 0.92 * fast;
       e.moveRange = e.kind === 'elite' ? 4.2 : 5.4;
-      e.moveDamage = e.kind === 'elite' ? 25 : 32;
+      e.moveDamage = Math.round((e.kind === 'elite' ? 25 : 32) * e.damageMult);
       e.moveUnblockable = true; // Red-purple ground slam MUST be dodged!
       e.telegraphPos.copy(e.pos);
       e.telegraph = this.vfx.createTelegraph(
@@ -1910,9 +2051,9 @@ export class Game {
         new THREE.Color(2.2, 0.2, 0.65),
       );
     } else if (move === 'yinCircle') {
-      e.stateDuration = 1.05;
+      e.stateDuration = 1.05 * fast;
       e.moveRange = 3.1;
-      e.moveDamage = 20;
+      e.moveDamage = Math.round(20 * e.damageMult);
       e.moveUnblockable = true;
       e.telegraphPos.copy(this.hero.pos);
       e.telegraph = this.vfx.createTelegraph(
@@ -1924,9 +2065,9 @@ export class Game {
         new THREE.Color(1.4, 0.45, 2.35),
       );
     } else if (move === 'orb' || move === 'barrage') {
-      e.stateDuration = move === 'barrage' ? 0.75 : 0.68;
+      e.stateDuration = (move === 'barrage' ? 0.75 : 0.68) * fast;
       e.moveRange = 14;
-      e.moveDamage = move === 'barrage' ? 18 : 16;
+      e.moveDamage = Math.round((move === 'barrage' ? 18 : 16) * e.damageMult);
       e.moveUnblockable = false;
     }
   }
@@ -2012,6 +2153,13 @@ export class Game {
     if (dist <= e.moveRange + h.radius && (diff < 1.15 || dist < 1.5)) {
       this.tryHitHero(e, e.moveDamage, e.moveUnblockable);
     }
+    // Storm affix unleashes an electric shock ring pulse on melee strike
+    if (e.affix === 'storm') {
+      this.vfx.spawnShockRing(e.pos, new THREE.Color(1.35, 0.75, 2.4), 0.4, 3.6, 0.36);
+      if (dist <= 3.5 + h.radius && diff >= 1.15) {
+        this.tryHitHero(e, Math.round(e.moveDamage * 0.55), false);
+      }
+    }
   }
 
   private tryHitHero(attacker: EnemyEntity | null, dmg: number, unblockable: boolean): void {
@@ -2095,6 +2243,13 @@ export class Game {
     if (!this.godMode) {
       h.hp = Math.max(0, h.hp - dmg);
     }
+    // Vampiric affix steals health on successful hit
+    if (attacker && attacker.affix === 'vampiric' && attacker.aiState !== 'dead') {
+      const leach = Math.max(12, Math.round(attacker.maxHp * 0.08));
+      attacker.hp = Math.min(attacker.maxHp, attacker.hp + leach);
+      this.vfx.spawnShockRing(attacker.pos, new THREE.Color(2.1, 0.22, 0.48), 0.25, 1.8, 0.35);
+      this.spawnWorldCallout(`嗜血 +${leach}`, attacker.pos, 'crit');
+    }
     h.hurtInvuln = 0.48;
     h.comboCount = 0;
     h.rig.triggerHitFlash(1.0);
@@ -2111,13 +2266,11 @@ export class Game {
       }
       this.mode = 'defeat';
       this.hud.setMode('defeat');
-      this.hud.showResult(
-        false,
-        this.runElapsed,
-        h,
-        this.stage === 'soloPvp' ? '切 磋 惜 败' : undefined,
-        this.stage === 'soloPvp' ? '对方剑势更胜一筹，点击「再战剑台」发起再来一局！' : undefined,
-      );
+      this.hud.showResult(false, this.runElapsed, h, {
+        stageDef: getStageDef(this.currentStageNum),
+        customTitle: this.stage === 'soloPvp' ? '切 磋 惜 败' : undefined,
+        customSub: this.stage === 'soloPvp' ? '对方剑势更胜一筹，点击「重战本关」发起再来一局！' : undefined,
+      });
     } else if (h.state !== 'skillR') {
       h.state = 'hit';
       h.stateTime = 0;
@@ -2272,55 +2425,35 @@ export class Game {
       if (this.hero.state === 'dead' && this.peerHero && this.peerHero.dead && this.mode === 'playing') {
         this.mode = 'defeat';
         this.hud.setMode('defeat');
-        this.hud.showResult(false, this.runElapsed, this.hero);
-      }
-      const boss = this.enemies.find((e) => e.kind === 'boss');
-      if (this.stage === 'boss' && boss && boss.aiState === 'dead') {
-        this.stage = 'done';
-        this.stageTimer = 1.2;
-        this.audio.setMood('victory');
+        this.hud.showResult(false, this.runElapsed, this.hero, { stageDef: getStageDef(this.currentStageNum) });
       }
       return;
     }
 
-    if (this.stage === 'wave1') {
+    const stDef = getStageDef(this.currentStageNum);
+    if (this.stage === 'combat') {
       const anyAlive = this.enemies.some((e) => e.aiState !== 'dead');
       if (!anyAlive) {
-        this.stage = 'stage2Transition';
-        this.stageTimer = 1.8;
-        this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + 38);
-        this.hero.gourds = Math.min(this.hero.maxGourds, this.hero.gourds + 1);
-        this.vfx.spawnHealVortex(this.hero.pos);
-        this.hud.showSubtitle('第一关告捷！回复气血与灵葫，剑冢残碑魔将已现身！', 2.4);
+        if (this.currentWaveIdx + 1 < stDef.waves.length) {
+          this.stage = 'waveTransition';
+          this.stageTimer = 1.65;
+          this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + 42);
+          this.hero.gourds = Math.min(this.hero.maxGourds, this.hero.gourds + 1);
+          this.vfx.spawnHealVortex(this.hero.pos);
+          const nextWave = stDef.waves[this.currentWaveIdx + 1];
+          this.hud.showSubtitle(`第 ${this.currentWaveIdx + 1} 波肃清！回气补葫，${nextWave.label}将至！`, 2.2);
+        } else {
+          this.stage = 'done';
+          this.stageTimer = 1.1;
+          this.audio.setMood('victory');
+          this.hud.showSubtitle(stDef.victoryLine, 3.0);
+        }
       }
-    } else if (this.stage === 'stage2Transition') {
+    } else if (this.stage === 'waveTransition') {
       this.stageTimer -= dt;
       if (this.stageTimer <= 0) {
-        this.spawnStage2();
-        this.hud.showStageBanner('第二关', '剑冢残碑 · 血甲剑魔');
-      }
-    } else if (this.stage === 'stage2') {
-      const anyAlive = this.enemies.some((e) => e.aiState !== 'dead');
-      if (!anyAlive) {
-        this.stage = 'bossTransition';
-        this.stageTimer = 2.0;
-        this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + 48);
-        this.hero.gourds = Math.min(this.hero.maxGourds, this.hero.gourds + 1);
-        this.vfx.spawnHealVortex(this.hero.pos);
-        this.hud.showSubtitle('血甲魔将伏诛——地脉八卦忽起暗红妖气，镇狱妖王将醒！', 2.6);
-      }
-    } else if (this.stage === 'bossTransition') {
-      this.stageTimer -= dt;
-      if (this.stageTimer <= 0) {
-        this.spawnBossEncounter(true);
-      }
-    } else if (this.stage === 'boss') {
-      const boss = this.enemies.find((e) => e.kind === 'boss');
-      if (boss && boss.aiState === 'dead') {
-        this.stage = 'done';
-        this.stageTimer = 1.4;
-        this.audio.setMood('victory');
-        this.hud.showSubtitle('镇狱妖王伏诛，三关俱破，剑台重归清明。', 3.0);
+        this.currentWaveIdx += 1;
+        this.spawnCurrentWave(true);
       }
     } else if (this.stage === 'done') {
       this.stageTimer -= dt;
@@ -2329,13 +2462,29 @@ export class Game {
         this.hud.clearSubtitle();
         this.hud.setMode('victory');
         const isSolo = this.peerHero?.isEnemy;
-        this.hud.showResult(
-          true,
-          this.runElapsed,
-          this.hero,
-          isSolo ? '独 步 蜀 山 · 单 挑 获 胜' : undefined,
-          isSolo ? '剑势如虹，力压群雄！点击「再战剑台」可再来一局。' : undefined,
-        );
+        if (isSolo) {
+          this.hud.showResult(true, this.runElapsed, this.hero, {
+            customTitle: '独 步 蜀 山 · 单 挑 获 胜',
+            customSub: '剑势如虹，力压群雄！点击「重战本关」可再来一局。',
+          });
+        } else {
+          const starResult = evaluateStageStars(
+            stDef,
+            this.runElapsed,
+            this.hero.hp / Math.max(1, this.hero.maxHp),
+            this.hero.parryCount,
+          );
+          this.saveStore.recordClear(stDef.id, starResult.stars, this.runElapsed, this.hero.maxCombo);
+          const nextStageId = stDef.id < 20 ? stDef.id + 1 : null;
+          this.pendingBlessings = nextStageId ? pickBlessingChoices(this.rng, 3) : [];
+          this.hud.syncCampaignProgress(this.saveStore, nextStageId ?? 20);
+          this.hud.showResult(true, this.runElapsed, this.hero, {
+            stageDef: stDef,
+            starResult,
+            blessingChoices: this.pendingBlessings,
+            nextStageId,
+          });
+        }
       }
     }
   }
@@ -2386,16 +2535,18 @@ export class Game {
 
       this.mode = 'playing';
       this.stage = 'soloPvp';
-      this.currentStageNum = 3;
-      this.arena.setStageTheme(2);
+      this.currentStageNum = 20;
+      this.applyChapterAtmosphere(10);
       this.audio.setMood('boss1');
       this.hud.setMode('playing');
       this.cameraRig.snapTo(this.hero.pos);
       this.hud.showStageBanner('1v1 联机单挑', `房间 ${info.code} · 剑台决胜`);
       this.hud.showSubtitle(`已匹配对手「${peerName}」，三段连招、弹反、御剑万剑全开！`, 3.4);
     } else {
-      const stageNum = (info.stage === 3 ? 3 : info.stage === 2 ? 2 : 1) as 1 | 2 | 3;
+      const stageNum = clamp(Math.floor(info.stage || 1), 1, 20);
+      const stDef = getStageDef(stageNum);
       this.currentStageNum = stageNum;
+      this.currentWaveIdx = 0;
       const myX = info.role === 'host' ? -1.6 : 1.6;
       const peerX = info.role === 'host' ? 1.6 : -1.6;
       this.resetHero(new THREE.Vector3(myX, 0, 8.6), Math.PI);
@@ -2407,21 +2558,16 @@ export class Game {
       this.peerHero.rig.root.position.copy(this.peerHero.pos);
 
       this.mode = 'playing';
+      this.stage = 'combat';
       this.hud.setMode('playing');
-      this.arena.setStageTheme(stageNum);
+      this.applyChapterAtmosphere(stageNum);
       this.cameraRig.snapTo(this.hero.pos);
-      this.hud.showStageBanner(`双人组队 · 第${stageNum}关`, `与「${peerName}」共镇锁妖台`);
+      this.hud.showStageBanner(`双人组队 · 第 ${stageNum} 关`, `${stDef.name} · 与「${peerName}」共镇锁妖台`);
 
       if (info.role === 'host') {
-        if (stageNum === 3) this.spawnBossEncounter(false);
-        else if (stageNum === 2) this.spawnStage2();
-        else {
-          this.stage = 'wave1';
-          this.spawnWave1();
-        }
+        this.spawnCurrentWave(false);
       } else {
-        this.stage = stageNum === 3 ? 'boss' : stageNum === 2 ? 'stage2' : 'wave1';
-        this.audio.setMood(stageNum === 3 ? 'boss1' : 'skirmish');
+        this.audio.setMood(stDef.isBossStage ? 'boss1' : 'skirmish');
       }
     }
     this.hud.setMpHudBadge(`${isSolo ? 'Solo' : '组队'} · 房${info.code}`);
@@ -2651,9 +2797,9 @@ export class Game {
         this.enemies.splice(i, 1);
       }
     }
-    if (stageNum >= 1 && stageNum <= 3 && stageNum !== this.currentStageNum) {
-      this.currentStageNum = stageNum as 1 | 2 | 3;
-      this.arena.setStageTheme(this.currentStageNum);
+    if (stageNum >= 1 && stageNum <= 20 && stageNum !== this.currentStageNum) {
+      this.currentStageNum = stageNum;
+      this.applyChapterAtmosphere(this.currentStageNum);
     }
   }
 
@@ -2878,8 +3024,22 @@ export class Game {
       spawn: (kind: 'bladesman' | 'caster' | 'elite' | 'boss', x = 0, z = -3) => {
         this.spawnEnemy(kind, x, z);
       },
-      toBoss: () => this.startNewRun(3),
-      toStage: (s: 1 | 2 | 3) => this.startNewRun(s),
+      toBoss: () => this.startNewRun(20, false),
+      toStage: (s: number) => this.startNewRun(s, false),
+      stageNum: () => this.currentStageNum,
+      wave: () => this.currentWaveIdx + 1,
+      totalStars: () => this.saveStore.getTotalStars(),
+      openMap: (chapterId?: 1 | 2 | 3 | 4) => this.hud.openCampaignMap(chapterId),
+      clearCurrentStage: () => {
+        const stDef = getStageDef(this.currentStageNum);
+        this.currentWaveIdx = stDef.waves.length - 1;
+        for (const e of this.enemies) {
+          e.hp = 0;
+          e.aiState = 'dead';
+          e.telegraph?.dispose();
+          e.telegraph = null;
+        }
+      },
       god: (on = true) => {
         this.godMode = on;
       },
@@ -2896,7 +3056,7 @@ export class Game {
               dead: this.peerHero.dead,
             }
           : null,
-      mpCreate: (mode: 'coop' | 'solo', stage: 1 | 2 | 3 = 1) => this.mp.createRoom(mode, stage, '李逍遥'),
+      mpCreate: (mode: 'coop' | 'solo', stage = 1) => this.mp.createRoom(mode, stage, '李逍遥'),
       mpJoin: (code: string) => this.mp.joinRoom(code, '玄影剑侠'),
       mpRoom: () => this.mp.roomCode,
     };

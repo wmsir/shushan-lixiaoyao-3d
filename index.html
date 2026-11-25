@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0b1420" />
     <link rel="icon" href="data:," />
-    <title>仙剑 · 锁妖剑台 — 李逍遥 3D 动作游戏</title>
+    <title>仙剑 · 锁妖剑台 — 二十重剑劫 3D 动作游戏</title>
   </head>
   <body>
     <main id="app">
@@ -16,8 +16,8 @@
 
       <!-- Cinematic Stage Transition Banner -->
       <div id="stage-banner" role="status" aria-live="polite">
-        <div id="stage-banner-kicker" class="stage-kicker">第一关</div>
-        <div id="stage-banner-title" class="stage-title">蜀山山门 · 妖兵破关</div>
+        <div id="stage-banner-kicker" class="stage-kicker">第一章 · 第 1 关</div>
+        <div id="stage-banner-title" class="stage-title">剑启山门 · 妖兵破关</div>
       </div>
 
       <!-- Literary Dialogue / Event Subtitle Banner -->
@@ -26,26 +26,36 @@
       <!-- Title Overlay over Live 3D Moonlit Shushan Courtyard -->
       <section id="title-overlay" class="overlay visible">
         <div class="title-card">
-          <div class="title-kicker">SHUSHAN DEMON-LOCK COURT</div>
+          <div class="title-kicker">SHUSHAN DEMON-LOCK COURT · 20 STAGES</div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
             <span class="chop-seal" aria-hidden="true">逍遥</span>
           </div>
-          <p class="title-tagline">国漫 3D 仙侠三关闯关 · 电脑端联盟式鼠标右键走位 / 手机端王者荣耀轮盘 · 双人联机组队与 1v1 Solo。</p>
+          <p class="title-tagline">写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。</p>
 
-          <!-- 3-Stage Selector -->
-          <div class="stage-picker" role="group" aria-label="关卡选择">
-            <button id="stage-btn-1" class="stage-pill active" data-stage="1" type="button">一 · 蜀山山门</button>
-            <button id="stage-btn-2" class="stage-pill" data-stage="2" type="button">二 · 剑冢魔将</button>
-            <button id="stage-btn-3" class="stage-pill" data-stage="3" type="button">三 · 镇狱妖王</button>
+          <!-- Campaign Progress & Selected Stage Strip -->
+          <div class="campaign-strip">
+            <div class="campaign-strip-row">
+              <span id="title-realm-badge" class="realm-badge">炼气初境</span>
+              <span id="title-stars-text" class="stars-badge">★ 0 / 60</span>
+              <span id="title-clear-text" class="clear-badge">已破 0 / 20 关</span>
+            </div>
+            <div class="campaign-selected-row">
+              <span id="title-selected-stage" class="selected-stage-label">当前目标：第 1 关 · 剑启山门</span>
+              <span id="title-selected-meta" class="selected-stage-meta">第一章 蜀山山门</span>
+            </div>
           </div>
 
-          <button id="btn-start" class="xianxia-btn primary" type="button">单人仗剑入台</button>
+          <!-- Primary Campaign Entry Buttons -->
+          <div class="title-cta-row">
+            <button id="btn-start" class="xianxia-btn primary" type="button">仗剑出征 · 第 1 关</button>
+            <button id="btn-open-campaign" class="xianxia-btn map-btn" type="button">二十关 · 蜀山剑录</button>
+          </div>
 
           <!-- 2-Player Online Multiplayer Lobby -->
           <div class="mp-lobby">
             <div class="mp-lobby-head">
-              <span class="mp-badge">联机阁 · 跨端互通</span>
+              <span class="mp-badge">联机阁 · 20 关跨端互通</span>
               <span class="mp-dot-wrap"><span id="mp-conn-dot" class="mp-dot"></span><span class="mp-dot-lbl">联机就绪</span></span>
             </div>
             <div class="mp-btn-row">
@@ -74,6 +84,41 @@
         </div>
       </section>
 
+      <!-- Commercial 20-Stage 4-Chapter Campaign Map Overlay -->
+      <section id="campaign-overlay" class="overlay">
+        <div class="campaign-modal">
+          <div class="campaign-head">
+            <div class="campaign-head-left">
+              <h2 class="campaign-title">二十重剑劫 · 蜀山剑录</h2>
+              <div class="campaign-meta-pills">
+                <span id="map-realm-pill" class="realm-badge">炼气初境</span>
+                <span id="map-realm-buff" class="realm-buff-txt">气血+0 · 剑伤+0%</span>
+                <span id="map-stars-pill" class="stars-badge">★ 0 / 60</span>
+              </div>
+            </div>
+            <button id="btn-close-campaign" class="util-btn" type="button">返回</button>
+          </div>
+
+          <!-- 4 Chapter Tabs -->
+          <div id="chapter-tabs" class="chapter-tabs" role="tablist" aria-label="战役章节"></div>
+
+          <!-- Active Chapter Lore Banner -->
+          <div id="chapter-lore-bar" class="chapter-lore-bar"></div>
+
+          <!-- 5 Stage Cards for Active Chapter -->
+          <div id="stage-card-grid" class="stage-card-grid"></div>
+
+          <!-- Selected Stage Action Footer -->
+          <div class="campaign-footer">
+            <div id="campaign-detail-box" class="campaign-detail-box"></div>
+            <div class="campaign-footer-btns">
+              <button id="btn-map-coop" class="xianxia-btn mp-btn" type="button">双人组队本关</button>
+              <button id="btn-map-launch" class="xianxia-btn primary" type="button">单人挑战第 1 关</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Active Gameplay Xianxia HUD -->
       <section id="game-hud" aria-live="polite">
         <!-- Top-Left: Li Xiaoyao Hero Vitality Cluster -->
@@ -81,8 +126,11 @@
           <div class="hero-nameplate">
             <span class="hero-seal">李</span>
             <div class="hero-name-col">
-              <strong id="hero-title-name">李逍遥</strong>
-              <span class="hero-sub">蜀山剑侠 · 剑意 <b id="ult-pct">35%</b></span>
+              <div class="hero-name-row">
+                <strong id="hero-title-name">李逍遥</strong>
+                <span id="hud-blessing-pill" class="hud-blessing-pill"></span>
+              </div>
+              <span class="hero-sub"><span id="hud-realm-name">炼气初境</span> · 剑意 <b id="ult-pct">35%</b></span>
             </div>
           </div>
           <div class="bar-row">
@@ -114,7 +162,7 @@
 
         <!-- Top-Center: Objective & Boss / Elite / PvP Rival Bar -->
         <div class="top-center-stack">
-          <div id="objective-text" class="objective-pill">第一关 · 肃清山门妖煞</div>
+          <div id="objective-text" class="objective-pill">第 1 关 剑启山门 · 剩余 3</div>
           <div id="boss-bar" class="boss-bar">
             <div id="boss-name" class="boss-name">九幽剑煞 · 镇狱妖王</div>
             <div class="boss-hp-track">
@@ -231,20 +279,29 @@
           <p class="modal-desc">按 Esc 或点击继续回到锁妖剑台。</p>
           <div class="modal-actions">
             <button id="btn-resume" class="xianxia-btn primary" type="button">继续试剑</button>
-            <button id="btn-restart-pause" class="xianxia-btn" type="button">重开本局</button>
+            <button id="btn-restart-pause" class="xianxia-btn" type="button">重开本关</button>
+            <button id="btn-pause-map" class="xianxia-btn" type="button">选关剑录</button>
             <button id="btn-pause-title" class="xianxia-btn" type="button">返回大厅</button>
           </div>
         </div>
       </section>
 
-      <!-- Victory / Defeat Result Overlay -->
+      <!-- Commercial Victory / Defeat Result Overlay with 3-Star Rating & 3-Pick-1 Blessings -->
       <section id="result-overlay" class="overlay">
-        <div class="modal-card">
+        <div class="modal-card result-modal-wide">
           <h2 id="result-title" class="result-title win">降 妖 凯 旋</h2>
+          <div id="result-stars-row" class="result-stars-row"></div>
           <p id="result-sub" class="modal-desc"></p>
+          <div id="result-star-checks" class="result-star-checks"></div>
           <div id="result-stats" class="result-stats"></div>
+          <div id="result-blessing-wrap" class="result-blessing-wrap">
+            <div class="blessing-header">蜀山剑阁赐福 · 任选一项携带进入下一关</div>
+            <div id="result-blessing-grid" class="blessing-grid"></div>
+          </div>
           <div class="modal-actions">
-            <button id="btn-retry" class="xianxia-btn primary" type="button">再战剑台</button>
+            <button id="btn-next-stage" class="xianxia-btn primary" type="button">下一关</button>
+            <button id="btn-retry" class="xianxia-btn" type="button">重战本关</button>
+            <button id="btn-result-map" class="xianxia-btn" type="button">选关剑录</button>
             <button id="btn-result-title" class="xianxia-btn" type="button">返回大厅</button>
           </div>
         </div>

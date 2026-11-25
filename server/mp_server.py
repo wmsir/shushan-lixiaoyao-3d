@@ -181,7 +181,7 @@ class RoomHub:
         if t == "create_room":
             await self.leave_room(conn)
             mode = "solo" if msg.get("mode") == "solo" else "coop"
-            stage = max(1, min(3, int(msg.get("stage", 1))))
+            stage = max(1, min(20, int(msg.get("stage", 1))))
             conn.name = str(msg.get("name") or "李逍遥")[:16]
             code = self.alloc_code()
             room = Room(code=code, mode=mode, stage=stage, host=conn)
@@ -214,7 +214,7 @@ class RoomHub:
         if t == "quick_match":
             await self.leave_room(conn)
             mode = "solo" if msg.get("mode") == "solo" else "coop"
-            stage = max(1, min(3, int(msg.get("stage", 1))))
+            stage = max(1, min(20, int(msg.get("stage", 1))))
             conn.name = str(msg.get("name") or "蜀山侠客")[:16]
             # Find open room matching mode
             for r in list(self.rooms.values()):
