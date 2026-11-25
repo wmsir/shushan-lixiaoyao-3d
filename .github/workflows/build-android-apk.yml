@@ -1,9 +1,12 @@
-name: Build Android APK (仙剑·锁妖剑台)
+name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -44,7 +47,6 @@ jobs:
         run: npx cap sync android
 
       - name: Prepare Android signing keystore
-        id: keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -59,7 +61,6 @@ jobs:
             echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
             echo "ANDROID_KEY_PASSWORD=${KEY_PASS}" >> "$GITHUB_ENV"
           else
-            # Auto-generate deterministic self-signed release keystore so APK installs directly on Android phones
             keytool -genkeypair -v \
               -keystore "$KS_FILE" \
               -storepass "lixiaoyao2026" \
@@ -80,11 +81,22 @@ jobs:
           ./gradlew assembleRelease assembleDebug --no-daemon
 
       - name: Collect & rename APK deliverables
+        id: meta
         run: |
           mkdir -p apk-out
           cp android/app/build/outputs/apk/release/app-release.apk apk-out/lixiaoyao-3d-release.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk apk-out/lixiaoyao-3d-debug.apk
           ls -lh apk-out
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "tag=v1.1.0-build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
@@ -93,19 +105,20 @@ jobs:
           path: apk-out/*.apk
           retention-days: 30
 
-      - name: Publish GitHub Release on Tag or Manual Dispatch
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Publish GitHub Release with APK
+        if: steps.meta.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('apk-build-{0}', github.run_number) }}
-          name: "仙剑·锁妖剑台 Android APK (${{ github.run_number }})"
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "仙剑·锁妖剑台 Android APK (${{ steps.meta.outputs.tag }})"
           body: |
-            ### 仙剑 · 锁妖剑台 — Android 客户端（Capacitor + Three.js WebGL2）
-            - 原生横屏沉浸锁 + 触觉震动反馈 + 移动端自适应 DPR 60fps
-            - 王者荣耀式悬浮摇杆与物理浮雕技能轮盘
-            - 与网页版 https://fwpt.cn/lixiaoyao/ 跨端同房联机（双人组队刷怪 + 双人 1v1 Solo）
+            ### 仙剑 · 锁妖剑台 — 国漫 3D 仙侠动作游戏（Android 原生 APK）
+            - **国漫 3D 仙侠画风**：李逍遥、镇狱妖王、血甲剑魔精英、浮空仙山剑峰与护山天剑阵
+            - **原生横屏沉浸 + 触觉震动 + 自适应 DPR 60fps**
+            - **王者荣耀式左手悬浮摇杆 + 右手 7 键浮雕技能轮盘**（电脑网页版支持英雄联盟式右键走位+鼠标指哪打哪）
+            - **跨端实时联机**：与网页版 https://fwpt.cn/lixiaoyao/ 跨端同房双人组队刷怪 / 1v1 Solo 单挑
 
-            直接下载下方 `lixiaoyao-3d-release.apk` 到安卓手机安装即可游玩。
+            手机直接下载下方 `lixiaoyao-3d-release.apk` 安装即可开玩。
           files: |
             apk-out/lixiaoyao-3d-release.apk
             apk-out/lixiaoyao-3d-debug.apk

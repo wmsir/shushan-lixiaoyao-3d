@@ -726,23 +726,43 @@ export class CharacterRig {
       mirrorGlow.position.set(0, 0.34, 0.175);
       this.torso.add(mirrorGlow);
 
-      // Sleek Translucent Crimson-Gold Spirit Seal Halos (replaces thick plastic red hoops!)
+      // Sleek Translucent Crimson-Gold Spirit Seal Halos + 3 Floating Orbiting Ancient Demon Rune-Swords (国漫 3D 妖王标志剪影!)
       const haloMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(1.35, 0.38, 0.24),
+        color: new THREE.Color(1.45, 0.42, 0.28),
         transparent: true,
-        opacity: 0.54,
+        opacity: 0.58,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const outerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.014, 8, 40), haloMat);
+      const outerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.76, 0.015, 8, 40), haloMat);
       outerHalo.position.set(0, 0.54, -0.32);
       this.torso.add(outerHalo);
       this.floatingOrbitals.push(outerHalo);
 
-      const innerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.01, 8, 32), haloMat);
+      const innerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.011, 8, 32), haloMat);
       innerHalo.position.set(0, 0.54, -0.3);
       this.torso.add(innerHalo);
       this.floatingOrbitals.push(innerHalo);
+
+      // 3 Floating Orbiting Demon Swords in crescent array behind Boss shoulders
+      const demonBladeMat = new THREE.MeshStandardMaterial({
+        color: '#2b1820',
+        emissive: new THREE.Color('#d92c38'),
+        emissiveIntensity: 0.85,
+        roughness: 0.25,
+        metalness: 0.88,
+      });
+      for (const ang of [-0.72, 0, 0.72]) {
+        const sw = new THREE.Group();
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.036, 0.78, 4), demonBladeMat);
+        b.scale.set(1, 1, 0.32);
+        const g = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.028, 0.035), palette.bronze);
+        g.position.y = -0.36;
+        sw.add(b, g);
+        sw.position.set(Math.sin(ang) * 0.68, 0.72 + Math.cos(ang) * 0.26, -0.36);
+        sw.rotation.z = -ang * 0.85;
+        this.torso.add(sw);
+      }
     }
 
     // Seamless Limbs + Joint Bridge Caps + Articulated Sculpted Hands
@@ -888,19 +908,19 @@ export class CharacterRig {
           emissive: new THREE.Color('#1c0e08'),
           emissiveIntensity: 0.12,
         }),
-        // Photorealistic portrait albedo with subtle frontal warmth lift so face never sits darker than neck!
+        // 3D Donghua Anime Luminous Porcelain Face Material (silky cel sheen + crisp rim lift)
         faceMat: new THREE.MeshPhysicalMaterial({
           map: assets.heroFaceTex,
           normalMap: assets.heroFaceNrm,
-          normalScale: new THREE.Vector2(0.4, 0.4),
-          color: new THREE.Color('#fff5ed'),
-          roughness: 0.58,
+          normalScale: new THREE.Vector2(0.24, 0.24),
+          color: new THREE.Color('#fff8f2'),
+          roughness: 0.44,
           metalness: 0.0,
-          sheen: 0.26,
-          sheenColor: new THREE.Color('#e6a284'),
-          sheenRoughness: 0.64,
-          emissive: new THREE.Color('#2d1a10'),
-          emissiveIntensity: 0.24,
+          sheen: 0.42,
+          sheenColor: new THREE.Color('#bfe8ff'),
+          sheenRoughness: 0.5,
+          emissive: new THREE.Color('#38241a'),
+          emissiveIntensity: 0.34,
         }),
         hair: new THREE.MeshStandardMaterial({
           map: assets.hairDark.map,
@@ -1215,18 +1235,18 @@ export class CharacterRig {
         emissive: new THREE.Color('#120e12'),
         emissiveIntensity: 0.12,
       }),
-      // Photorealistic scarred warlord portrait albedo lifted cleanly so scars & brows read in dark moonlight!
+      // 3D Donghua Demon Sovereign Face Material (luminous stylized cel-rim contrast so demon crest & blazing eyes pop!)
       faceMat: new THREE.MeshPhysicalMaterial({
         map: assets.bossFaceTex,
         normalMap: assets.bossFaceNrm,
-        normalScale: new THREE.Vector2(0.75, 0.75),
-        color: new THREE.Color('#ece4e0'),
-        roughness: 0.58,
+        normalScale: new THREE.Vector2(0.35, 0.35),
+        color: new THREE.Color('#f7eee8'),
+        roughness: 0.46,
         metalness: 0.02,
-        sheen: 0.22,
-        sheenColor: new THREE.Color('#bfa6a0'),
-        emissive: new THREE.Color('#30221e'),
-        emissiveIntensity: 0.32,
+        sheen: 0.42,
+        sheenColor: new THREE.Color('#ff8a66'),
+        emissive: new THREE.Color('#422620'),
+        emissiveIntensity: 0.42,
       }),
       hair: new THREE.MeshStandardMaterial({
         map: assets.hairSilver.map,
@@ -1265,6 +1285,18 @@ export class CharacterRig {
     skull.position.y = 0.145;
     skull.castShadow = true;
     this.head.add(skull);
+
+    // Subtle 3D Donghua Anime Inked Silhouette Contour Shell around Hero / Ally / Boss heads!
+    if (archetype === 'xiaoyao' || archetype === 'ally' || archetype === 'boss') {
+      const inkMat = new THREE.MeshBasicMaterial({
+        color: archetype === 'boss' ? '#1c090e' : '#121b2b',
+        side: THREE.BackSide,
+      });
+      const outline = new THREE.Mesh(headGeo, inkMat);
+      outline.scale.setScalar(headScale * 1.036);
+      outline.position.y = 0.145;
+      this.head.add(outline);
+    }
 
     for (const s of [-1, 1]) {
       const ear = new THREE.Mesh(assets.ear, palette.skin);
@@ -1565,7 +1597,22 @@ export class CharacterRig {
       tip.rotation.y = Math.PI / 4;
       tip.position.y = 1.17;
 
-      g.add(grip, pommel, tassel, guard, guardCore, blade, fuller, tip);
+      // Subtle Donghua Anime Jade-Cyan Spirit Sword Aura Sheath
+      const auraSheath = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.024, 0.038, 1.06, 6, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: archetype === 'ally' ? new THREE.Color(0.45, 1.9, 1.55) : new THREE.Color(0.42, 1.75, 2.05),
+          transparent: true,
+          opacity: 0.22,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
+      );
+      auraSheath.scale.set(1.0, 1.0, 0.45);
+      auraSheath.position.y = 0.62;
+
+      g.add(grip, pommel, tassel, guard, guardCore, blade, fuller, tip, auraSheath);
       this.weaponTipLocal.set(0, 1.28, 0);
     } else if (archetype === 'bladesman') {
       const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.021, 0.34, 8), palette.leather);

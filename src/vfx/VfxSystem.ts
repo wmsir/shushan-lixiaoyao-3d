@@ -526,6 +526,24 @@ export class VfxSystem {
     this.spawnShockRing(pos, new THREE.Color(0.85, 2.05, 2.25), 0.2, 2.4, 0.26);
   }
 
+  /** League-of-Legends style emerald-jade right-click move ripple marker on the stone courtyard! */
+  spawnMoveMarker(pos: THREE.Vector3): void {
+    this.spawnShockRing(
+      new THREE.Vector3(pos.x, 0.06, pos.z),
+      new THREE.Color(0.35, 2.15, 1.35),
+      0.85,
+      0.14,
+      0.34,
+    );
+    this.spawnShockRing(
+      new THREE.Vector3(pos.x, 0.065, pos.z),
+      new THREE.Color(0.75, 2.3, 1.65),
+      0.16,
+      0.72,
+      0.28,
+    );
+  }
+
   /** Spawns an alpha-feathered glowing shockwave ripple (never an opaque hard-edged donut). */
   spawnShockRing(pos: THREE.Vector3, color: THREE.Color, startScale: number, endScale: number, duration = 0.38): void {
     const mat = new THREE.ShaderMaterial({

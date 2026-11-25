@@ -26,6 +26,10 @@ export class GameInput {
   readonly keys = new Set<string>();
   readonly pressed = new Set<string>();
   readonly mouseNdc = { x: 0, y: 0 };
+  mouseMoved = false;
+  lolMouseMode = true; // PC default: League-of-Legends RMB move + cursor directional aim!
+  rmbHeld = false;
+  private rmbClickQueued = false;
   touchActive = false;
   readonly touchMove = { x: 0, z: 0 };
   touchBlockHeld = false;
@@ -109,11 +113,28 @@ export class GameInput {
   }
 
   isBlocking(): boolean {
-    return this.keys.has('RMB') || this.keys.has('KeyK') || this.touchBlockHeld;
+    const rmbBlock = !this.lolMouseMode && this.keys.has('RMB');
+    return rmbBlock || this.keys.has('KeyK') || this.keys.has('KeyC') || this.keys.has('MMB') || this.touchBlockHeld;
   }
 
   wasBlockJustPressed(): boolean {
-    return this.pressed.has('RMB') || this.pressed.has('KeyK') || this.pressed.has('TOUCH_BLOCK');
+    const rmbPress = !this.lolMouseMode && this.pressed.has('RMB');
+    return rmbPress || this.pressed.has('KeyK') || this.pressed.has('KeyC') || this.pressed.has('MMB') || this.pressed.has('TOUCH_BLOCK');
+  }
+
+  consumeRmbClick(): boolean {
+    if (this.rmbClickQueued) {
+      this.rmbClickQueued = false;
+      return true;
+    }
+    return false;
+  }
+
+  setLolMouseMode(enabled: boolean): void {
+    this.lolMouseMode = enabled;
+    this.rmbHeld = false;
+    this.rmbClickQueued = false;
+    this.keys.delete('RMB');
   }
 
   updateDebugPanel(extraText: string): void {
@@ -177,6 +198,8 @@ export class GameInput {
     const onClear = (label: string) => () => {
       this.note('[' + label + ']');
       this.keys.clear();
+      this.rmbHeld = false;
+      this.rmbClickQueued = false;
       this.touchBlockHeld = false;
       this.touchMove.x = 0;
       this.touchMove.z = 0;
@@ -184,7 +207,14 @@ export class GameInput {
 
     const onMouseMove = (e: MouseEvent) => {
       if (performance.now() - this.lastTouchTime < 500) return;
-      if (!(e.buttons & 2)) this.keys.delete('RMB');
+      this.mouseMoved = true;
+      if (!(e.buttons & 2)) {
+        this.keys.delete('RMB');
+        this.rmbHeld = false;
+      }
+      if (!(e.buttons & 4)) {
+        this.keys.delete('MMB');
+      }
       const rect = this.canvas.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         this.mouseNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -196,6 +226,12 @@ export class GameInput {
       if (performance.now() - this.lastTouchTime < 500) return;
       const target = e.target as HTMLElement | null;
       if (target && target !== this.canvas) return;
+      this.mouseMoved = true;
+      const rect = this.canvas.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        this.mouseNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouseNdc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      }
       if (e.button === 0) {
         this.pressed.add('LMB');
         this.bufferAction('attack');
@@ -203,14 +239,27 @@ export class GameInput {
       } else if (e.button === 2) {
         this.pressed.add('RMB');
         this.keys.add('RMB');
+        if (this.lolMouseMode) {
+          this.rmbHeld = true;
+          this.rmbClickQueued = true;
+        }
         this.note('↓RMB');
+      } else if (e.button === 1) {
+        e.preventDefault();
+        this.pressed.add('MMB');
+        this.keys.add('MMB');
+        this.note('↓MMB');
       }
     };
 
     const onMouseUp = (e: MouseEvent) => {
       if (e.button === 2) {
         this.keys.delete('RMB');
+        this.rmbHeld = false;
         this.note('↑RMB');
+      } else if (e.button === 1) {
+        this.keys.delete('MMB');
+        this.note('↑MMB');
       }
     };
 

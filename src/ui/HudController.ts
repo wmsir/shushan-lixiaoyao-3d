@@ -17,6 +17,7 @@ export interface HudCallbacks {
   onBackToTitle: () => void;
   onToggleMute: () => boolean;
   onTogglePause: () => void;
+  onToggleLolMode: () => boolean;
   onMpCreate: (mode: 'coop' | 'solo', stage: 1 | 2 | 3) => void;
   onMpJoin: (code: string) => void;
   onMpQuick: (mode: 'coop' | 'solo', stage: 1 | 2 | 3) => void;
@@ -98,6 +99,7 @@ export class HudController {
   private readonly resultStats = this.q('#result-stats');
   private readonly muteBtn = this.q('#btn-mute');
   private readonly wheelToggleBtn = this.q('#btn-wheel-toggle');
+  private readonly lolToggleBtn = this.q('#btn-lol-toggle');
   private readonly mpHudBadge = this.q('#mp-hud-badge');
 
   // Online lobby controls
@@ -149,6 +151,11 @@ export class HudController {
 
     this.wheelToggleBtn.addEventListener('click', () => {
       this.setWheelForced(!this.wheelForced);
+    });
+
+    this.lolToggleBtn.addEventListener('click', () => {
+      const isLol = this.callbacks.onToggleLolMode();
+      this.lolToggleBtn.textContent = isLol ? '联盟鼠标' : '经典WASD';
     });
 
     this.muteBtn.addEventListener('click', () => {

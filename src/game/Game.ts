@@ -68,6 +68,9 @@ export class Game {
   private readonly raycaster = new THREE.Raycaster();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly aimPoint = new THREE.Vector3();
+  private clickMoveTarget: THREE.Vector3 | null = null;
+  private rmbRippleCooldown = 0;
+  private readonly cursorReticle: THREE.Mesh;
   private readonly moveVec = { x: 0, z: 0 };
   private readonly tmpVec = new THREE.Vector3();
   private readonly tmpVec2 = new THREE.Vector3();
@@ -97,6 +100,23 @@ export class Game {
     this.hero.rig.root.position.copy(this.hero.pos);
     this.hero.rig.root.rotation.y = this.hero.yaw;
     this.scene.add(this.hero.rig.root);
+
+    // Subtle League-of-Legends style translucent jade-gold ground cursor aim reticle (desktop only)
+    this.cursorReticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.42, 24),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(0.45, 2.05, 1.65),
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.cursorReticle.rotation.x = -Math.PI / 2;
+    this.cursorReticle.position.y = 0.055;
+    this.cursorReticle.visible = false;
+    this.scene.add(this.cursorReticle);
 
     this.mp = new MultiplayerClient({
       onStatus: (text, connected) => {
@@ -209,6 +229,16 @@ export class Game {
         return next;
       },
       onTogglePause: () => this.togglePause(),
+      onToggleLolMode: () => {
+        const next = !this.input.lolMouseMode;
+        this.input.setLolMouseMode(next);
+        this.clickMoveTarget = null;
+        this.hud.showSubtitle(
+          next ? '已切换【联盟鼠标模式】：右键点地/按住移动，左键/QER 指哪打哪，K/中键弹反' : '已切换【经典键鼠模式】：WASD 移动，右键格挡弹反',
+          2.6,
+        );
+        return next;
+      },
       onMpCreate: (mode, stage) => {
         this.mp.createRoom(mode, stage, '李逍遥').catch(() => {});
       },
@@ -718,6 +748,25 @@ export class Game {
     }
   }
 
+  private updateGroundCursorWorld(): boolean {
+    if (this.input.touchActive || !this.input.mouseMoved || this.mode !== 'playing') {
+      this.cursorReticle.visible = false;
+      return false;
+    }
+    this.raycaster.setFromCamera(
+      new THREE.Vector2(this.input.mouseNdc.x, this.input.mouseNdc.y),
+      this.camera,
+    );
+    if (this.raycaster.ray.intersectPlane(this.groundPlane, this.aimPoint)) {
+      this.cursorReticle.position.set(this.aimPoint.x, 0.055, this.aimPoint.z);
+      this.cursorReticle.rotation.z = this.elapsed * 1.4;
+      this.cursorReticle.visible = this.input.lolMouseMode;
+      return true;
+    }
+    this.cursorReticle.visible = false;
+    return false;
+  }
+
   private getAimYaw(): number {
     // Touch/mobile mode aims at nearest enemy, then stick direction, then current facing
     if (this.input.touchActive) {
@@ -829,6 +878,37 @@ export class Game {
 
     this.input.getMoveVector(this.moveVec);
     const prevPos = this.tmpVec.copy(h.pos);
+    this.rmbRippleCooldown = Math.max(0, this.rmbRippleCooldown - dt);
+
+    // League-of-Legends (英雄联盟) Desktop Right-Click Move + Hold-to-Steer + Ground Aim Reticle!
+    const hasCursorWorld = this.updateGroundCursorWorld();
+    const keyboardOrStickMoving = Math.hypot(this.moveVec.x, this.moveVec.z) > 0.05;
+    if (keyboardOrStickMoving) {
+      this.clickMoveTarget = null;
+    } else if (this.input.lolMouseMode && !this.input.touchActive && hasCursorWorld) {
+      const freshClick = this.input.consumeRmbClick();
+      if (freshClick || this.input.rmbHeld) {
+        if (!this.clickMoveTarget) this.clickMoveTarget = new THREE.Vector3();
+        this.clickMoveTarget.copy(this.aimPoint);
+        this.arena.constrainPosition(this.clickMoveTarget, h.radius);
+        if (freshClick || this.rmbRippleCooldown <= 0) {
+          this.vfx.spawnMoveMarker(this.clickMoveTarget);
+          this.rmbRippleCooldown = 0.36;
+        }
+      }
+    }
+
+    if (this.clickMoveTarget && !keyboardOrStickMoving) {
+      const dx = this.clickMoveTarget.x - h.pos.x;
+      const dz = this.clickMoveTarget.z - h.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 0.28) {
+        this.moveVec.x = dx / dist;
+        this.moveVec.z = dz / dist;
+      } else {
+        this.clickMoveTarget = null;
+      }
+    }
 
     // Highest priority interrupt checks when free or cancelable
     const isFree = h.state === 'idle' || h.state === 'run' || h.state === 'block';
@@ -1336,13 +1416,20 @@ export class Game {
         });
         this.vfx.spawnShockRing(startPos, new THREE.Color(0.5, 2.0, 2.2), 0.2, 1.4, 0.25);
       } else if (h.state === 'skillE') {
-        // 万剑诀: Bagua array + 9 cascading falling 3D spirit swords around target center!
+        // 万剑诀: Bagua array + 9 cascading falling 3D spirit swords around cursor (LoL) or target center!
         const tgt = this.findNearestEnemy(12, h.yaw);
-        const center = tgt
-          ? tgt.pos.clone()
-          : this.peerHero && this.peerHero.isEnemy && !this.peerHero.dead
-            ? this.peerHero.pos.clone()
-            : h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 5.2, 0, Math.cos(h.yaw) * 5.2));
+        let center: THREE.Vector3;
+        if (this.input.lolMouseMode && !this.input.touchActive && this.input.mouseMoved) {
+          const toC = this.aimPoint.clone().sub(h.pos);
+          if (toC.length() > 11.5) toC.setLength(11.5);
+          center = h.pos.clone().add(toC);
+        } else {
+          center = tgt
+            ? tgt.pos.clone()
+            : this.peerHero && this.peerHero.isEnemy && !this.peerHero.dead
+              ? this.peerHero.pos.clone()
+              : h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 5.2, 0, Math.cos(h.yaw) * 5.2));
+        }
         this.arena.constrainPosition(center, 1.0);
         this.mp.sendAction('skillE', { x: center.x, z: center.z });
         this.vfx.spawnBaguaArray({
@@ -1377,11 +1464,18 @@ export class Game {
         }
       } else if (h.state === 'skillR') {
         const tgt = this.findNearestEnemy(15);
-        const center = tgt
-          ? tgt.pos.clone()
-          : this.peerHero && this.peerHero.isEnemy && !this.peerHero.dead
-            ? this.peerHero.pos.clone()
-            : h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 5.5, 0, Math.cos(h.yaw) * 5.5));
+        let center: THREE.Vector3;
+        if (this.input.lolMouseMode && !this.input.touchActive && this.input.mouseMoved) {
+          const toC = this.aimPoint.clone().sub(h.pos);
+          if (toC.length() > 12.5) toC.setLength(12.5);
+          center = h.pos.clone().add(toC);
+        } else {
+          center = tgt
+            ? tgt.pos.clone()
+            : this.peerHero && this.peerHero.isEnemy && !this.peerHero.dead
+              ? this.peerHero.pos.clone()
+              : h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 5.5, 0, Math.cos(h.yaw) * 5.5));
+        }
         this.arena.constrainPosition(center, 1.2);
         this.mp.sendAction('skillR', { x: center.x, z: center.z });
         this.vfx.spawnBaguaArray({

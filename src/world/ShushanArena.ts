@@ -45,6 +45,9 @@ export class ShushanArena {
   private readonly fireflyPoints: THREE.Points;
   private readonly fireflyData: Float32Array;
   private readonly mistPlanes: THREE.Mesh[] = [];
+  private readonly floatingPeaks: THREE.Group[] = [];
+  private readonly skySwordRing = new THREE.Group();
+  private readonly moonbeams: THREE.Mesh[] = [];
   private readonly lanterns: LanternRef[] = [];
   private readonly occludables: OccludableProp[] = [];
   private readonly rng: () => number;
@@ -225,6 +228,11 @@ export class ShushanArena {
 
     // 10. Low Drifting Cliff Mist Planes
     this.buildDriftingMist();
+
+    // 11. Chinese 3D Donghua Immortal Shushan Scenery: Floating Sword-Peaks, Orbiting Celestial Sword Array & Volumetric Moonbeams!
+    this.buildFloatingImmortalPeaks(carvedTex, lacquerTex);
+    this.buildSkySwordArray();
+    this.buildMoonbeamShafts();
   }
 
   private buildShushanArchway(
@@ -861,6 +869,191 @@ export class ShushanArena {
     }
   }
 
+  private buildFloatingImmortalPeaks(carvedTex: THREE.CanvasTexture, lacquerTex: THREE.CanvasTexture): void {
+    const rockMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#2c445c',
+      emissive: new THREE.Color('#0c2030'),
+      emissiveIntensity: 0.38,
+      roughness: 0.84,
+      metalness: 0.08,
+      flatShading: true,
+    });
+    const capMat = new THREE.MeshStandardMaterial({
+      color: '#1f5e54',
+      emissive: new THREE.Color('#0d302f'),
+      emissiveIntensity: 0.28,
+      roughness: 0.82,
+    });
+    const roofMat = new THREE.MeshStandardMaterial({
+      map: lacquerTex,
+      color: '#2c5a6c',
+      emissive: new THREE.Color('#143544'),
+      emissiveIntensity: 0.45,
+      roughness: 0.55,
+      metalness: 0.3,
+    });
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: '#e8c46e',
+      emissive: new THREE.Color('#7a5216'),
+      emissiveIntensity: 0.62,
+      roughness: 0.3,
+      metalness: 0.85,
+    });
+    const waterfallMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.45, 0.96, 1.08),
+      transparent: true,
+      opacity: 0.34,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const specs: Array<[number, number, number, number, boolean]> = [
+      [-34, 8.5, -36, 1.35, true],
+      [36, 11.2, -34, 1.5, true],
+      [-46, 5.0, -8, 1.15, false],
+      [48, 7.2, -4, 1.25, true],
+      [-26, 13.5, -52, 1.65, true],
+      [24, 14.5, -54, 1.55, false],
+    ];
+
+    for (let i = 0; i < specs.length; i++) {
+      const [px, py, pz, sc, hasPavilion] = specs[i];
+      const peak = new THREE.Group();
+      peak.position.set(px, py, pz);
+      peak.scale.setScalar(sc);
+      peak.userData.baseY = py;
+      peak.userData.phase = i * 1.15;
+
+      const body = new THREE.Mesh(new THREE.ConeGeometry(4.6, 14.5, 7), rockMat);
+      body.rotation.x = Math.PI;
+      body.position.y = -6.8;
+      peak.add(body);
+
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.7, 1.1, 7), capMat);
+      crown.position.y = 0.5;
+      peak.add(crown);
+
+      const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 16), waterfallMat);
+      wf.position.set(1.6, -8.5, 2.2);
+      wf.lookAt(0, -8.5, 0);
+      peak.add(wf);
+
+      if (hasPavilion) {
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 1.4, 6), goldMat);
+        base.position.y = 1.7;
+        const roof1 = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.35, 6), roofMat);
+        roof1.position.y = 3.0;
+        const roof2 = new THREE.Mesh(new THREE.ConeGeometry(1.85, 1.1, 6), roofMat);
+        roof2.position.y = 4.1;
+        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.14, 1.2, 6), goldMat);
+        spire.position.y = 5.0;
+        const lamp = new THREE.Mesh(
+          new THREE.SphereGeometry(0.32, 8, 8),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(1.45, 1.18, 0.55) }),
+        );
+        lamp.position.y = 2.1;
+        peak.add(base, roof1, roof2, spire, lamp);
+      }
+
+      this.group.add(peak);
+      this.floatingPeaks.push(peak);
+    }
+  }
+
+  private buildSkySwordArray(): void {
+    this.skySwordRing.position.set(0, 17.5, -24);
+    this.skySwordRing.rotation.x = 0.22;
+    const bladeMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.55, 1.65, 1.85),
+      transparent: true,
+      opacity: 0.62,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const guardMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.8, 1.45, 0.55),
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const ringHalo = new THREE.Mesh(
+      new THREE.TorusGeometry(13.5, 0.08, 8, 64),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(0.42, 1.35, 1.55),
+        transparent: true,
+        opacity: 0.34,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ringHalo.rotation.x = Math.PI / 2;
+    this.skySwordRing.add(ringHalo);
+
+    const bladeGeo = new THREE.CylinderGeometry(0.06, 0.24, 5.2, 4);
+    const guardGeo = new THREE.BoxGeometry(1.45, 0.22, 0.28);
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * Math.PI * 2;
+      const sw = new THREE.Group();
+      const b = new THREE.Mesh(bladeGeo, bladeMat);
+      const gd = new THREE.Mesh(guardGeo, guardMat);
+      gd.position.y = 2.65;
+      sw.add(b, gd);
+      sw.position.set(Math.cos(ang) * 13.5, Math.sin(ang * 2) * 0.65, Math.sin(ang) * 13.5);
+      sw.rotation.set(0, -ang, 0.14);
+      this.skySwordRing.add(sw);
+    }
+    this.group.add(this.skySwordRing);
+  }
+
+  private buildMoonbeamShafts(): void {
+    const beamMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        void main() {
+          float horiz = sin(vUv.x * 3.14159265);
+          float vert = smoothstep(0.0, 0.28, vUv.y) * smoothstep(1.0, 0.18, vUv.y);
+          float shimmer = 0.8 + 0.2 * sin(uTime * 1.1 + vUv.x * 6.0);
+          float alpha = pow(horiz, 2.2) * vert * shimmer * 0.13;
+          vec3 col = mix(vec3(0.45, 0.82, 1.0), vec3(0.95, 0.86, 0.62), vUv.y * 0.35);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const beamGeo = new THREE.PlaneGeometry(5.8, 28);
+    const spots: Array<[number, number, number]> = [
+      [-9.5, 11.5, -13.5],
+      [0.0, 12.0, -15.0],
+      [10.2, 11.5, -12.5],
+    ];
+    for (const [x, y, z] of spots) {
+      const m = new THREE.Mesh(beamGeo, beamMat);
+      m.position.set(x, y, z);
+      m.rotation.set(0.18, 0.12, -0.26);
+      this.group.add(m);
+      this.moonbeams.push(m);
+    }
+  }
+
   setBossMode(active: boolean): void {
     this.setStageTheme(active ? 3 : 1);
   }
@@ -944,6 +1137,16 @@ export class ShushanArena {
       const dist = m.userData.dist as number;
       m.position.x = Math.cos(ang) * dist;
       m.position.z = Math.sin(ang) * dist;
+    }
+
+    for (const pk of this.floatingPeaks) {
+      const baseY = pk.userData.baseY as number;
+      const ph = pk.userData.phase as number;
+      pk.position.y = baseY + Math.sin(elapsed * 0.55 + ph) * 0.65;
+    }
+    this.skySwordRing.rotation.y = elapsed * 0.14;
+    if (this.moonbeams.length > 0) {
+      (this.moonbeams[0].material as THREE.ShaderMaterial).uniforms.uTime.value = elapsed;
     }
 
     const pAttr = this.petalPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
