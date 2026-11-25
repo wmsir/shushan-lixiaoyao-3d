@@ -1004,15 +1004,24 @@ body,
   pointer-events: none;
 }
 
+.util-btn.active-mode {
+  border-color: rgba(76, 217, 208, 0.85);
+  background: linear-gradient(180deg, rgba(22, 68, 78, 0.9), rgba(10, 36, 44, 0.94));
+  color: #a8fff5;
+  box-shadow: 0 0 12px rgba(76, 217, 208, 0.32);
+}
+
 .bottom-hint {
   position: fixed;
   left: 16px;
   bottom: 14px;
-  padding: 5px 12px;
+  max-width: calc(50vw - 220px);
+  padding: 5px 10px;
   border-radius: 6px;
-  background: rgba(6, 12, 20, 0.78);
+  background: rgba(6, 12, 20, 0.8);
   border: 1px solid rgba(223, 192, 117, 0.22);
   font-size: 11px;
+  line-height: 1.4;
   color: #d6e4f2;
   backdrop-filter: blur(4px);
 }

@@ -872,51 +872,77 @@ export class ShushanArena {
   private buildFloatingImmortalPeaks(carvedTex: THREE.CanvasTexture, lacquerTex: THREE.CanvasTexture): void {
     const rockMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
-      color: '#2c445c',
-      emissive: new THREE.Color('#0c2030'),
-      emissiveIntensity: 0.38,
-      roughness: 0.84,
-      metalness: 0.08,
-      flatShading: true,
+      color: '#34526e',
+      emissive: new THREE.Color('#10263a'),
+      emissiveIntensity: 0.42,
+      roughness: 0.86,
+      metalness: 0.06,
     });
     const capMat = new THREE.MeshStandardMaterial({
-      color: '#1f5e54',
-      emissive: new THREE.Color('#0d302f'),
-      emissiveIntensity: 0.28,
-      roughness: 0.82,
+      color: '#256c62',
+      emissive: new THREE.Color('#0f3836'),
+      emissiveIntensity: 0.32,
+      roughness: 0.84,
     });
     const roofMat = new THREE.MeshStandardMaterial({
       map: lacquerTex,
-      color: '#2c5a6c',
-      emissive: new THREE.Color('#143544'),
-      emissiveIntensity: 0.45,
-      roughness: 0.55,
-      metalness: 0.3,
+      color: '#32687e',
+      emissive: new THREE.Color('#184052'),
+      emissiveIntensity: 0.5,
+      roughness: 0.52,
+      metalness: 0.32,
     });
     const goldMat = new THREE.MeshStandardMaterial({
-      color: '#e8c46e',
-      emissive: new THREE.Color('#7a5216'),
-      emissiveIntensity: 0.62,
-      roughness: 0.3,
-      metalness: 0.85,
+      color: '#ecc974',
+      emissive: new THREE.Color('#8a5c18'),
+      emissiveIntensity: 0.68,
+      roughness: 0.28,
+      metalness: 0.86,
     });
-    const waterfallMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0.45, 0.96, 1.08),
+    // Soft alpha-feathered Donghua mist waterfall shader (replaces hard flat teal polygon!)
+    const waterfallMat = new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.34,
-      blending: THREE.AdditiveBlending,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          float edge = sin(vUv.x * 3.14159265);
+          float vert = smoothstep(0.0, 0.35, vUv.y) * smoothstep(1.0, 0.08, vUv.y);
+          float alpha = pow(edge, 2.0) * vert * 0.38;
+          vec3 col = mix(vec3(0.45, 0.88, 1.0), vec3(0.85, 0.96, 1.0), vUv.y);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
     });
 
     const specs: Array<[number, number, number, number, boolean]> = [
-      [-34, 8.5, -36, 1.35, true],
-      [36, 11.2, -34, 1.5, true],
-      [-46, 5.0, -8, 1.15, false],
-      [48, 7.2, -4, 1.25, true],
-      [-26, 13.5, -52, 1.65, true],
-      [24, 14.5, -54, 1.55, false],
+      [-28, 5.2, -34, 1.18, true],
+      [29, 6.2, -33, 1.28, true],
+      [-40, 4.2, -16, 1.05, false],
+      [41, 5.4, -14, 1.12, true],
+      [-19, 8.2, -46, 1.38, true],
+      [19, 8.8, -48, 1.32, false],
     ];
+
+    // Smoothly sculpted organic tapering floating-island geometry (14 radial segments!)
+    const islandGeo = new THREE.ConeGeometry(4.4, 13.5, 14, 4);
+    const iPos = islandGeo.attributes.position as THREE.BufferAttribute;
+    for (let k = 0; k < iPos.count; k++) {
+      const ix = iPos.getX(k);
+      const iy = iPos.getY(k);
+      const iz = iPos.getZ(k);
+      const ang = Math.atan2(iz, ix);
+      const crag = 1.0 + 0.14 * Math.sin(ang * 3.0 + iy * 0.4) + 0.08 * Math.cos(ang * 5.0 - iy * 0.3);
+      iPos.setX(k, ix * crag);
+      iPos.setZ(k, iz * crag);
+    }
+    islandGeo.computeVertexNormals();
 
     for (let i = 0; i < specs.length; i++) {
       const [px, py, pz, sc, hasPavilion] = specs[i];
@@ -926,18 +952,18 @@ export class ShushanArena {
       peak.userData.baseY = py;
       peak.userData.phase = i * 1.15;
 
-      const body = new THREE.Mesh(new THREE.ConeGeometry(4.6, 14.5, 7), rockMat);
+      const body = new THREE.Mesh(islandGeo, rockMat);
       body.rotation.x = Math.PI;
-      body.position.y = -6.8;
+      body.position.y = -6.4;
       peak.add(body);
 
-      const crown = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.7, 1.1, 7), capMat);
-      crown.position.y = 0.5;
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.5, 1.0, 14), capMat);
+      crown.position.y = 0.45;
       peak.add(crown);
 
-      const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 16), waterfallMat);
-      wf.position.set(1.6, -8.5, 2.2);
-      wf.lookAt(0, -8.5, 0);
+      const wf = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 15), waterfallMat);
+      wf.position.set(1.5, -7.8, 2.0);
+      wf.lookAt(0, -7.8, 0);
       peak.add(wf);
 
       if (hasPavilion) {
@@ -963,8 +989,8 @@ export class ShushanArena {
   }
 
   private buildSkySwordArray(): void {
-    this.skySwordRing.position.set(0, 17.5, -24);
-    this.skySwordRing.rotation.x = 0.22;
+    this.skySwordRing.position.set(0, 11.2, -23);
+    this.skySwordRing.rotation.x = 0.18;
     const bladeMat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(0.55, 1.65, 1.85),
       transparent: true,

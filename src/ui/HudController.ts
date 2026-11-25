@@ -156,6 +156,7 @@ export class HudController {
     this.lolToggleBtn.addEventListener('click', () => {
       const isLol = this.callbacks.onToggleLolMode();
       this.lolToggleBtn.textContent = isLol ? '联盟鼠标' : '经典WASD';
+      this.lolToggleBtn.classList.toggle('active-mode', isLol);
     });
 
     this.muteBtn.addEventListener('click', () => {

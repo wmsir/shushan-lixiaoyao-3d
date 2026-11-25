@@ -540,6 +540,16 @@ export class CharacterRig {
     chest.receiveShadow = true;
     this.torso.add(chest);
 
+    // Subtle 3D Donghua Anime Silhouette Contour Outline on Hero/Ally/Elite/Boss Torso!
+    if (isHeroLike || archetype === 'boss' || archetype === 'elite') {
+      const torsoInk = new THREE.Mesh(
+        archetype === 'boss' || archetype === 'elite' ? assets.torsoBoss : assets.torsoHero,
+        new THREE.MeshBasicMaterial({ color: archetype === 'boss' ? '#1c080c' : '#0f1a2b', side: THREE.BackSide }),
+      );
+      torsoInk.scale.setScalar(1.045);
+      this.torso.add(torsoInk);
+    }
+
     const collarL = new THREE.Mesh(assets.collarStrip, palette.trim);
     collarL.position.set(-0.042, 0.34, 0.16);
     collarL.rotation.z = 0.38;
@@ -598,18 +608,19 @@ export class CharacterRig {
       outerCollar.position.set(0, 0.525, 0.015);
       this.torso.add(outerCollar);
     } else if (archetype === 'boss' || archetype === 'elite' || archetype === 'bladesman') {
+      // Lowered anatomical iron gorget (leaves warrior chin & mouth 100% uncovered!)
       const gorget = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.095, 0.132, 0.11, 16),
+        new THREE.CylinderGeometry(0.088, 0.125, 0.072, 16),
         palette.armor,
       );
-      gorget.position.set(0, 0.545, 0.01);
+      gorget.position.set(0, 0.506, 0.01);
       this.torso.add(gorget);
       const gorgetTrim = new THREE.Mesh(
-        new THREE.TorusGeometry(0.098, 0.014, 8, 20),
+        new THREE.TorusGeometry(0.09, 0.012, 8, 20),
         palette.bronze,
       );
       gorgetTrim.rotation.x = Math.PI / 2 + 0.1;
-      gorgetTrim.position.set(0, 0.59, 0.012);
+      gorgetTrim.position.set(0, 0.54, 0.012);
       this.torso.add(gorgetTrim);
     }
 
@@ -744,23 +755,38 @@ export class CharacterRig {
       this.torso.add(innerHalo);
       this.floatingOrbitals.push(innerHalo);
 
-      // 3 Floating Orbiting Demon Swords in crescent array behind Boss shoulders
-      const demonBladeMat = new THREE.MeshStandardMaterial({
-        color: '#2b1820',
-        emissive: new THREE.Color('#d92c38'),
-        emissiveIntensity: 0.85,
-        roughness: 0.25,
+      // 3 Ornate Forged Damascus Floating Demon Rune-Swords behind Boss shoulders (beveled steel + crimson fuller + winged bronze crossguard!)
+      const demonSteelMat = new THREE.MeshStandardMaterial({
+        map: assets.steelPbr.map,
+        color: '#c8cfd8',
+        emissive: new THREE.Color('#3b0c14'),
+        emissiveIntensity: 0.35,
+        roughness: 0.24,
         metalness: 0.88,
       });
-      for (const ang of [-0.72, 0, 0.72]) {
+      const demonFullerMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.9, 0.32, 0.36) });
+      for (const ang of [-0.78, 0, 0.78]) {
         const sw = new THREE.Group();
-        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.036, 0.78, 4), demonBladeMat);
-        b.scale.set(1, 1, 0.32);
-        const g = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.028, 0.035), palette.bronze);
-        g.position.y = -0.36;
-        sw.add(b, g);
-        sw.position.set(Math.sin(ang) * 0.68, 0.72 + Math.cos(ang) * 0.26, -0.36);
-        sw.rotation.z = -ang * 0.85;
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.044, 0.86, 4), demonSteelMat);
+        b.scale.set(1, 1, 0.3);
+        b.rotation.y = Math.PI / 4;
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.18, 4), demonSteelMat);
+        tip.scale.set(1, 1, 0.3);
+        tip.rotation.y = Math.PI / 4;
+        tip.position.y = 0.52;
+        const fuller = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.012, 0.76, 4), demonFullerMat);
+        fuller.scale.set(1, 1, 0.6);
+        fuller.rotation.y = Math.PI / 4;
+        const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.026, 0.26, 6), palette.bronze);
+        guard.rotation.z = Math.PI / 2;
+        guard.position.y = -0.42;
+        const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.016, 0.18, 6), palette.leather);
+        hilt.position.y = -0.52;
+        const pommel = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.007, 6, 12), palette.bronze);
+        pommel.position.y = -0.63;
+        sw.add(b, tip, fuller, guard, hilt, pommel);
+        sw.position.set(Math.sin(ang) * 0.72, 0.76 + Math.cos(ang) * 0.26, -0.38);
+        sw.rotation.z = -ang * 0.82;
         this.torso.add(sw);
       }
     }
@@ -1286,14 +1312,14 @@ export class CharacterRig {
     skull.castShadow = true;
     this.head.add(skull);
 
-    // Subtle 3D Donghua Anime Inked Silhouette Contour Shell around Hero / Ally / Boss heads!
-    if (archetype === 'xiaoyao' || archetype === 'ally' || archetype === 'boss') {
+    // Crisp 3D Donghua Anime Inked Silhouette Contour Shell around Hero / Ally / Elite / Boss heads!
+    if (archetype === 'xiaoyao' || archetype === 'ally' || archetype === 'elite' || archetype === 'boss') {
       const inkMat = new THREE.MeshBasicMaterial({
-        color: archetype === 'boss' ? '#1c090e' : '#121b2b',
+        color: archetype === 'boss' || archetype === 'elite' ? '#1c080c' : '#0f1a2b',
         side: THREE.BackSide,
       });
       const outline = new THREE.Mesh(headGeo, inkMat);
-      outline.scale.setScalar(headScale * 1.036);
+      outline.scale.setScalar(headScale * 1.055);
       outline.position.y = 0.145;
       this.head.add(outline);
     }

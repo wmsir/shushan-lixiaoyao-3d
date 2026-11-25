@@ -19,9 +19,10 @@ interface CutsceneState {
  * - Clamps camera Y above terrain height
  */
 export class CameraRig {
-  private readonly baseOffset = new THREE.Vector3(0, 10.6, 12.6);
-  private readonly currentPos = new THREE.Vector3(0, 10.6, 12.6);
-  private readonly currentLook = new THREE.Vector3(0, 1.1, 0);
+  // Cinematic 3D Donghua action camera angle (~22.6 deg pitch): crisp floor combat clarity + Shushan sky/peaks/sword-array framing!
+  private readonly baseOffset = new THREE.Vector3(0, 7.6, 13.8);
+  private readonly currentPos = new THREE.Vector3(0, 7.6, 13.8);
+  private readonly currentLook = new THREE.Vector3(0, 1.85, 0);
   private readonly targetLook = new THREE.Vector3();
   private readonly targetPos = new THREE.Vector3();
 
@@ -50,7 +51,7 @@ export class CameraRig {
   }
 
   snapTo(heroPos: THREE.Vector3): void {
-    this.currentLook.set(heroPos.x, 1.15, heroPos.z);
+    this.currentLook.set(heroPos.x, 1.85, heroPos.z);
     this.currentPos.copy(this.currentLook).addScaledVector(this.baseOffset, this.zoomFactor);
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLook);
@@ -86,11 +87,11 @@ export class CameraRig {
     this.camera.lookAt(this.currentLook);
   }
 
-  /** Close-up photorealistic showcase framing Li Xiaoyao & Demon Sovereign Boss cleanly from front 3/4. */
+  /** Wide Donghua 3D full-cast showcase framing all 4 heroes/bosses + Li Xiaoyao's full sword & jade aura cleanly! */
   updateShowcase(heroPos: THREE.Vector3, elapsed: number): void {
-    const a = 0.04 + Math.sin(elapsed * 0.35) * 0.12;
-    this.currentLook.set(heroPos.x, 1.52, heroPos.z - 0.15);
-    this.currentPos.set(heroPos.x + Math.sin(a) * 3.9, 1.72, heroPos.z + Math.cos(a) * 3.9);
+    const a = Math.sin(elapsed * 0.3) * 0.08;
+    this.currentLook.set(heroPos.x, 1.48, heroPos.z - 0.1);
+    this.currentPos.set(heroPos.x + Math.sin(a) * 6.2, 1.82, heroPos.z + Math.cos(a) * 6.2);
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLook);
   }
@@ -102,8 +103,8 @@ export class CameraRig {
     bossPos: THREE.Vector3 | null,
     mouseNdc: { x: number; y: number },
   ): void {
-    // Compute exact desired gameplay look & position
-    this.targetLook.set(heroPos.x, 1.15, heroPos.z);
+    // Compute exact desired gameplay look & position (elevated lookY reveals Shushan archway, floating peaks & sky sword array!)
+    this.targetLook.set(heroPos.x, 1.85, heroPos.z);
     if (bossPos) {
       // Leash focus at most 3.0m toward Boss so Li Xiaoyao always stays near center
       const dx = bossPos.x - heroPos.x;
