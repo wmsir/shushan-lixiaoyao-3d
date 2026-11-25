@@ -281,12 +281,12 @@ export class Game {
     this.scene.background = new THREE.Color('#0c1522');
     this.scene.fog = new THREE.FogExp2('#101d2c', 0.0138);
 
-    // Filmic moonlit lighting: crisp cool-silver key + warm torch/lantern counter-fill for realistic fabric & steel contrast
-    const hemi = new THREE.HemisphereLight('#8fb4d8', '#232026', 1.15);
+    // Cinematic live-action 3-point lighting: cool moon key + warm Rembrandt lantern fill + back rim separation
+    const hemi = new THREE.HemisphereLight('#84a4c4', '#1d191d', 0.92);
     this.scene.add(hemi);
 
-    const moonKey = new THREE.DirectionalLight('#d6e6fa', 2.45);
-    moonKey.position.set(-15, 24, -18);
+    const moonKey = new THREE.DirectionalLight('#d6e4f5', 2.55);
+    moonKey.position.set(-14, 22, -16);
     moonKey.castShadow = true;
     moonKey.shadow.mapSize.set(2048, 2048);
     moonKey.shadow.camera.near = 2;
@@ -296,20 +296,26 @@ export class Game {
     moonKey.shadow.camera.right = sc;
     moonKey.shadow.camera.top = sc;
     moonKey.shadow.camera.bottom = -sc;
-    moonKey.shadow.bias = -0.0005;
+    moonKey.shadow.bias = -0.00035;
+    moonKey.shadow.normalBias = 0.028;
     this.scene.add(moonKey);
 
-    // Procedural PMREM studio-moonlight IBL environment so forged Damascus steel, bronze guards & iron armor catch crisp metallic reflections (never crushed pitch-black!)
+    // PMREM studio-moonlight IBL environment so Damascus steel, bronze & wet corneal eyes catch crisp reflections
     const pmrem = new THREE.PMREMGenerator(this.pipeline.renderer);
     const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environment = envTex;
-    this.scene.environmentIntensity = 0.52;
+    this.scene.environmentIntensity = 0.58;
     pmrem.dispose();
 
-    // Warm lantern-bounce front-right key fill so faces, woven silk, leather, and lamellar armor read tactile & realistic
-    const warmFill = new THREE.DirectionalLight('#ffcf9e', 0.92);
-    warmFill.position.set(11, 10, 15);
+    // Warm Rembrandt lantern front-side key (sculpts real human cheekbones, nose bridge, brow shadows & silk folds!)
+    const warmFill = new THREE.DirectionalLight('#ffc084', 1.38);
+    warmFill.position.set(10, 9, 14);
     this.scene.add(warmFill);
+
+    // Subtle cool silver-blue rear rim light to separate dark hair strands, silk brocade & iron armor from night mist
+    const backRim = new THREE.DirectionalLight('#8ab4e6', 0.96);
+    backRim.position.set(4, 11, -16);
+    this.scene.add(backRim);
   }
 
   start(): void {

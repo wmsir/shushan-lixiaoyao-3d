@@ -36,7 +36,7 @@ export class RenderPipeline {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.06;
+    this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -47,9 +47,8 @@ export class RenderPipeline {
     const renderPass = new RenderPass(scene, camera);
     this.composer.addPass(renderPass);
 
-    // Disciplined HDR bloom: higher threshold (1.22) and gentler strength (0.28)
-    // keeps stone, characters, and Boss arrays crisp without white-out blowout
-    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.28, 0.3, 1.22);
+    // Restrained filmic HDR bloom (threshold 1.35, strength 0.18) so human skin, silk & steel stay razor-crisp and never glow plastically
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.18, 0.24, 1.35);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
 

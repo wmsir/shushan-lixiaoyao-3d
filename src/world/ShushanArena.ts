@@ -870,36 +870,38 @@ export class ShushanArena {
   }
 
   private buildFloatingImmortalPeaks(carvedTex: THREE.CanvasTexture, lacquerTex: THREE.CanvasTexture): void {
+    // Natural moonlit slate-granite floating mountain crags (clustered jagged spires, zero cartoon green pancake caps!)
     const rockMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
-      color: '#34526e',
-      emissive: new THREE.Color('#10263a'),
-      emissiveIntensity: 0.42,
-      roughness: 0.86,
-      metalness: 0.06,
+      color: '#2d3f52',
+      emissive: new THREE.Color('#0c1824'),
+      emissiveIntensity: 0.26,
+      roughness: 0.9,
+      metalness: 0.05,
     });
     const capMat = new THREE.MeshStandardMaterial({
-      color: '#256c62',
-      emissive: new THREE.Color('#0f3836'),
-      emissiveIntensity: 0.32,
-      roughness: 0.84,
+      map: carvedTex,
+      color: '#25393d',
+      emissive: new THREE.Color('#0a191c'),
+      emissiveIntensity: 0.18,
+      roughness: 0.92,
     });
     const roofMat = new THREE.MeshStandardMaterial({
       map: lacquerTex,
-      color: '#32687e',
-      emissive: new THREE.Color('#184052'),
-      emissiveIntensity: 0.5,
-      roughness: 0.52,
-      metalness: 0.32,
+      color: '#2a4d5c',
+      emissive: new THREE.Color('#102630'),
+      emissiveIntensity: 0.32,
+      roughness: 0.58,
+      metalness: 0.28,
     });
     const goldMat = new THREE.MeshStandardMaterial({
-      color: '#ecc974',
-      emissive: new THREE.Color('#8a5c18'),
-      emissiveIntensity: 0.68,
-      roughness: 0.28,
-      metalness: 0.86,
+      color: '#c9a962',
+      emissive: new THREE.Color('#5a3d12'),
+      emissiveIntensity: 0.45,
+      roughness: 0.34,
+      metalness: 0.82,
     });
-    // Soft alpha-feathered Donghua mist waterfall shader (replaces hard flat teal polygon!)
+    // Soft alpha-feathered mountain mist waterfall shader
     const waterfallMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -914,35 +916,45 @@ export class ShushanArena {
         void main() {
           float edge = sin(vUv.x * 3.14159265);
           float vert = smoothstep(0.0, 0.35, vUv.y) * smoothstep(1.0, 0.08, vUv.y);
-          float alpha = pow(edge, 2.0) * vert * 0.38;
-          vec3 col = mix(vec3(0.45, 0.88, 1.0), vec3(0.85, 0.96, 1.0), vUv.y);
+          float alpha = pow(edge, 2.0) * vert * 0.24;
+          vec3 col = mix(vec3(0.42, 0.68, 0.82), vec3(0.76, 0.88, 0.96), vUv.y);
           gl_FragColor = vec4(col, alpha);
         }
       `,
     });
 
     const specs: Array<[number, number, number, number, boolean]> = [
-      [-28, 5.2, -34, 1.18, true],
-      [29, 6.2, -33, 1.28, true],
-      [-40, 4.2, -16, 1.05, false],
-      [41, 5.4, -14, 1.12, true],
-      [-19, 8.2, -46, 1.38, true],
-      [19, 8.8, -48, 1.32, false],
+      [-31, 5.2, -38, 1.12, true],
+      [32, 6.2, -37, 1.22, true],
+      [-42, 4.2, -18, 1.0, false],
+      [43, 5.4, -16, 1.08, true],
+      [-21, 8.2, -48, 1.32, true],
+      [21, 8.8, -50, 1.26, false],
     ];
 
-    // Smoothly sculpted organic tapering floating-island geometry (14 radial segments!)
-    const islandGeo = new THREE.ConeGeometry(4.4, 13.5, 14, 4);
-    const iPos = islandGeo.attributes.position as THREE.BufferAttribute;
-    for (let k = 0; k < iPos.count; k++) {
-      const ix = iPos.getX(k);
-      const iy = iPos.getY(k);
-      const iz = iPos.getZ(k);
-      const ang = Math.atan2(iz, ix);
-      const crag = 1.0 + 0.14 * Math.sin(ang * 3.0 + iy * 0.4) + 0.08 * Math.cos(ang * 5.0 - iy * 0.3);
-      iPos.setX(k, ix * crag);
-      iPos.setZ(k, iz * crag);
-    }
-    islandGeo.computeVertexNormals();
+    const makeCragGeo = (rad: number, h: number, seed: number) => {
+      const g = new THREE.ConeGeometry(rad, h, 18, 7);
+      const p = g.attributes.position as THREE.BufferAttribute;
+      for (let k = 0; k < p.count; k++) {
+        const ix = p.getX(k);
+        const iy = p.getY(k);
+        const iz = p.getZ(k);
+        const ang = Math.atan2(iz, ix);
+        const crag =
+          1.0 +
+          0.22 * Math.sin(ang * 3.0 + iy * 0.35 + seed) +
+          0.14 * Math.cos(ang * 5.0 - iy * 0.45 + seed * 1.7) +
+          0.08 * Math.sin(ang * 7.0 + iy * 0.6);
+        p.setX(k, ix * crag);
+        p.setZ(k, iz * crag);
+      }
+      g.computeVertexNormals();
+      return g;
+    };
+
+    const mainCragGeo = makeCragGeo(4.2, 15.5, 0.4);
+    const subCragGeo = makeCragGeo(2.6, 11.2, 2.1);
+    const crestGeo = makeCragGeo(4.1, 3.4, 1.2);
 
     for (let i = 0; i < specs.length; i++) {
       const [px, py, pz, sc, hasPavilion] = specs[i];
@@ -952,18 +964,27 @@ export class ShushanArena {
       peak.userData.baseY = py;
       peak.userData.phase = i * 1.15;
 
-      const body = new THREE.Mesh(islandGeo, rockMat);
+      // Main downward jagged limestone spire + 2 fused asymmetric side crags + sculpted rocky summit
+      const body = new THREE.Mesh(mainCragGeo, rockMat);
       body.rotation.x = Math.PI;
-      body.position.y = -6.4;
+      body.position.y = -7.2;
       peak.add(body);
 
-      const crown = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.5, 1.0, 14), capMat);
-      crown.position.y = 0.45;
-      peak.add(crown);
+      const sub1 = new THREE.Mesh(subCragGeo, rockMat);
+      sub1.rotation.set(Math.PI, 1.1 + i, 0.08);
+      sub1.position.set(-2.3, -4.6, 0.9);
+      const sub2 = new THREE.Mesh(subCragGeo, rockMat);
+      sub2.rotation.set(Math.PI, 2.6 + i, -0.07);
+      sub2.position.set(2.1, -5.2, -0.7);
+      peak.add(sub1, sub2);
 
-      const wf = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 15), waterfallMat);
-      wf.position.set(1.5, -7.8, 2.0);
-      wf.lookAt(0, -7.8, 0);
+      const summit = new THREE.Mesh(crestGeo, capMat);
+      summit.position.y = 1.1;
+      peak.add(summit);
+
+      const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 14), waterfallMat);
+      wf.position.set(1.5, -7.2, 2.0);
+      wf.lookAt(0, -7.2, 0);
       peak.add(wf);
 
       if (hasPavilion) {
