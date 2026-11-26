@@ -8,12 +8,14 @@ import {
 } from '../utils/math';
 import {
   createArchwayPlaqueTexture,
+  createCanyonCliffMaps,
   createCarvedStoneTexture,
   createCourtyardStoneMaps,
   createJadeBridgeDeckMaps,
   createLacquerWoodTexture,
   createShushanSkyDome,
   createSoftParticleTexture,
+  createStreamStoneMaps,
 } from './Materials';
 import skyUrl from '../assets/shushan-sky.jpg';
 
@@ -22,7 +24,7 @@ export type ArenaLayout = 'corridor' | 'arena';
 interface OccludableProp {
   position: THREE.Vector3;
   radius: number;
-  materials: THREE.MeshStandardMaterial[];
+  materials: Array<THREE.MeshStandardMaterial | THREE.MeshBasicMaterial>;
   currentOpacity: number;
 }
 
@@ -42,12 +44,11 @@ interface SpiritBarrierGate {
 }
 
 const ZONE_CENTERS = [0, -42, -84] as const;
-const ZONE_NAMES = ['山门前坪', '八卦剑坪', '锁妖主坛'] as const;
+const ZONE_NAMES = ['云溪山门', '翠竹剑涧', '锁妖绝壁'] as const;
 const ZONE_RADII = [16.5, 16.5, 17.5] as const;
-const BRIDGE_HALF_WIDTH = 4.2;
 const BRIDGE_SPANS = [
-  { zMax: -15, zMin: -27, barrierZ: -15.5 },
-  { zMax: -57, zMin: -69, barrierZ: -57.5 },
+  { zMax: -14.5, zMin: -27.5, barrierZ: -15.5, halfWidth: 5.4 },
+  { zMax: -56.0, zMin: -70.0, barrierZ: -57.2, halfWidth: 4.8 },
 ] as const;
 
 export class ShushanArena {
@@ -75,6 +76,7 @@ export class ShushanArena {
   private readonly rng: () => number;
 
   private readonly archwayGroup = new THREE.Group();
+  private archwayOccludable!: OccludableProp;
   private readonly arenaArchwayCapsules: CapsuleObstacle[] = [];
   private readonly zone0Obstacles: CircleObstacle[] = [];
   private readonly zone1Obstacles: CircleObstacle[] = [];
@@ -87,10 +89,18 @@ export class ShushanArena {
   private readonly zone1Group = new THREE.Group();
   private readonly bridge1Group = new THREE.Group();
   private readonly zone2Group = new THREE.Group();
+  private readonly waterMeshes: THREE.Mesh[] = [];
+  private readonly canyonCliffs: THREE.Object3D[] = [];
   private zone1DoubleOpenCurb!: THREE.Group;
   private zone1SouthOpenCurb!: THREE.Mesh;
   private chevronMat0!: THREE.ShaderMaterial;
   private chevronMat1!: THREE.ShaderMaterial;
+  private riverMat?: THREE.ShaderMaterial;
+  private shallowWaterMat?: THREE.ShaderMaterial;
+  private waterfallMat?: THREE.ShaderMaterial;
+  private plungeFoamMat?: THREE.ShaderMaterial;
+  private bambooMat?: THREE.ShaderMaterial;
+  private bambooLeafMat?: THREE.ShaderMaterial;
   private readonly barriers: SpiritBarrierGate[] = [];
 
   private layout: ArenaLayout = 'arena';
@@ -150,12 +160,12 @@ export class ShushanArena {
     this.zone0FullCurb.castShadow = true;
     this.group.add(this.zone0FullCurb);
 
-    // Open-north curb used in corridor mode so Bridge 0 connects flush at Z = -15 without a stone lip
+    // Open-north curb used in corridor mode so Crossing 0 shallow ford connects flush at Z = -14.5
     this.zone0OpenCurb = new THREE.Mesh(
-      new THREE.TorusGeometry(19.1, 0.36, 10, 44, Math.PI * 2 - 0.50),
+      new THREE.TorusGeometry(19.1, 0.36, 10, 44, Math.PI * 2 - 0.62),
       trimMat,
     );
-    this.zone0OpenCurb.rotation.set(Math.PI / 2, Math.PI / 2 + 0.25, 0);
+    this.zone0OpenCurb.rotation.set(Math.PI / 2, 0, -Math.PI / 2 + 0.31);
     this.zone0OpenCurb.position.y = 0.08;
     this.zone0OpenCurb.receiveShadow = true;
     this.zone0OpenCurb.castShadow = true;
@@ -321,17 +331,23 @@ export class ShushanArena {
       map: lacquerTex,
       roughness: 0.56,
       metalness: 0.12,
+      transparent: true,
+      opacity: 1,
     });
     const stoneBaseMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
       color: '#8897aa',
       roughness: 0.82,
       metalness: 0.06,
+      transparent: true,
+      opacity: 1,
     });
     const roofMat = new THREE.MeshStandardMaterial({
       color: '#1b2b3b',
       roughness: 0.58,
       metalness: 0.2,
+      transparent: true,
+      opacity: 1,
     });
     const goldMat = new THREE.MeshStandardMaterial({
       color: '#d4af5e',
@@ -339,6 +355,8 @@ export class ShushanArena {
       metalness: 0.72,
       emissive: new THREE.Color('#3b2a0b'),
       emissiveIntensity: 0.35,
+      transparent: true,
+      opacity: 1,
     });
     const plaqueMat = new THREE.MeshStandardMaterial({
       map: createArchwayPlaqueTexture(),
@@ -346,6 +364,8 @@ export class ShushanArena {
       metalness: 0.35,
       emissive: new THREE.Color('#402a0d'),
       emissiveIntensity: 0.32,
+      transparent: true,
+      opacity: 1,
     });
 
     // Shared geometries across all 4 archway columns
@@ -418,7 +438,11 @@ export class ShushanArena {
     buildEaves(3.3, 5.56, 4.1);
 
     // Warm crimson-gold hanging lanterns
-    const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.85, 0.9, 0.34) });
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.85, 0.9, 0.34),
+      transparent: true,
+      opacity: 1,
+    });
     const cordGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.7, 6);
     const globeGeo = new THREE.SphereGeometry(0.26, 10, 8);
     for (const lx of [-1.75, 1.75]) {
@@ -432,6 +456,14 @@ export class ShushanArena {
     }
 
     this.group.add(arch);
+
+    this.archwayOccludable = {
+      position: new THREE.Vector3(0, 3.0, -16.6),
+      radius: 5.5,
+      materials: [pillarMat, stoneBaseMat, roofMat, goldMat, plaqueMat, glowMat],
+      currentOpacity: 1,
+    };
+    this.occludables.push(this.archwayOccludable);
 
     this.arenaArchwayCapsules.push(
       { ax: -5.6, az: -16.6, bx: -2.4, bz: -16.6, r: 0.75 },
@@ -597,20 +629,33 @@ export class ShushanArena {
       const lGroup = new THREE.Group();
       lGroup.position.set(lx, 0, lz);
 
-      const ped = new THREE.Mesh(lPedGeo, lanternStoneMat);
+      const lStoneM = lanternStoneMat.clone();
+      lStoneM.transparent = true;
+      lStoneM.opacity = 1;
+      const lBronzeM = lanternBronzeMat.clone();
+      lBronzeM.transparent = true;
+      lBronzeM.opacity = 1;
+      const lRoofM = roofCapMat.clone();
+      lRoofM.transparent = true;
+      lRoofM.opacity = 1;
+      const lFlameM = flameMat.clone();
+      lFlameM.transparent = true;
+      lFlameM.opacity = 1;
+
+      const ped = new THREE.Mesh(lPedGeo, lStoneM);
       ped.position.y = 0.68;
       ped.castShadow = true;
       lGroup.add(ped);
 
-      const rim = new THREE.Mesh(lRimGeo, lanternBronzeMat);
+      const rim = new THREE.Mesh(lRimGeo, lBronzeM);
       rim.position.y = 1.38;
       lGroup.add(rim);
 
-      const flame = new THREE.Mesh(lFlameGeo, flameMat);
+      const flame = new THREE.Mesh(lFlameGeo, lFlameM);
       flame.position.y = 1.62;
       lGroup.add(flame);
 
-      const cap = new THREE.Mesh(lCapGeo, roofCapMat);
+      const cap = new THREE.Mesh(lCapGeo, lRoofM);
       cap.position.y = 2.08;
       cap.castShadow = true;
       lGroup.add(cap);
@@ -624,6 +669,12 @@ export class ShushanArena {
 
       this.group.add(lGroup);
       this.zone0Obstacles.push({ x: lx, z: lz, r: 0.48 });
+      this.occludables.push({
+        position: new THREE.Vector3(lx, 1.35, lz),
+        radius: 1.2,
+        materials: [lStoneM, lBronzeM, lRoofM, lFlameM],
+        currentOpacity: 1,
+      });
     });
   }
 
@@ -663,13 +714,20 @@ export class ShushanArena {
       pine.rotation.y = rotY;
       pine.scale.setScalar(sc);
 
-      const seg1 = new THREE.Mesh(trunk1Geo, barkMat);
+      const pBark = barkMat.clone();
+      pBark.transparent = true;
+      pBark.opacity = 1;
+      const pNeedle = needleMat.clone();
+      pNeedle.transparent = true;
+      pNeedle.opacity = 1;
+
+      const seg1 = new THREE.Mesh(trunk1Geo, pBark);
       seg1.position.set(0, 1.0, 0);
       seg1.rotation.z = 0.16;
       seg1.castShadow = true;
       pine.add(seg1);
 
-      const seg2 = new THREE.Mesh(trunk2Geo, barkMat);
+      const seg2 = new THREE.Mesh(trunk2Geo, pBark);
       seg2.position.set(-0.32, 2.8, 0.12);
       seg2.rotation.z = -0.22;
       seg2.castShadow = true;
@@ -682,7 +740,7 @@ export class ShushanArena {
         [-1.35, 2.85, 0.5, 1.3, 0.45],
       ];
       for (const [px, py, pz, pr, ph] of pads) {
-        const pad = new THREE.Mesh(padGeo, needleMat);
+        const pad = new THREE.Mesh(padGeo, pNeedle);
         pad.scale.set(pr, ph, pr * 0.85);
         pad.position.set(px, py, pz);
         pad.castShadow = true;
@@ -690,6 +748,12 @@ export class ShushanArena {
         pine.add(pad);
       }
       this.group.add(pine);
+      this.occludables.push({
+        position: new THREE.Vector3(tx, 3.0, tz),
+        radius: 2.3 * sc,
+        materials: [pBark, pNeedle],
+        currentOpacity: 1,
+      });
     }
 
     const rockSpots: Array<[number, number, number]> = [
@@ -838,8 +902,8 @@ export class ShushanArena {
       const r = 16.0 + this.rng() * 2.8;
       const gx = Math.cos(ang) * r + (this.rng() - 0.5) * 0.6;
       const gz = Math.sin(ang) * r + (this.rng() - 0.5) * 0.6;
-      // Keep north bridge mouth clear so grass never pokes through Bridge 0 slabs
-      if (gz < -14.2 && Math.abs(gx) < 4.7) continue;
+      // Keep north shallow ford mouth clear so grass never pokes through Crossing 0 slabs
+      if (gz < -13.5 && Math.abs(gx) < 5.9) continue;
       dummy.position.set(gx, 0.0, gz);
       dummy.rotation.set(
         (this.rng() - 0.5) * 0.32,
@@ -1057,8 +1121,8 @@ export class ShushanArena {
       [32, 6.2, -37, 1.22, true],
       [-42, 4.2, -18, 1.0, false],
       [43, 5.4, -16, 1.08, true],
-      [-21, 8.2, -48, 1.32, true],
-      [21, 8.8, -50, 1.26, false],
+      [-27, 9.0, -48, 1.32, true],
+      [27, 9.4, -50, 1.26, false],
     ];
 
     const makeCragGeo = (rad: number, h: number, seed: number) => {
@@ -1216,10 +1280,12 @@ export class ShushanArena {
       `,
     });
     const beamGeo = new THREE.PlaneGeometry(5.8, 28);
+    // Keep all moonbeams strictly outside |x| >= 18m flanking cliff waterfalls (centerBeamCount === 0)
     const spots: Array<[number, number, number]> = [
-      [-9.5, 11.5, -13.5],
-      [0.0, 12.0, -15.0],
-      [10.2, 11.5, -12.5],
+      [-21.5, 12.2, -16.0],
+      [21.5, 12.2, -16.0],
+      [-22.0, 12.4, -63.0],
+      [22.0, 12.4, -63.0],
     ];
     for (const [x, y, z] of spots) {
       const m = new THREE.Mesh(beamGeo, beamMat);
@@ -1296,6 +1362,7 @@ export class ShushanArena {
     trimMat: THREE.MeshStandardMaterial,
   ): void {
     const bridgeMaps = createJadeBridgeDeckMaps();
+    const streamMaps = createStreamStoneMaps();
     const bridgeDeckMat = new THREE.MeshStandardMaterial({
       map: bridgeMaps.map,
       bumpMap: bridgeMaps.bumpMap,
@@ -1303,22 +1370,16 @@ export class ShushanArena {
       roughnessMap: bridgeMaps.roughnessMap,
       roughness: 0.82,
       metalness: 0.08,
-      color: new THREE.Color('#a4c4cf'),
+      color: new THREE.Color('#7f9aa8'),
     });
-    const chainBridgeDeckMat = new THREE.MeshStandardMaterial({
-      map: bridgeMaps.map,
-      bumpMap: bridgeMaps.bumpMap,
-      bumpScale: 0.1,
-      roughnessMap: bridgeMaps.roughnessMap,
-      roughness: 0.86,
-      metalness: 0.12,
-      color: new THREE.Color('#7f8d9c'),
-    });
-    const jadeRailMat = new THREE.MeshStandardMaterial({
-      map: carvedTex,
-      color: '#7da8ad',
-      roughness: 0.56,
-      metalness: 0.14,
+    const streamBedMat = new THREE.MeshStandardMaterial({
+      map: streamMaps.map,
+      bumpMap: streamMaps.bumpMap,
+      bumpScale: 0.12,
+      roughnessMap: streamMaps.roughnessMap,
+      roughness: 0.48,
+      metalness: 0.08,
+      color: new THREE.Color('#5a868d'),
     });
     const bronzeChainMat = new THREE.MeshStandardMaterial({
       color: '#9c7840',
@@ -1331,23 +1392,23 @@ export class ShushanArena {
     this.chevronMat0 = this.createGuideChevronMaterial();
     this.chevronMat1 = this.createGuideChevronMaterial();
 
-    // Bridge 0: 云海玉桥 (Z = -15 .. -27) + Spirit Barrier Gate at Z = -15.5
-    this.buildCorridorBridge({
+    // Continuous Flanking Canyon Cliffs, Bamboo Groves, Flowing Canyon River & Cliff Waterfalls
+    this.buildCanyonScenery(carvedTex);
+
+    // Crossing 0: 碧水浅滩 (Z = -14.5 .. -27.5, halfWidth = 5.4m) + low river-stone barrier at Z = -15.5
+    this.buildShallowFordCrossing({
       target: this.bridge0Group,
       centerZ: -21,
-      barrierZ: -15.5,
-      deckMat: bridgeDeckMat,
-      railMat: jadeRailMat,
+      barrierZ: BRIDGE_SPANS[0].barrierZ,
+      bedMat: streamBedMat,
       trimMat,
       carvedTex,
-      lacquerTex,
+      bronzeMat: bronzeChainMat,
       chevronMat: this.chevronMat0,
-      hasChains: false,
-      chainMat: bronzeChainMat,
     });
     this.corridorGroup.add(this.bridge0Group);
 
-    // Zone 1: 八卦剑坪 (Z = -42)
+    // Zone 1: 翠竹剑涧 (Z = -42)
     this.buildZonePlatform({
       target: this.zone1Group,
       centerZ: -42,
@@ -1364,23 +1425,20 @@ export class ShushanArena {
     });
     this.corridorGroup.add(this.zone1Group);
 
-    // Bridge 1: 锁妖索桥 (Z = -57 .. -69) + Spirit Barrier Gate at Z = -57.5
-    this.buildCorridorBridge({
+    // Crossing 1: 飞瀑虹桥 (Z = -56 .. -70, halfWidth = 4.8m) + low river-stone barrier at Z = -57.2
+    this.buildRainbowArchBridge({
       target: this.bridge1Group,
       centerZ: -63,
-      barrierZ: -57.5,
-      deckMat: chainBridgeDeckMat,
-      railMat: trimMat,
+      barrierZ: BRIDGE_SPANS[1].barrierZ,
+      deckMat: bridgeDeckMat,
       trimMat,
       carvedTex,
-      lacquerTex,
+      bronzeMat: bronzeChainMat,
       chevronMat: this.chevronMat1,
-      hasChains: true,
-      chainMat: bronzeChainMat,
     });
     this.corridorGroup.add(this.bridge1Group);
 
-    // Zone 2: 锁妖主坛 (Z = -84)
+    // Zone 2: 锁妖绝壁 (Z = -84)
     this.buildZonePlatform({
       target: this.zone2Group,
       centerZ: -84,
@@ -1396,6 +1454,366 @@ export class ShushanArena {
       isFinalBossZone: true,
     });
     this.corridorGroup.add(this.zone2Group);
+  }
+
+  private buildCanyonScenery(carvedTex: THREE.CanvasTexture): void {
+    const cliffMaps = createCanyonCliffMaps();
+    const canyonCliffMat = new THREE.MeshStandardMaterial({
+      map: cliffMaps.map,
+      bumpMap: cliffMaps.bumpMap,
+      bumpScale: 0.22,
+      roughnessMap: cliffMaps.roughnessMap,
+      roughness: 0.92,
+      metalness: 0.04,
+      color: new THREE.Color('#6b8896'),
+    });
+    const cliffCrestMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#2c4a48',
+      roughness: 0.9,
+      metalness: 0.03,
+      flatShading: true,
+    });
+
+    // 1. Continuous Animated Flowing Emerald-Turquoise Canyon River (y = -1.65m)
+    this.riverMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorld;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        varying vec3 vWorld;
+
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+
+        void main() {
+          // Scroll rapids toward +Z (downstream)
+          vec2 flowUv = vec2(vWorld.x * 0.12, vWorld.z * 0.09 - uTime * 0.58);
+          float n1 = noise(flowUv * 2.2);
+          float n2 = noise(flowUv * 4.7 + vec2(uTime * 0.14, -uTime * 0.42));
+          float stream = n1 * 0.6 + n2 * 0.4;
+
+          // Swirling wakes near Crossing 1 piers (Z = -63) & waterfall plunge zones
+          float pierWake = exp(-pow((vWorld.z + 63.0) * 0.16, 2.0)) *
+                           (exp(-pow((abs(vWorld.x) - 3.2) * 0.7, 2.0)) * 0.7 + 0.25);
+          float bankFoam = smoothstep(14.5, 22.0, abs(vWorld.x)) * 0.42;
+
+          vec3 deepRiver = vec3(0.045, 0.18, 0.23);
+          vec3 jadeCurrent = vec3(0.11, 0.42, 0.46);
+          vec3 moonSpec = vec3(0.46, 0.80, 0.84);
+          vec3 col = mix(deepRiver, jadeCurrent, smoothstep(0.32, 0.76, stream));
+          float foam = smoothstep(0.66, 0.88, stream + pierWake * 0.35 + bankFoam * 0.22);
+          col = mix(col, moonSpec, foam * 0.65);
+
+          // Subtle moonlight glint
+          float glint = pow(max(0.0, sin(vWorld.x * 0.9 + vWorld.z * 0.5 - uTime * 2.4)), 14.0);
+          col += vec3(0.28, 0.52, 0.56) * glint * 0.35;
+
+          gl_FragColor = vec4(col, 0.92);
+        }
+      `,
+    });
+    const riverMesh = new THREE.Mesh(new THREE.PlaneGeometry(64, 144, 24, 56), this.riverMat);
+    riverMesh.rotation.x = -Math.PI / 2;
+    riverMesh.position.set(0, -1.65, -44);
+    this.corridorGroup.add(riverMesh);
+    this.waterMeshes.push(riverMesh);
+
+    // 2. Sculpted Stratified Canyon Cliff Walls (Z = +20 .. -108, |x| = 21..36, height 14..30m)
+    const makeCliffGeo = (w: number, h: number, d: number, seed: number) => {
+      const geo = new THREE.BoxGeometry(w, h, d, 5, 8, 8);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const vx = pos.getX(i);
+        const vy = pos.getY(i);
+        const vz = pos.getZ(i);
+        const ny = (vy + h * 0.5) / h; // 0 bottom .. 1 top
+        const strata = Math.sin(vy * 0.85 + seed) * 0.65;
+        const jag = Math.sin(vz * 0.27 + seed * 1.3) * 1.4 + Math.cos(vz * 0.58 - seed) * 0.75;
+        // Taper subtly near crest while keeping base grounded
+        const taper = 1.0 - ny * 0.22;
+        const xOff = vx * taper + Math.sign(vx) * (strata * 0.45 + jag * 0.55);
+        const yOff = ny > 0.72 ? vy + Math.sin(vz * 0.22 + seed) * 2.2 * (ny - 0.72) * 3.0 : vy;
+        pos.setXYZ(i, xOff, yOff, vz);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+
+    const cliffSpecs: Array<{ x: number; z: number; h: number; d: number; seed: number }> = [
+      { x: -29.5, z: 9, h: 24, d: 28, seed: 0.4 },
+      { x: 29.5, z: 9, h: 25, d: 28, seed: 1.2 },
+      { x: -27.8, z: -16, h: 26, d: 27, seed: 2.1 },
+      { x: 27.8, z: -16, h: 27, d: 27, seed: 2.9 },
+      { x: -29.2, z: -41, h: 28, d: 28, seed: 3.7 },
+      { x: 29.2, z: -41, h: 26, d: 28, seed: 4.5 },
+      { x: -27.5, z: -64, h: 29, d: 26, seed: 5.3 },
+      { x: 27.5, z: -64, h: 30, d: 26, seed: 6.1 },
+      { x: -29.6, z: -87, h: 31, d: 28, seed: 6.9 },
+      { x: 29.6, z: -87, h: 32, d: 28, seed: 7.7 },
+      { x: -28.4, z: -102, h: 28, d: 20, seed: 8.5 },
+      { x: 28.4, z: -102, h: 29, d: 20, seed: 9.3 },
+    ];
+
+    const spireGeo = new THREE.DodecahedronGeometry(1.0, 1);
+    const trunkGeo = new THREE.CylinderGeometry(0.24, 0.38, 2.4, 6);
+    const padGeo = new THREE.DodecahedronGeometry(1.0, 1);
+    const cliffBarkMat = new THREE.MeshStandardMaterial({ color: '#3b2d26', roughness: 0.94 });
+    const cliffNeedleMat = new THREE.MeshStandardMaterial({ color: '#1b4a3e', roughness: 0.88 });
+
+    for (const sp of cliffSpecs) {
+      const cliffGroup = new THREE.Group();
+      const bodyGeo = makeCliffGeo(14.5, sp.h, sp.d, sp.seed);
+      const body = new THREE.Mesh(bodyGeo, canyonCliffMat);
+      body.position.set(sp.x, sp.h * 0.5 - 6.5, sp.z);
+      body.receiveShadow = true;
+      cliffGroup.add(body);
+
+      // Crown ridge rock spires
+      const crestY = sp.h - 6.8;
+      for (let k = -1; k <= 1; k += 2) {
+        const crag = new THREE.Mesh(spireGeo, cliffCrestMat);
+        crag.scale.set(3.2, 4.2 + (sp.seed % 2.4), 4.6);
+        crag.position.set(sp.x - Math.sign(sp.x) * 2.2, crestY, sp.z + k * 6.0);
+        crag.rotation.y = sp.seed + k;
+        cliffGroup.add(crag);
+      }
+
+      // Cliffside pines perched on upper ledges (strictly |x| >= 22m)
+      const pineX = sp.x - Math.sign(sp.x) * 4.6;
+      const pineY = Math.min(14.5, sp.h * 0.42);
+      const pine = new THREE.Group();
+      pine.position.set(pineX, pineY, sp.z + (sp.seed % 4) - 2);
+      pine.scale.setScalar(1.35);
+      const trunk = new THREE.Mesh(trunkGeo, cliffBarkMat);
+      trunk.position.y = 1.2;
+      trunk.rotation.z = Math.sign(sp.x) * 0.28;
+      pine.add(trunk);
+      const canopy = new THREE.Mesh(padGeo, cliffNeedleMat);
+      canopy.scale.set(2.2, 0.72, 1.9);
+      canopy.position.set(-Math.sign(sp.x) * 0.5, 2.5, 0);
+      pine.add(canopy);
+      cliffGroup.add(pine);
+
+      this.corridorGroup.add(cliffGroup);
+      this.canyonCliffs.push(cliffGroup);
+    }
+
+    // 3. Swaying Instanced Emerald Bamboo Groves (翠竹) along cliff shelves (|x| >= 21m)
+    this.buildCanyonBambooGroves();
+
+    // 4. Animated Cascading Cliff Waterfalls (银练飞瀑) & Churning Plunge Pools
+    this.waterfallMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+        void main() {
+          float edge = sin(vUv.x * 3.14159265);
+          float streak1 = noise(vec2(vUv.x * 10.0, vUv.y * 6.0 + uTime * 2.2));
+          float streak2 = noise(vec2(vUv.x * 18.0 + 3.1, vUv.y * 11.0 + uTime * 3.4));
+          float silk = 0.45 + 0.55 * (streak1 * 0.6 + streak2 * 0.4);
+          float splash = smoothstep(0.24, 0.0, vUv.y) * 0.75;
+          float topFade = smoothstep(1.0, 0.86, vUv.y);
+          float alpha = pow(edge, 1.45) * (silk * 0.46 + splash) * topFade;
+          if (alpha < 0.02) discard;
+          vec3 col = mix(vec3(0.40, 0.84, 0.90), vec3(0.88, 0.98, 1.0), smoothstep(0.55, 0.95, silk + splash));
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+
+    this.plungeFoamMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        void main() {
+          float r = length(vUv);
+          if (r > 1.0) discard;
+          float ring1 = smoothstep(0.08, 0.0, abs(fract(r * 2.5 - uTime * 0.65) - 0.5));
+          float core = smoothstep(0.65, 0.0, r) * 0.48;
+          float fade = smoothstep(1.0, 0.35, r);
+          float alpha = (core + ring1 * 0.45 * fade) * fade;
+          if (alpha < 0.02) discard;
+          gl_FragColor = vec4(vec3(0.66, 0.94, 0.98), alpha * 0.72);
+        }
+      `,
+    });
+
+    const waterfallSpecs: Array<{ x: number; z: number; topY: number; width: number }> = [
+      { x: -21.2, z: -16.0, topY: 17.5, width: 4.2 },
+      { x: 21.2, z: -16.0, topY: 18.0, width: 4.2 },
+      { x: -21.6, z: -44.0, topY: 19.5, width: 4.6 },
+      { x: -20.8, z: -63.0, topY: 18.5, width: 4.4 },
+      { x: 20.8, z: -63.0, topY: 19.0, width: 4.4 },
+      { x: 21.6, z: -86.0, topY: 21.0, width: 4.8 },
+    ];
+
+    const poolGeo = new THREE.PlaneGeometry(7.6, 7.6);
+    for (const wf of waterfallSpecs) {
+      const h = wf.topY + 2.0;
+      const wfMesh = new THREE.Mesh(new THREE.PlaneGeometry(wf.width, h, 4, 8), this.waterfallMat);
+      wfMesh.position.set(wf.x, wf.topY * 0.5 - 0.9, wf.z);
+      wfMesh.rotation.y = wf.x < 0 ? Math.PI / 2 : -Math.PI / 2;
+      wfMesh.rotation.z = wf.x < 0 ? -0.1 : 0.1;
+      this.corridorGroup.add(wfMesh);
+      this.waterMeshes.push(wfMesh);
+
+      const pool = new THREE.Mesh(poolGeo, this.plungeFoamMat);
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(wf.x - Math.sign(wf.x) * 2.2, -1.56, wf.z);
+      this.corridorGroup.add(pool);
+      this.waterMeshes.push(pool);
+    }
+  }
+
+  private buildCanyonBambooGroves(): void {
+    const stalkCount = 160;
+    const culmGeo = new THREE.CylinderGeometry(0.09, 0.13, 8.2, 6, 4);
+    culmGeo.translate(0, 4.1, 0);
+
+    this.bambooMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        varying float vH;
+        void main() {
+          vH = clamp(position.y / 8.2, 0.0, 1.0);
+          vec4 wb = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+          float sway = sin(uTime * 1.45 + wb.x * 0.25 + wb.z * 0.19) * 0.34 * vH * vH;
+          vec3 p = position;
+          p.x += sway;
+          p.z += sway * 0.45;
+          gl_Position = projectionMatrix * viewMatrix * instanceMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vH;
+        void main() {
+          float node = smoothstep(0.08, 0.0, abs(fract(vH * 7.0) - 0.5));
+          vec3 col = mix(vec3(0.08, 0.28, 0.20), vec3(0.20, 0.52, 0.34), vH);
+          col = mix(col, vec3(0.45, 0.68, 0.42), node * 0.45);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    const leafCount = stalkCount * 2;
+    const leafGeo = new THREE.ConeGeometry(0.95, 2.2, 5);
+    this.bambooLeafMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        varying float vH;
+        void main() {
+          vH = clamp((position.y + 1.1) / 2.2, 0.0, 1.0);
+          vec4 wb = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+          float sway = sin(uTime * 1.45 + wb.x * 0.25 + wb.z * 0.19) * 0.38;
+          vec3 p = position;
+          p.x += sway * (0.6 + 0.4 * vH);
+          gl_Position = projectionMatrix * viewMatrix * instanceMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vH;
+        void main() {
+          vec3 col = mix(vec3(0.09, 0.32, 0.24), vec3(0.24, 0.58, 0.38), vH);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    const culmInst = new THREE.InstancedMesh(culmGeo, this.bambooMat, stalkCount);
+    const leafInst = new THREE.InstancedMesh(leafGeo, this.bambooLeafMat, leafCount);
+    const dummy = new THREE.Object3D();
+
+    for (let i = 0; i < stalkCount; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      const bx = side * (21.6 + this.rng() * 7.2);
+      const bz = 14 - (i / stalkCount) * 116 + (this.rng() - 0.5) * 4.5;
+      const by = 4.5 + this.rng() * 6.5;
+      const sc = 0.8 + this.rng() * 0.65;
+      const tilt = (this.rng() - 0.5) * 0.16;
+
+      dummy.position.set(bx, by, bz);
+      dummy.rotation.set(tilt, this.rng() * Math.PI * 2, side * -0.08 + tilt);
+      dummy.scale.set(sc, sc * (0.9 + this.rng() * 0.35), sc);
+      dummy.updateMatrix();
+      culmInst.setMatrixAt(i, dummy.matrix);
+
+      for (let l = 0; l < 2; l++) {
+        dummy.position.set(bx - side * 0.15, by + (5.8 + l * 1.6) * sc, bz);
+        dummy.rotation.set(0.25 * (l === 0 ? 1 : -1), this.rng() * Math.PI * 2, 0.2 * side);
+        dummy.scale.set(sc * (1.1 - l * 0.2), sc * 0.85, sc * (1.1 - l * 0.2));
+        dummy.updateMatrix();
+        leafInst.setMatrixAt(i * 2 + l, dummy.matrix);
+      }
+    }
+    culmInst.instanceMatrix.needsUpdate = true;
+    leafInst.instanceMatrix.needsUpdate = true;
+    culmInst.frustumCulled = false;
+    leafInst.frustumCulled = false;
+    this.corridorGroup.add(culmInst, leafInst);
   }
 
   private createGuideChevronMaterial(): THREE.ShaderMaterial {
@@ -1421,7 +1839,7 @@ export class ShushanArena {
         void main() {
           float dx = abs(vUv.x - 0.5);
           if (dx > 0.45) discard;
-          // Chevrons point toward +vUv.y (-Z forward along the bridge)
+          // Chevrons point toward +vUv.y (-Z forward along the crossing)
           float phase = fract(vUv.y * 4.5 + dx * 1.35 - uTime * (0.55 + uUnlocked * 1.15));
           float band = smoothstep(0.06, 0.18, phase) * smoothstep(0.46, 0.24, phase);
           float sideFade = smoothstep(0.45, 0.18, dx);
@@ -1438,6 +1856,10 @@ export class ShushanArena {
     });
   }
 
+  /**
+   * Low river-stone rune markers (<= 0.95m, |x| = 4.9m) + low 1.65m parting water-rune mist ribbon
+   * so forward sightlines and guide arrows remain 100% unobstructed.
+   */
   private createSpiritBarrierGate(
     barrierZ: number,
     carvedTex: THREE.CanvasTexture,
@@ -1446,33 +1868,34 @@ export class ShushanArena {
     const gateGroup = new THREE.Group();
     gateGroup.position.set(0, 0, barrierZ);
 
-    const pylonMat = new THREE.MeshStandardMaterial({
+    const markerMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
-      color: '#73889e',
+      color: '#637d8f',
       roughness: 0.78,
       metalness: 0.1,
     });
     const crystalMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0.55, 1.75, 1.85),
+      color: new THREE.Color(0.45, 1.65, 1.85),
     });
 
-    const baseGeo = new THREE.BoxGeometry(0.9, 0.5, 0.9);
-    const colGeo = new THREE.CylinderGeometry(0.28, 0.36, 3.2, 8);
-    const capGeo = new THREE.OctahedronGeometry(0.32, 0);
-    for (const sx of [-4.55, 4.55]) {
-      const base = new THREE.Mesh(baseGeo, pylonMat);
-      base.position.set(sx, 0.25, 0);
-      base.castShadow = true;
-      base.receiveShadow = true;
-      const col = new THREE.Mesh(colGeo, pylonMat);
-      col.position.set(sx, 2.05, 0);
-      col.castShadow = true;
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.05, 6, 14), bronzeMat);
+    const plinthGeo = new THREE.BoxGeometry(0.92, 0.34, 0.92);
+    const stoneGeo = new THREE.CylinderGeometry(0.26, 0.36, 0.38, 6);
+    const ringGeo = new THREE.TorusGeometry(0.30, 0.04, 6, 14);
+    const capGeo = new THREE.OctahedronGeometry(0.15, 0);
+    for (const sx of [-4.9, 4.9]) {
+      const plinth = new THREE.Mesh(plinthGeo, markerMat);
+      plinth.position.set(sx, 0.17, 0);
+      plinth.castShadow = true;
+      plinth.receiveShadow = true;
+      const stone = new THREE.Mesh(stoneGeo, markerMat);
+      stone.position.set(sx, 0.53, 0);
+      stone.castShadow = true;
+      const ring = new THREE.Mesh(ringGeo, bronzeMat);
       ring.rotation.x = Math.PI / 2;
-      ring.position.set(sx, 3.65, 0);
+      ring.position.set(sx, 0.73, 0);
       const crystal = new THREE.Mesh(capGeo, crystalMat);
-      crystal.position.set(sx, 4.15, 0);
-      gateGroup.add(base, col, ring, crystal);
+      crystal.position.set(sx, 0.80, 0);
+      gateGroup.add(plinth, stone, ring, crystal);
     }
 
     const barrierMat = new THREE.ShaderMaterial({
@@ -1499,29 +1922,26 @@ export class ShushanArena {
           float dissolve = 1.0 - smoothstep(0.05, 0.98, uOpen);
           if (dissolve < 0.01) discard;
           vec2 c = vUv * 2.0 - 1.0;
-          // Parting curtain as barrier dissolves open
           float partGap = uOpen * 1.15;
           float curtainMask = smoothstep(partGap - 0.14, partGap + 0.14, abs(c.x));
-          float r = length(vec2(c.x * 1.65, c.y));
-          float sealRing = smoothstep(0.032, 0.008, abs(r - 0.62)) + smoothstep(0.024, 0.006, abs(r - 0.34));
-          float grid = pow(abs(sin(vUv.x * 26.0 + uTime * 2.2)), 6.0) * 0.45
-                     + pow(abs(sin(vUv.y * 14.0 - uTime * 2.6)), 6.0) * 0.45;
+          float wave = sin(vUv.x * 16.0 - uTime * 2.8) * 0.12 + cos(vUv.x * 9.0 + uTime * 1.9) * 0.08;
+          float ribbon = smoothstep(0.92, 0.18, abs(c.y + wave));
+          float runeTicks = pow(abs(sin(vUv.x * 22.0 + uTime * 2.1)), 5.0) * 0.55;
           float edgeFade = smoothstep(0.0, 0.08, vUv.x) * smoothstep(1.0, 0.92, vUv.x)
-                         * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.84, vUv.y);
-          float pulse = 0.78 + 0.22 * sin(uTime * 4.2 + vUv.x * 8.0);
-          float baseWall = 0.26 + grid * 0.55 + sealRing * 0.9;
-          float alpha = baseWall * edgeFade * curtainMask * dissolve * pulse * 0.74;
+                         * smoothstep(0.0, 0.14, vUv.y) * smoothstep(1.0, 0.78, vUv.y);
+          float pulse = 0.78 + 0.22 * sin(uTime * 4.0 + vUv.x * 7.0);
+          float alpha = (0.24 + ribbon * 0.52 + runeTicks * 0.35) * edgeFade * curtainMask * dissolve * pulse * 0.76;
           if (alpha < 0.015) discard;
-          vec3 lockedCol = mix(vec3(0.98, 0.32, 0.34), vec3(0.98, 0.76, 0.32), sealRing + grid * 0.4);
-          vec3 openBurst = vec3(0.32, 0.92, 0.95);
+          vec3 lockedCol = mix(vec3(0.96, 0.38, 0.34), vec3(0.32, 0.88, 0.92), runeTicks);
+          vec3 openBurst = vec3(0.36, 0.95, 0.96);
           vec3 col = mix(lockedCol, openBurst, smoothstep(0.05, 0.55, uOpen));
           gl_FragColor = vec4(col, alpha);
         }
       `,
     });
 
-    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(8.5, 4.1), barrierMat);
-    curtain.position.set(0, 2.05, 0);
+    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(9.4, 1.65), barrierMat);
+    curtain.position.set(0, 0.825, 0);
     gateGroup.add(curtain);
 
     return {
@@ -1533,133 +1953,235 @@ export class ShushanArena {
     };
   }
 
-  private buildCorridorBridge(opts: {
+  /**
+   * Crossing 0 — 碧水浅滩: wadeable shallow stream ford (y = -0.04m bed, +0.01m wet stepping slabs,
+   * +0.035m shimmering water overlay, smooth bank stones <= 0.42m, ZERO tall railings/posts).
+   */
+  private buildShallowFordCrossing(opts: {
+    target: THREE.Group;
+    centerZ: number;
+    barrierZ: number;
+    bedMat: THREE.MeshStandardMaterial;
+    trimMat: THREE.MeshStandardMaterial;
+    carvedTex: THREE.CanvasTexture;
+    bronzeMat: THREE.MeshStandardMaterial;
+    chevronMat: THREE.ShaderMaterial;
+  }): void {
+    const { target, centerZ, barrierZ, bedMat, trimMat, carvedTex, bronzeMat, chevronMat } = opts;
+
+    // Shallow river-bed shelf (top at y = -0.04m, extending smoothly to Zone 0 lip & Zone 1 shoal)
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.26, 16.0), bedMat);
+    bed.position.set(0, -0.17, centerZ);
+    bed.receiveShadow = true;
+    target.add(bed);
+
+    const underRock = new THREE.Mesh(new THREE.BoxGeometry(10.8, 1.7, 15.0), trimMat);
+    underRock.position.set(0, -1.05, centerZ);
+    target.add(underRock);
+
+    // Wet mossy stepping-stone slabs (top at y = +0.01m)
+    const slabMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#4e6c73',
+      roughness: 0.34,
+      metalness: 0.1,
+    });
+    const slabGeo = new THREE.CylinderGeometry(1.0, 1.12, 0.14, 7);
+    const slabSpots: Array<[number, number, number, number, number]> = [
+      [-1.7, centerZ + 5.6, 1.45, 0.95, 0.2],
+      [1.8, centerZ + 5.2, 1.38, 0.92, -0.4],
+      [-0.3, centerZ + 3.8, 1.65, 1.05, 0.1],
+      [2.6, centerZ + 2.6, 1.28, 0.88, 0.7],
+      [-2.5, centerZ + 2.0, 1.35, 0.95, -0.5],
+      [0.4, centerZ + 0.5, 1.72, 1.1, 0.3],
+      [-1.9, centerZ - 1.2, 1.48, 0.98, -0.2],
+      [2.1, centerZ - 1.8, 1.42, 0.94, 0.5],
+      [-0.2, centerZ - 3.3, 1.62, 1.05, -0.1],
+      [2.3, centerZ - 4.7, 1.32, 0.9, 0.6],
+      [-2.2, centerZ - 5.1, 1.38, 0.95, -0.3],
+      [0.2, centerZ - 6.2, 1.55, 0.98, 0.2],
+    ];
+    for (const [sx, sz, rx, rz, rot] of slabSpots) {
+      const slab = new THREE.Mesh(slabGeo, slabMat);
+      slab.scale.set(rx, 1.0, rz);
+      slab.rotation.y = rot;
+      slab.position.set(sx, -0.06, sz);
+      slab.receiveShadow = true;
+      target.add(slab);
+    }
+
+    // Shimmering ankle-deep flowing crystal water overlay (y = 0.035m)
+    this.shallowWaterMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorld;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        varying vec3 vWorld;
+
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+
+        void main() {
+          // Gentle mountain stream drifting diagonally across the ford
+          vec2 flow = vec2(vWorld.x * 0.45 - uTime * 0.72, vWorld.z * 0.42 + uTime * 0.28);
+          float r1 = noise(flow * 2.1);
+          float r2 = noise(flow * 4.4 + vec2(uTime * 0.35, -uTime * 0.2));
+          float caustic = smoothstep(0.56, 0.88, r1 * 0.55 + r2 * 0.45);
+          float edgeX = smoothstep(0.0, 0.10, vUv.x) * smoothstep(1.0, 0.90, vUv.x);
+          float edgeZ = smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
+          vec3 col = mix(vec3(0.16, 0.58, 0.64), vec3(0.68, 0.96, 0.96), caustic * 0.72);
+          float alpha = (0.30 + caustic * 0.28) * edgeX * edgeZ;
+          if (alpha < 0.02) discard;
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const shallowWater = new THREE.Mesh(
+      new THREE.PlaneGeometry(11.4, 16.4, 16, 24),
+      this.shallowWaterMat,
+    );
+    shallowWater.rotation.x = -Math.PI / 2;
+    shallowWater.position.set(0, 0.035, centerZ);
+    target.add(shallowWater);
+    this.waterMeshes.push(shallowWater);
+
+    // Smoothed natural bank stones flanking |x| = 5.65..6.35m (<= 0.42m high, ZERO railings/posts)
+    const bankGeo = new THREE.DodecahedronGeometry(0.65, 1);
+    const bankMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#485d66',
+      roughness: 0.78,
+      flatShading: true,
+    });
+    for (const sx of [-5.85, 5.85]) {
+      for (let k = 0; k < 8; k++) {
+        const bz = centerZ + 6.2 - k * 1.75;
+        const stone = new THREE.Mesh(bankGeo, bankMat);
+        stone.scale.set(1.05 + (k % 3) * 0.14, 0.42, 1.35);
+        stone.position.set(sx + (k % 2) * 0.18 * Math.sign(sx), 0.12, bz);
+        stone.rotation.y = k * 0.8 + sx;
+        stone.receiveShadow = true;
+        stone.castShadow = true;
+        target.add(stone);
+      }
+    }
+
+    // Luminous jade guide chevrons pointing -Z across the shallow ford
+    const chevronPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 12.6), chevronMat);
+    chevronPlane.rotation.x = -Math.PI / 2;
+    chevronPlane.position.set(0, 0.048, centerZ);
+    target.add(chevronPlane);
+
+    const gate = this.createSpiritBarrierGate(barrierZ, carvedTex, bronzeMat);
+    target.add(gate.group);
+    this.barriers.push(gate);
+  }
+
+  /**
+   * Crossing 1 — 飞瀑虹桥: graceful low-curb arched canyon stone bridge above rushing rapids
+   * between twin cliff waterfalls (curbs <= 0.44m, ZERO tall blocking posts).
+   */
+  private buildRainbowArchBridge(opts: {
     target: THREE.Group;
     centerZ: number;
     barrierZ: number;
     deckMat: THREE.MeshStandardMaterial;
-    railMat: THREE.MeshStandardMaterial;
     trimMat: THREE.MeshStandardMaterial;
     carvedTex: THREE.CanvasTexture;
-    lacquerTex: THREE.CanvasTexture;
+    bronzeMat: THREE.MeshStandardMaterial;
     chevronMat: THREE.ShaderMaterial;
-    hasChains: boolean;
-    chainMat: THREE.MeshStandardMaterial;
   }): void {
-    const {
-      target,
-      centerZ,
-      barrierZ,
-      deckMat,
-      railMat,
-      trimMat,
-      carvedTex,
-      lacquerTex,
-      chevronMat,
-      hasChains,
-      chainMat,
-    } = opts;
+    const { target, centerZ, barrierZ, deckMat, trimMat, carvedTex, bronzeMat, chevronMat } = opts;
 
-    // Main bridge stone-jade deck (top at y = -0.012 so zero z-fighting with circular plazas)
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(8.8, 1.1, 13.4), deckMat);
-    deck.position.set(0, -0.562, centerZ);
+    // Main bridge stone deck (width 9.8m for halfWidth = 4.8m, top flush at y = -0.01m)
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(9.8, 0.88, 14.4), deckMat);
+    deck.position.set(0, -0.45, centerZ);
     deck.receiveShadow = true;
     deck.castShadow = true;
     target.add(deck);
 
-    // Under-deck structural arch spine & deep cliff piers
-    const spine = new THREE.Mesh(new THREE.BoxGeometry(7.2, 1.8, 12.2), trimMat);
-    spine.position.set(0, -1.95, centerZ);
-    target.add(spine);
+    // Graceful arched stone vault ribs underneath over rushing river rapids
+    const archCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -2.15, 6.8),
+      new THREE.Vector3(0, -0.75, 0),
+      new THREE.Vector3(0, -2.15, -6.8),
+    ]);
+    const archRibGeo = new THREE.TubeGeometry(archCurve, 18, 0.42, 8, false);
+    for (const ax of [-4.1, 0, 4.1]) {
+      const rib = new THREE.Mesh(archRibGeo, trimMat);
+      rib.position.set(ax, 0, centerZ);
+      target.add(rib);
+    }
 
-    const pierGeo = new THREE.BoxGeometry(1.4, 15.0, 1.6);
-    for (const pz of [centerZ + 3.4, centerZ - 3.4]) {
-      for (const px of [-3.0, 3.0]) {
+    // Sturdy river piers rooted below y = -1.65m
+    const pierGeo = new THREE.BoxGeometry(1.5, 14.0, 1.8);
+    for (const pz of [centerZ + 3.6, centerZ - 3.6]) {
+      for (const px of [-3.2, 3.2]) {
         const pier = new THREE.Mesh(pierGeo, trimMat);
-        pier.position.set(px, -9.2, pz);
+        pier.position.set(px, -8.4, pz);
         target.add(pier);
       }
     }
 
-    // Low side curbs & balustrade posts
-    const curbGeo = new THREE.BoxGeometry(0.42, 0.34, 12.4);
-    const postGeo = new THREE.BoxGeometry(0.38, 1.05, 0.38);
-    const postCapGeo = new THREE.SphereGeometry(0.22, 8, 8);
-    const railGeo = new THREE.BoxGeometry(0.16, 0.14, 11.4);
+    // Low carved rainbow-arch side curbs (height <= 0.44m, ZERO tall blocking posts)
+    const lowCurbMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#738e98',
+      roughness: 0.68,
+      metalness: 0.1,
+    });
+    const lowCurbGeo = new THREE.BoxGeometry(0.46, 0.34, 13.8);
+    const archCrownGeo = new THREE.BoxGeometry(0.50, 0.42, 5.2);
+    const endBollardGeo = new THREE.BoxGeometry(0.58, 0.44, 0.58);
 
-    for (const sx of [-4.48, 4.48]) {
-      const sideCurb = new THREE.Mesh(curbGeo, railMat);
-      sideCurb.position.set(sx, 0.16, centerZ);
-      sideCurb.receiveShadow = true;
-      sideCurb.castShadow = true;
-      target.add(sideCurb);
+    for (const sx of [-4.92, 4.92]) {
+      const baseCurb = new THREE.Mesh(lowCurbGeo, lowCurbMat);
+      baseCurb.position.set(sx, 0.17, centerZ);
+      baseCurb.receiveShadow = true;
+      baseCurb.castShadow = true;
+      target.add(baseCurb);
 
-      if (!hasChains) {
-        const topRail = new THREE.Mesh(railGeo, railMat);
-        topRail.position.set(sx, 0.86, centerZ);
-        topRail.castShadow = true;
-        target.add(topRail);
-      }
+      const archCrown = new THREE.Mesh(archCrownGeo, lowCurbMat);
+      archCrown.position.set(sx, 0.21, centerZ);
+      archCrown.receiveShadow = true;
+      target.add(archCrown);
 
-      for (let k = 0; k < 5; k++) {
-        const pz = centerZ + 5.5 - k * 2.75;
-        const post = new THREE.Mesh(postGeo, trimMat);
-        post.position.set(sx, 0.52, pz);
-        post.castShadow = true;
-        const cap = new THREE.Mesh(postCapGeo, hasChains ? chainMat : railMat);
-        cap.position.set(sx, 1.14, pz);
-        target.add(post, cap);
-      }
-    }
-
-    // Catenary bronze-iron lock chains for 锁妖索桥 (Bridge 1)
-    if (hasChains) {
-      const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0, 0.92, 1.375),
-        new THREE.Vector3(0, 0.68, 0),
-        new THREE.Vector3(0, 0.92, -1.375),
-      ]);
-      const chainGeo = new THREE.TubeGeometry(curve, 12, 0.065, 6, false);
-      for (const sx of [-4.48, 4.48]) {
-        for (let k = 0; k < 4; k++) {
-          const midZ = centerZ + 4.125 - k * 2.75;
-          const chain = new THREE.Mesh(chainGeo, chainMat);
-          chain.position.set(sx, 0, midZ);
-          chain.castShadow = true;
-          target.add(chain);
-        }
+      for (const bz of [centerZ + 6.6, centerZ - 6.6]) {
+        const bollard = new THREE.Mesh(endBollardGeo, bronzeMat);
+        bollard.position.set(sx, 0.22, bz);
+        target.add(bollard);
       }
     }
 
-    // Bridge stone lanterns at entry & exit
-    const lPedGeo = new THREE.CylinderGeometry(0.18, 0.24, 0.72, 6);
-    const lFlameGeo = new THREE.OctahedronGeometry(0.16, 1);
-    const lCapGeo = new THREE.ConeGeometry(0.42, 0.34, 6);
-    const flameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.9, 1.15, 0.42) });
-    const capMat = new THREE.MeshStandardMaterial({ map: lacquerTex, color: '#4f3834', roughness: 0.68 });
-    for (const lz of [centerZ + 4.4, centerZ - 4.4]) {
-      for (const lx of [-4.48, 4.48]) {
-        const lGroup = new THREE.Group();
-        lGroup.position.set(lx, 1.05, lz);
-        const ped = new THREE.Mesh(lPedGeo, trimMat);
-        ped.position.y = 0.36;
-        const flame = new THREE.Mesh(lFlameGeo, flameMat);
-        flame.position.y = 0.88;
-        const cap = new THREE.Mesh(lCapGeo, capMat);
-        cap.position.y = 1.22;
-        lGroup.add(ped, flame, cap);
-        target.add(lGroup);
-      }
-    }
-
-    // Glowing blue-gold floor guide chevrons pointing -Z
-    const chevronPlane = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 11.4), chevronMat);
+    // Glowing guide chevrons pointing -Z
+    const chevronPlane = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 12.2), chevronMat);
     chevronPlane.rotation.x = -Math.PI / 2;
     chevronPlane.position.set(0, 0.022, centerZ);
     target.add(chevronPlane);
 
-    // Spirit Barrier Gate at bridge entrance
-    const gate = this.createSpiritBarrierGate(barrierZ, carvedTex, chainMat);
+    const gate = this.createSpiritBarrierGate(barrierZ, carvedTex, bronzeMat);
     target.add(gate.group);
     this.barriers.push(gate);
   }
@@ -1710,12 +2232,12 @@ export class ShushanArena {
 
     const curbR = radius - 0.45;
     if (isFinalBossZone) {
-      // Open only on +Z (south entrance from Bridge 1)
+      // Open only on +Z (south entrance from Crossing 1)
       const southOpenCurb = new THREE.Mesh(
-        new THREE.TorusGeometry(curbR, 0.38, 10, 44, Math.PI * 2 - 0.50),
+        new THREE.TorusGeometry(curbR, 0.38, 10, 44, Math.PI * 2 - 0.56),
         trimMat,
       );
-      southOpenCurb.rotation.set(Math.PI / 2, -Math.PI / 2 + 0.25, 0);
+      southOpenCurb.rotation.set(Math.PI / 2, 0, Math.PI / 2 + 0.28);
       southOpenCurb.position.set(0, 0.08, centerZ);
       southOpenCurb.castShadow = true;
       southOpenCurb.receiveShadow = true;
@@ -1724,27 +2246,27 @@ export class ShushanArena {
       // Zone 1 can have either south+north openings (maxZone === 2) or south-only opening (maxZone === 1)
       this.zone1DoubleOpenCurb = new THREE.Group();
       const rightArc = new THREE.Mesh(
-        new THREE.TorusGeometry(curbR, 0.36, 10, 22, Math.PI - 0.50),
+        new THREE.TorusGeometry(curbR, 0.36, 10, 22, Math.PI - 0.60),
         trimMat,
       );
-      rightArc.rotation.set(Math.PI / 2, Math.PI / 2 - 0.25, 0);
+      rightArc.rotation.set(Math.PI / 2, 0, -Math.PI / 2 + 0.30);
       rightArc.position.set(0, 0.08, centerZ);
       rightArc.castShadow = true;
       const leftArc = new THREE.Mesh(
-        new THREE.TorusGeometry(curbR, 0.36, 10, 22, Math.PI - 0.50),
+        new THREE.TorusGeometry(curbR, 0.36, 10, 22, Math.PI - 0.60),
         trimMat,
       );
-      leftArc.rotation.set(Math.PI / 2, -Math.PI / 2 - 0.25, 0);
+      leftArc.rotation.set(Math.PI / 2, 0, Math.PI / 2 + 0.30);
       leftArc.position.set(0, 0.08, centerZ);
       leftArc.castShadow = true;
       this.zone1DoubleOpenCurb.add(rightArc, leftArc);
       target.add(this.zone1DoubleOpenCurb);
 
       this.zone1SouthOpenCurb = new THREE.Mesh(
-        new THREE.TorusGeometry(curbR, 0.36, 10, 44, Math.PI * 2 - 0.50),
+        new THREE.TorusGeometry(curbR, 0.36, 10, 44, Math.PI * 2 - 0.62),
         trimMat,
       );
-      this.zone1SouthOpenCurb.rotation.set(Math.PI / 2, -Math.PI / 2 + 0.25, 0);
+      this.zone1SouthOpenCurb.rotation.set(Math.PI / 2, 0, Math.PI / 2 + 0.31);
       this.zone1SouthOpenCurb.position.set(0, 0.08, centerZ);
       this.zone1SouthOpenCurb.castShadow = true;
       this.zone1SouthOpenCurb.visible = false;
@@ -1757,7 +2279,7 @@ export class ShushanArena {
     baguaPlane.position.set(0, 0.024, centerZ);
     target.add(baguaPlane);
 
-    // 4 Corner Carved Rune Pillars (strictly outside |x| >= 11.4 so bridges stay wide open)
+    // 4 Corner Carved Rune Pillars (strictly outside |x| >= 11.4 so crossings stay wide open)
     const pBaseGeo = new THREE.CylinderGeometry(0.76, 0.94, 0.65, 8);
     const pShaftGeo = new THREE.CylinderGeometry(0.5, 0.62, 5.2, 8);
     const pBandGeo = new THREE.TorusGeometry(0.56, 0.05, 8, 20);
@@ -1835,7 +2357,7 @@ export class ShushanArena {
       });
     }
 
-    // 4 Carved Stone Lanterns
+    // 4 Carved Stone Lanterns (registered in occludables with per-lantern materials)
     const lPedGeo = new THREE.CylinderGeometry(0.28, 0.42, 1.35, 6);
     const lRimGeo = new THREE.CylinderGeometry(0.36, 0.32, 0.12, 6);
     const lFlameGeo = new THREE.OctahedronGeometry(0.22, 1);
@@ -1862,14 +2384,27 @@ export class ShushanArena {
     lanternSpots.forEach(([lx, lz], idx) => {
       const lGroup = new THREE.Group();
       lGroup.position.set(lx, 0, lz);
-      const ped = new THREE.Mesh(lPedGeo, lanternStoneMat);
+      const lStoneM = lanternStoneMat.clone();
+      lStoneM.transparent = true;
+      lStoneM.opacity = 1;
+      const lBronzeM = lanternBronzeMat.clone();
+      lBronzeM.transparent = true;
+      lBronzeM.opacity = 1;
+      const lRoofM = roofCapMat.clone();
+      lRoofM.transparent = true;
+      lRoofM.opacity = 1;
+      const lFlameM = flameMat.clone();
+      lFlameM.transparent = true;
+      lFlameM.opacity = 1;
+
+      const ped = new THREE.Mesh(lPedGeo, lStoneM);
       ped.position.y = 0.68;
       ped.castShadow = true;
-      const rim = new THREE.Mesh(lRimGeo, lanternBronzeMat);
+      const rim = new THREE.Mesh(lRimGeo, lBronzeM);
       rim.position.y = 1.38;
-      const flame = new THREE.Mesh(lFlameGeo, flameMat);
+      const flame = new THREE.Mesh(lFlameGeo, lFlameM);
       flame.position.y = 1.62;
-      const cap = new THREE.Mesh(lCapGeo, roofCapMat);
+      const cap = new THREE.Mesh(lCapGeo, lRoofM);
       cap.position.y = 2.08;
       cap.castShadow = true;
       lGroup.add(ped, rim, flame, cap);
@@ -1881,9 +2416,15 @@ export class ShushanArena {
       }
       target.add(lGroup);
       obstaclesOut.push({ x: lx, z: lz, r: 0.48 });
+      this.occludables.push({
+        position: new THREE.Vector3(lx, 1.35, lz),
+        radius: 1.2,
+        materials: [lStoneM, lBronzeM, lRoofM, lFlameM],
+        currentOpacity: 1,
+      });
     });
 
-    // Cliffside Pine Trees & Perimeter Boulders (strictly clear of bridge lanes)
+    // Cliffside Pine Trees & Perimeter Boulders (strictly clear of bridge lanes & registered in occludables)
     const barkMat = new THREE.MeshStandardMaterial({ color: '#3b2d26', roughness: 0.94 });
     const needleMat = new THREE.MeshStandardMaterial({ color: '#1b473c', roughness: 0.88, metalness: 0.02 });
     const rockMat = new THREE.MeshStandardMaterial({
@@ -1910,11 +2451,18 @@ export class ShushanArena {
       pine.position.set(tx, -0.1, tz);
       pine.rotation.y = rotY;
       pine.scale.setScalar(sc);
-      const seg1 = new THREE.Mesh(trunk1Geo, barkMat);
+      const pBark = barkMat.clone();
+      pBark.transparent = true;
+      pBark.opacity = 1;
+      const pNeedle = needleMat.clone();
+      pNeedle.transparent = true;
+      pNeedle.opacity = 1;
+
+      const seg1 = new THREE.Mesh(trunk1Geo, pBark);
       seg1.position.set(0, 1.0, 0);
       seg1.rotation.z = 0.16;
       seg1.castShadow = true;
-      const seg2 = new THREE.Mesh(trunk2Geo, barkMat);
+      const seg2 = new THREE.Mesh(trunk2Geo, pBark);
       seg2.position.set(-0.32, 2.8, 0.12);
       seg2.rotation.z = -0.22;
       seg2.castShadow = true;
@@ -1925,7 +2473,7 @@ export class ShushanArena {
         [-0.1, 4.65, 0.1, 1.65, 0.55],
       ];
       for (const [px, py, pz, pr, ph] of pads) {
-        const pad = new THREE.Mesh(padGeo, needleMat);
+        const pad = new THREE.Mesh(padGeo, pNeedle);
         pad.scale.set(pr, ph, pr * 0.85);
         pad.position.set(px, py, pz);
         pad.castShadow = true;
@@ -1933,6 +2481,12 @@ export class ShushanArena {
         pine.add(pad);
       }
       target.add(pine);
+      this.occludables.push({
+        position: new THREE.Vector3(tx, 3.0, tz),
+        radius: 2.3 * sc,
+        materials: [pBark, pNeedle],
+        currentOpacity: 1,
+      });
     }
 
     const rockSpots: Array<[number, number, number]> = [
@@ -1964,7 +2518,7 @@ export class ShushanArena {
       const gr = radius - 3.2 + this.rng() * 2.5;
       const gx = Math.cos(ang) * gr + (this.rng() - 0.5) * 0.5;
       const gz = centerZ + Math.sin(ang) * gr + (this.rng() - 0.5) * 0.5;
-      if (Math.abs(gx) < 5.0 && (gz > centerZ + radius - 5.2 || gz < centerZ - radius + 5.2)) {
+      if (Math.abs(gx) < 6.0 && (gz > centerZ + radius - 5.2 || gz < centerZ - radius + 5.2)) {
         continue;
       }
       dummy.position.set(gx, 0, gz);
@@ -2016,6 +2570,7 @@ export class ShushanArena {
       this.zone0FullCurb.visible = true;
       this.zone0OpenCurb.visible = false;
       this.archwayGroup.position.set(0, 0, -16.6);
+      this.archwayOccludable.position.set(0, 3.0, -16.6);
       this.bossRingPlane.position.set(0, 0.036, 0);
       this.skySwordRing.position.set(0, 11.2, -23);
     } else {
@@ -2034,6 +2589,7 @@ export class ShushanArena {
 
       const archZ = this.maxZone === 2 ? -101.0 : this.maxZone === 1 ? -58.0 : -16.6;
       this.archwayGroup.position.set(0, 0, archZ);
+      this.archwayOccludable.position.set(0, 3.0, archZ);
       this.bossRingPlane.position.set(0, 0.036, this.getZoneCenterZ(this.maxZone));
       this.skySwordRing.position.set(0, 12.8, this.getZoneCenterZ(this.maxZone) - 18);
     }
@@ -2086,6 +2642,28 @@ export class ShushanArena {
     return clamp(((zMax - z) / (zMax - zMin)) * 100, 0, 100);
   }
 
+  isInShallowWater(pos: THREE.Vector3): boolean {
+    if (this.layout !== 'corridor' || this.maxZone < 1) return false;
+    if (pos.z >= -27.5 && pos.z <= -14.5 && Math.abs(pos.x) <= 5.5) return true;
+    if (pos.z >= -14.5 && pos.z <= -12.8 && Math.abs(pos.x) <= 5.2) return true;
+    if (pos.z >= -29.2 && pos.z <= -27.5 && Math.abs(pos.x) <= 5.3) return true;
+    return false;
+  }
+
+  getSightlineStats(): {
+    centerBeamCount: number;
+    occludableCount: number;
+    waterMeshCount: number;
+    canyonCliffCount: number;
+  } {
+    return {
+      centerBeamCount: this.moonbeams.filter((m) => Math.abs(m.position.x) < 18).length,
+      occludableCount: this.occludables.length,
+      waterMeshCount: this.waterMeshes.length,
+      canyonCliffCount: this.canyonCliffs.length,
+    };
+  }
+
   isOutOfBounds(pos: THREE.Vector3, margin = 0): boolean {
     if (this.layout === 'arena') {
       return Math.hypot(pos.x, pos.z) > this.playableRadius + margin;
@@ -2098,13 +2676,15 @@ export class ShushanArena {
       if (pos.x * pos.x + dz * dz <= r * r) return false;
     }
 
-    const halfW = Math.max(0.4, BRIDGE_HALF_WIDTH + margin);
-    if (Math.abs(pos.x) <= halfW) {
-      for (let bi = 0; bi < this.maxZone; bi++) {
-        const span = BRIDGE_SPANS[bi];
-        if (pos.z >= span.zMin - margin && pos.z <= span.zMax + margin) {
-          return false;
-        }
+    for (let bi = 0; bi < this.maxZone; bi++) {
+      const span = BRIDGE_SPANS[bi];
+      const halfW = Math.max(0.4, span.halfWidth + margin);
+      if (
+        Math.abs(pos.x) <= halfW &&
+        pos.z >= span.zMin - margin &&
+        pos.z <= span.zMax + margin
+      ) {
+        return false;
       }
     }
 
@@ -2119,9 +2699,9 @@ export class ShushanArena {
       const dz = pos.z - cz;
       if (pos.x * pos.x + dz * dz <= maxR * maxR) return;
     }
-    const halfW = Math.max(0.4, BRIDGE_HALF_WIDTH - radius);
     for (let bi = 0; bi < this.maxZone; bi++) {
       const span = BRIDGE_SPANS[bi];
+      const halfW = Math.max(0.4, span.halfWidth - radius);
       if (
         Math.abs(pos.x) <= halfW &&
         pos.z >= span.zMin - 0.5 &&
@@ -2155,6 +2735,7 @@ export class ShushanArena {
 
     for (let bi = 0; bi < this.maxZone; bi++) {
       const span = BRIDGE_SPANS[bi];
+      const halfW = Math.max(0.4, span.halfWidth - radius);
       const rx = clamp(pos.x, -halfW, halfW);
       const rz = clamp(pos.z, span.zMin - 0.5, span.zMax + 0.5);
       const dx = pos.x - rx;
@@ -2212,27 +2793,41 @@ export class ShushanArena {
   }
 
   updateOcclusion(cameraPos: THREE.Vector3, heroPos: THREE.Vector3, dt: number): void {
-    const abx = heroPos.x - cameraPos.x;
-    const abz = heroPos.z - cameraPos.z;
-    const abLenSq = abx * abx + abz * abz;
-    if (abLenSq < 1e-4) return;
+    const abLenSqHero =
+      (heroPos.x - cameraPos.x) * (heroPos.x - cameraPos.x) +
+      (heroPos.z - cameraPos.z) * (heroPos.z - cameraPos.z);
+    if (abLenSqHero < 1e-4) return;
+
+    const fwdX = heroPos.x;
+    const fwdZ = heroPos.z - 14;
+
+    const hitsRay = (bx: number, bz: number, px: number, pz: number, threshold: number): boolean => {
+      const abx = bx - cameraPos.x;
+      const abz = bz - cameraPos.z;
+      const abLenSq = abx * abx + abz * abz;
+      if (abLenSq < 1e-4) return false;
+      const apx = px - cameraPos.x;
+      const apz = pz - cameraPos.z;
+      const t = clamp((apx * abx + apz * abz) / abLenSq, 0, 1);
+      if (t <= 0.04 || t >= 0.98) return false;
+      const cx = cameraPos.x + abx * t;
+      const cz = cameraPos.z + abz * t;
+      return Math.hypot(px - cx, pz - cz) < threshold;
+    };
 
     for (const prop of this.occludables) {
-      const apx = prop.position.x - cameraPos.x;
-      const apz = prop.position.z - cameraPos.z;
-      const t = clamp((apx * abx + apz * abz) / abLenSq, 0, 1);
-      let targetOpacity = 1;
-      if (t > 0.08 && t < 0.94) {
-        const cx = cameraPos.x + abx * t;
-        const cz = cameraPos.z + abz * t;
-        const perpDist = Math.hypot(prop.position.x - cx, prop.position.z - cz);
-        if (perpDist < prop.radius) {
-          targetOpacity = 0.24;
-        }
-      }
+      const threshold = prop.radius + 1.4;
+      const occluded =
+        hitsRay(heroPos.x, heroPos.z, prop.position.x, prop.position.z, threshold) ||
+        hitsRay(fwdX, fwdZ, prop.position.x, prop.position.z, threshold);
+      const targetOpacity = occluded ? 0.16 : 1;
       prop.currentOpacity += (targetOpacity - prop.currentOpacity) * Math.min(1, dt * 10);
+      const writeDepth = prop.currentOpacity > 0.92;
       for (const mat of prop.materials) {
         mat.opacity = prop.currentOpacity;
+        if (mat instanceof THREE.MeshStandardMaterial) {
+          mat.depthWrite = writeDepth;
+        }
       }
     }
   }
@@ -2261,6 +2856,12 @@ export class ShushanArena {
       this.chevronMat0.uniforms.uUnlocked.value = this.unlockedZone >= 1 ? 1.0 : 0.18;
       this.chevronMat1.uniforms.uTime.value = elapsed;
       this.chevronMat1.uniforms.uUnlocked.value = this.unlockedZone >= 2 ? 1.0 : 0.18;
+      if (this.riverMat) this.riverMat.uniforms.uTime.value = elapsed;
+      if (this.shallowWaterMat) this.shallowWaterMat.uniforms.uTime.value = elapsed;
+      if (this.waterfallMat) this.waterfallMat.uniforms.uTime.value = elapsed;
+      if (this.plungeFoamMat) this.plungeFoamMat.uniforms.uTime.value = elapsed;
+      if (this.bambooMat) this.bambooMat.uniforms.uTime.value = elapsed;
+      if (this.bambooLeafMat) this.bambooLeafMat.uniforms.uTime.value = elapsed;
       for (let bi = 0; bi < this.barriers.length; bi++) {
         const b = this.barriers[bi];
         const targetOpen = this.unlockedZone >= bi + 1 ? 1 : 0;

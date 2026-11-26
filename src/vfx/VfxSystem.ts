@@ -11,6 +11,8 @@ export interface LootDrop {
   collected: boolean;
   mesh: THREE.Group;
   pillar: THREE.Group;
+  pillarCyls?: Array<{ mat: THREE.MeshBasicMaterial; baseOpacity: number }>;
+  pillarFade?: number;
   gearItem?: RolledGearItem;
   rarity?: EquipRarity;
 }
@@ -39,7 +41,6 @@ interface SkySwordGateVfx {
   cloudMat: THREE.ShaderMaterial;
   runeMat: THREE.ShaderMaterial;
   innerMat: THREE.ShaderMaterial;
-  beamGroup: THREE.Group;
   ownedGeos: THREE.BufferGeometry[];
   ownedMats: THREE.Material[];
   age: number;
@@ -148,6 +149,15 @@ function createArcSectorGeometry(innerR: number, outerR: number, arcAngle: numbe
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   return geo;
+}
+
+function distPointToSegmentXZ(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
+  const vx = bx - ax;
+  const vz = bz - az;
+  const lenSq = vx * vx + vz * vz;
+  if (lenSq < 1e-6) return Math.hypot(px - ax, pz - az);
+  const t = clamp(((px - ax) * vx + (pz - az) * vz) / lenSq, 0, 1);
+  return Math.hypot(px - (ax + vx * t), pz - (az + vz * t));
 }
 
 export class VfxSystem {
@@ -370,10 +380,10 @@ export class VfxSystem {
 
   /**
    * Spawns a shimmering overhead Cloud-Rift / Taoist Sky Sword Gate floating high above combat
-   * (y = 10.5..14.5m) with rotating golden/azure Bagua-rune rings, radial rift beams, and vortex sparks.
+   * (y >= 11m) with rotating golden/azure Bagua-rune rings and vortex sparks.
    */
   spawnSkySwordGate(pos: THREE.Vector3, radius: number, color: THREE.Color, duration = 1.6): void {
-    const gateY = pos.y >= 10.5 && pos.y <= 14.5 ? pos.y : clamp(11.4 + Math.min(2.6, radius * 0.25), 10.5, 14.5);
+    const gateY = pos.y >= 11.0 && pos.y <= 14.5 ? pos.y : clamp(11.6 + Math.min(2.6, radius * 0.25), 11.0, 14.5);
     const gateGroup = new THREE.Group();
     gateGroup.position.set(pos.x, gateY, pos.z);
     gateGroup.rotation.order = 'YXZ';
@@ -534,31 +544,7 @@ export class VfxSystem {
     innerMesh.position.z = -0.12;
     innerMesh.scale.setScalar(radius * 1.35);
 
-    const beamGroup = new THREE.Group();
-    const beamGeo = new THREE.PlaneGeometry(Math.max(0.28, radius * 0.14), 6.2);
-    beamGeo.translate(0, -3.1, 0);
-    const beamMat = new THREE.MeshBasicMaterial({
-      color: color.clone().multiplyScalar(1.1),
-      transparent: true,
-      opacity: 0.26,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-
-    const beamCount = 6;
-    for (let b = 0; b < beamCount; b++) {
-      const ang = (b / beamCount) * Math.PI * 2;
-      const beam = new THREE.Mesh(beamGeo, beamMat);
-      beam.position.set(Math.cos(ang) * radius * 0.52, Math.sin(ang) * radius * 0.52, -0.08);
-      // Tilt beam to project downward along gate -Z (world -Y)
-      beam.rotation.order = 'YXZ';
-      beam.rotation.x = Math.PI / 2 - 0.12;
-      beam.rotation.z = ang + Math.PI / 2;
-      beamGroup.add(beam);
-    }
-
-    gateGroup.add(cloudMesh, runeMesh, innerMesh, beamGroup);
+    gateGroup.add(cloudMesh, runeMesh, innerMesh);
     this.group.add(gateGroup);
 
     this.skyGates.push({
@@ -569,9 +555,8 @@ export class VfxSystem {
       cloudMat,
       runeMat,
       innerMat,
-      beamGroup,
-      ownedGeos: [beamGeo],
-      ownedMats: [cloudMat, runeMat, innerMat, beamMat],
+      ownedGeos: [],
+      ownedMats: [cloudMat, runeMat, innerMat],
       age: 0,
       duration,
       sparkTimer: 0,
@@ -966,6 +951,35 @@ export class VfxSystem {
 
   /** Spawns an alpha-feathered glowing shockwave ripple (never an opaque hard-edged donut). */
   spawnShockRing(pos: THREE.Vector3, color: THREE.Color, startScale: number, endScale: number, duration = 0.38): void {
+    this.pushRing(pos, Math.max(0.06, pos.y), color, startScale, endScale, duration);
+  }
+
+  /**
+   * Spawns expanding dual concentric crystal-jade water splash rings on y = 0.05
+   * plus tiny droplet sparks when moving or dodging through canyon shallow water.
+   */
+  spawnWaterRipple(pos: THREE.Vector3, scale = 1.0): void {
+    const s = Math.max(0.4, scale);
+    const outerCol = new THREE.Color(0.55, 1.55, 1.45);
+    const innerCol = new THREE.Color(0.85, 1.85, 1.72);
+    this.pushRing(pos, 0.05, outerCol, 0.24 * s, 1.28 * s, 0.52);
+    this.pushRing(pos, 0.05, innerCol, 0.12 * s, 0.78 * s, 0.40);
+    this.spawnHitSparks(
+      new THREE.Vector3(pos.x, 0.08, pos.z),
+      new THREE.Vector3(0, 1.0, 0),
+      innerCol,
+      Math.max(3, Math.round(4 * s)),
+    );
+  }
+
+  private pushRing(
+    pos: THREE.Vector3,
+    yPos: number,
+    color: THREE.Color,
+    startScale: number,
+    endScale: number,
+    duration: number,
+  ): void {
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -1002,8 +1016,7 @@ export class VfxSystem {
     });
     const mesh = new THREE.Mesh(this.planeGeo, mat);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.copy(pos);
-    mesh.position.y = Math.max(0.06, pos.y);
+    mesh.position.set(pos.x, yPos, pos.z);
     mesh.scale.setScalar(startScale * 2);
     this.group.add(mesh);
     this.rings.push({ mesh, mat, age: 0, duration, startScale, endScale });
@@ -1316,14 +1329,19 @@ export class VfxSystem {
     }
     mesh.position.set(pos.x, pos.y + 0.5, pos.z);
 
-    // 3-Layer Rarity Light Pillar
+    // Subtle short translucent light pillar for minor drops (keeps combat sightlines clear)
     const pillar = new THREE.Group();
-    const pillarH = kind === 'gourd' ? 5.2 : 3.2;
-    const layers: Array<[number, number]> = [
-      [0.06, 0.92], // bright core
-      [0.16, 0.42], // mid beam
-      [0.34, 0.16], // wide soft halo
-    ];
+    const pillarH = kind === 'gourd' ? 1.45 : 1.05;
+    const layers: Array<[number, number]> =
+      kind === 'gourd'
+        ? [
+            [0.05, 0.56],
+            [0.14, 0.22],
+          ]
+        : [
+            [0.04, 0.42],
+            [0.12, 0.16],
+          ];
     for (const [rad, op] of layers) {
       const pMat = new THREE.MeshBasicMaterial({
         color: colHdr,
@@ -1417,6 +1435,7 @@ export class VfxSystem {
     mesh.position.set(pos.x, pos.y + 0.6, pos.z);
 
     const pillar = new THREE.Group();
+    const pillarCyls: Array<{ mat: THREE.MeshBasicMaterial; baseOpacity: number }> = [];
     const pillarH = r === 'legendary' ? 9.4 : r === 'epic' ? 7.2 : r === 'rare' ? 5.5 : 3.2;
     const layers: Array<[number, number]> =
       r === 'legendary'
@@ -1448,25 +1467,28 @@ export class VfxSystem {
       const cyl = new THREE.Mesh(new THREE.CylinderGeometry(rad * 0.42, rad, pillarH, 12, 1, true), pMat);
       cyl.position.y = pillarH * 0.5;
       pillar.add(cyl);
+      pillarCyls.push({ mat: pMat, baseOpacity: op });
     }
 
     if (r === 'legendary') {
       const crimsonHdr = new THREE.Color(2.4, 0.35, 0.25);
+      const spiralMat = new THREE.MeshBasicMaterial({
+        color: crimsonHdr,
+        transparent: true,
+        opacity: 0.36,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        wireframe: true,
+      });
       const outerSpiral = new THREE.Mesh(
         new THREE.CylinderGeometry(0.18, 0.36, pillarH * 0.85, 6, 1, true),
-        new THREE.MeshBasicMaterial({
-          color: crimsonHdr,
-          transparent: true,
-          opacity: 0.36,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          wireframe: true,
-        }),
+        spiralMat,
       );
       outerSpiral.position.y = pillarH * 0.425;
       outerSpiral.name = 'counterSpin';
       pillar.add(outerSpiral);
+      pillarCyls.push({ mat: spiralMat, baseOpacity: 0.36 });
     }
 
     const baseRing = new THREE.Mesh(
@@ -1514,6 +1536,8 @@ export class VfxSystem {
       collected: false,
       mesh,
       pillar,
+      pillarCyls,
+      pillarFade: 0,
       gearItem: item,
       rarity: r,
     };
@@ -1541,6 +1565,7 @@ export class VfxSystem {
     heroPos: THREE.Vector3,
     onCollectDrop?: (kind: LootDrop['kind'], gearItem?: RolledGearItem) => void,
     onDropBounce?: (kind: LootDrop['kind']) => void,
+    cameraPos?: THREE.Vector3,
   ): void {
     // 1. Slash arcs
     for (let i = this.slashes.length - 1; i >= 0; i--) {
@@ -1590,13 +1615,6 @@ export class VfxSystem {
         gate.runeMat.uniforms.uProg.value = p;
         gate.innerMat.uniforms.uTime.value = elapsed;
         gate.innerMat.uniforms.uProg.value = p;
-        gate.beamGroup.rotation.z += dt * 0.45;
-        const beamFade = clamp(p / 0.18, 0, 1) * (1 - clamp((p - 0.72) / 0.28, 0, 1));
-        for (const child of gate.beamGroup.children) {
-          if (child instanceof THREE.Mesh) {
-            (child.material as THREE.MeshBasicMaterial).opacity = 0.26 * beamFade;
-          }
-        }
         // Emit swirling vortex sparks inside the rift aperture while active
         gate.sparkTimer += dt;
         if (p < 0.85 && gate.sparkTimer >= 0.055) {
@@ -1823,20 +1841,50 @@ export class VfxSystem {
         const dz = heroPos.z - d.pos.z;
         const dist = Math.hypot(dx, dz);
         // Magnetic pickup arc into Li Xiaoyao
-        if (dist < 4.2 && d.age > 0.35) {
-          const pull = Math.min(1, dt * (8 + (4.2 - dist) * 3.5));
+        if (dist < 5.5 && d.age > 0.35) {
+          const pull = Math.min(1, dt * (8 + (5.5 - dist) * 3.0));
           d.pos.x += dx * pull;
           d.pos.z += dz * pull;
           d.pos.y = lerp(d.pos.y, 1.05, pull);
           d.pillar.visible = false;
         } else {
           d.pos.y = 0.38 + Math.sin(elapsed * 3.4 + i) * 0.1;
-          d.pillar.scale.set(1 + Math.sin(elapsed * 4.2) * 0.08, 1, 1 + Math.sin(elapsed * 4.2) * 0.08);
+          let heightScale = 1;
           if (d.kind === 'gear') {
+            let obstructs = false;
+            if (cameraPos) {
+              const distCamToHero = distPointToSegmentXZ(
+                d.pos.x,
+                d.pos.z,
+                cameraPos.x,
+                cameraPos.z,
+                heroPos.x,
+                heroPos.z,
+              );
+              const distForwardArrow = distPointToSegmentXZ(
+                d.pos.x,
+                d.pos.z,
+                heroPos.x,
+                heroPos.z,
+                heroPos.x,
+                heroPos.z - 8,
+              );
+              obstructs = Math.min(distCamToHero, distForwardArrow) < 2.8;
+            }
+            d.pillarFade = lerp(d.pillarFade ?? 0, obstructs ? 1 : 0, Math.min(1, dt * 10));
+            heightScale = lerp(1, 0.38, d.pillarFade);
+            const opacityScale = lerp(1, 0.22, d.pillarFade);
+            if (d.pillarCyls) {
+              for (const cyl of d.pillarCyls) {
+                cyl.mat.opacity = cyl.baseOpacity * opacityScale;
+              }
+            }
             d.pillar.rotation.y += dt * 0.9;
             const cs = d.pillar.getObjectByName('counterSpin');
             if (cs) cs.rotation.y -= dt * 2.4;
           }
+          const pulse = 1 + Math.sin(elapsed * 4.2) * 0.08;
+          d.pillar.scale.set(pulse, heightScale, pulse);
         }
         if (dist < 0.85 && d.age > 0.35) {
           this.group.remove(d.mesh, d.pillar);

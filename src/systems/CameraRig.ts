@@ -19,16 +19,18 @@ interface CutsceneState {
  * - Clamps camera Y above terrain height
  */
 export class CameraRig {
-  // Cinematic 3D Donghua action camera angle (~25 deg pitch): crisp floor combat clarity + Shushan sky/peaks/sword-array framing!
-  private readonly baseOffset = new THREE.Vector3(0, 8.5, 13.8);
-  private readonly currentPos = new THREE.Vector3(0, 8.5, 13.8);
-  private readonly currentLook = new THREE.Vector3(0, 1.85, 0);
+  // Elevated oblique action camera angle (~30 deg pitch): crisp floor combat clarity over pillars/bridges + Shushan sky framing
+  private readonly baseOffset = new THREE.Vector3(0, 9.4, 13.4);
+  private readonly currentPos = new THREE.Vector3(0, 9.4, 13.4);
+  private readonly currentLook = new THREE.Vector3(0, 1.65, 0);
   private readonly targetLook = new THREE.Vector3();
   private readonly targetPos = new THREE.Vector3();
 
   private shakeTrauma = 0;
   private zoomFactor = 1.0;
   private followRamp = 1.0;
+  private prevHeroZ: number | null = null;
+  private forwardZBias = -0.85;
 
   private readonly cutscene: CutsceneState = {
     active: false,
@@ -51,7 +53,9 @@ export class CameraRig {
   }
 
   snapTo(heroPos: THREE.Vector3): void {
-    this.currentLook.set(heroPos.x, 1.85, heroPos.z);
+    this.prevHeroZ = heroPos.z;
+    this.forwardZBias = -0.85;
+    this.currentLook.set(heroPos.x, 1.65, heroPos.z + this.forwardZBias);
     this.currentPos.copy(this.currentLook).addScaledVector(this.baseOffset, this.zoomFactor);
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLook);
@@ -103,8 +107,18 @@ export class CameraRig {
     bossPos: THREE.Vector3 | null,
     mouseNdc: { x: number; y: number },
   ): void {
-    // Compute exact desired gameplay look & position (elevated lookY reveals Shushan archway, floating peaks & sky sword array!)
-    this.targetLook.set(heroPos.x, 1.85, heroPos.z);
+    // Track forward -Z canyon crossing movement to bias camera sightline ahead over pillars/bridges
+    let desiredForwardBias = -0.75;
+    if (this.prevHeroZ !== null && dt > 1e-4) {
+      const vz = (heroPos.z - this.prevHeroZ) / dt;
+      if (vz < -0.4) desiredForwardBias = -1.25;
+      else if (vz > 0.4) desiredForwardBias = -0.5;
+    }
+    this.prevHeroZ = heroPos.z;
+    this.forwardZBias = damp(this.forwardZBias, desiredForwardBias, 5.0, dt);
+
+    // Compute exact desired gameplay look & position (elevated pitch + targetLook.y = 1.65 keeps bridges/crossings clear)
+    this.targetLook.set(heroPos.x, 1.65, heroPos.z);
     if (bossPos) {
       // Leash focus at most 3.0m toward Boss so Li Xiaoyao always stays near center
       const dx = bossPos.x - heroPos.x;
@@ -115,10 +129,11 @@ export class CameraRig {
         this.targetLook.x += (dx / d) * bias;
         this.targetLook.z += (dz / d) * bias;
       }
+      this.targetLook.z += this.forwardZBias * 0.4;
     } else {
-      // Very slight mouse lead (max 0.8m)
+      // Slight forward -Z bias toward canyon crossings + gentle mouse lead
       this.targetLook.x += clamp(mouseNdc.x, -1, 1) * 0.75;
-      this.targetLook.z -= clamp(mouseNdc.y, -1, 1) * 0.55;
+      this.targetLook.z += this.forwardZBias - clamp(mouseNdc.y, -1, 1) * 0.55;
     }
 
     const desiredZoom = bossPos ? 1.12 : this.zoomFactor;

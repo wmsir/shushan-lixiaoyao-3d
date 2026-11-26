@@ -174,8 +174,8 @@ export function createHero(): HeroState {
     stamina: 100,
     maxStamina: 100,
     ult: 35,
-    gourds: 3,
-    maxGourds: 3,
+    gourds: 2,
+    maxGourds: 2,
 
     state: 'idle',
     stateTime: 0,
@@ -288,6 +288,16 @@ export function createPeerHero(name: string, isEnemy: boolean): PeerHeroState {
   };
 }
 
+export const ENEMY_BASE_STATS: Record<
+  Exclude<CharacterArchetype, 'xiaoyao' | 'ally'>,
+  { hp: number; poise: number; atk: number }
+> = {
+  bladesman: { hp: 215, poise: 64, atk: 24 },
+  caster: { hp: 165, poise: 46, atk: 23 },
+  elite: { hp: 440, poise: 112, atk: 31 },
+  boss: { hp: 840, poise: 175, atk: 39 },
+};
+
 export interface EnemyCreateOverrides {
   name?: string;
   hpMult?: number;
@@ -322,8 +332,9 @@ export function createEnemy(
   const affix = overrides?.affix;
   const isBoss = kind === 'boss';
   const isElite = kind === 'elite';
-  const baseHp = isBoss ? 520 : isElite ? 275 : kind === 'bladesman' ? 140 : 108;
-  const basePoise = isBoss ? 125 : isElite ? 82 : kind === 'bladesman' ? 46 : 32;
+  const baseStats = ENEMY_BASE_STATS[kind];
+  const baseHp = baseStats.hp;
+  const basePoise = baseStats.poise;
   const ironcladBonus = affix === 'ironclad' ? 1.38 : 1.0;
   const maxHp = Math.round(baseHp * (overrides?.hpMult ?? 1.0));
   const maxPoise = Math.round(basePoise * (overrides?.poiseMult ?? 1.0) * ironcladBonus);
@@ -400,12 +411,12 @@ export function createEnemy(
     moveKind: 'cleave',
     moveHasHit: false,
     moveRange: isBoss ? 3.8 : isElite ? 3.0 : 2.4,
-    moveDamage: Math.round((isBoss ? 26 : isElite ? 21 : 16) * damageMult),
+    moveDamage: Math.round(baseStats.atk * damageMult),
     moveUnblockable: false,
     comboFollowup: false,
 
     orbitDir: rng() > 0.5 ? 1 : -1,
-    attackCooldown: (isBoss ? 0.95 : 0.7 + rng() * 0.65) / speedMult,
+    attackCooldown: (isBoss ? 0.78 : 0.57 + rng() * 0.53) / speedMult,
     hitstopTimer: 0,
     shakeTimer: 0,
     deathTimer: 0,

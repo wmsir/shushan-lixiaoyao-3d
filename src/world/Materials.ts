@@ -509,3 +509,189 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
   mesh.frustumCulled = false;
   return mesh;
 }
+
+/**
+ * Stratified emerald-slate cliff rock maps for Shushan canyon walls.
+ */
+export function createCanyonCliffMaps(): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const size = 512;
+  const albedoC = document.createElement('canvas');
+  const bumpC = document.createElement('canvas');
+  const roughC = document.createElement('canvas');
+  albedoC.width = bumpC.width = roughC.width = size;
+  albedoC.height = bumpC.height = roughC.height = size;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const bCtx = bumpC.getContext('2d')!;
+  const rCtx = roughC.getContext('2d')!;
+
+  aCtx.fillStyle = '#1f2d38';
+  aCtx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#808080';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#dcdcdc';
+  rCtx.fillRect(0, 0, size, size);
+
+  for (let y = 0; y < size; y += 14) {
+    const h = hash2(y, 3.7);
+    const strataH = 8 + Math.floor(h * 10);
+    const base = Math.floor(28 + h * 26);
+    const r = base;
+    const g = Math.floor(base * 1.24 + (h > 0.62 ? 12 : 4));
+    const b = Math.floor(base * 1.32 + 10);
+
+    aCtx.fillStyle = `rgb(${r},${g},${b})`;
+    aCtx.fillRect(0, y, size, strataH);
+
+    aCtx.fillStyle = 'rgba(8, 14, 20, 0.55)';
+    aCtx.fillRect(0, y + strataH - 2, size, 3);
+
+    if (h > 0.58) {
+      aCtx.fillStyle = `rgba(34, 88, 72, ${(0.28 + h * 0.25).toFixed(2)})`;
+      aCtx.fillRect(0, y, size, 4);
+    }
+
+    const bVal = Math.floor(105 + h * 110);
+    bCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
+    bCtx.fillRect(0, y, size, strataH);
+    bCtx.fillStyle = '#202020';
+    bCtx.fillRect(0, y + strataH - 2, size, 3);
+
+    const rVal = Math.floor(190 + h * 48);
+    rCtx.fillStyle = `rgb(${rVal},${rVal},${rVal})`;
+    rCtx.fillRect(0, y, size, strataH);
+  }
+
+  for (let i = 0; i < 42; i++) {
+    const fx = hash2(i, 8.3) * size;
+    const fy = hash2(i, 19.1) * size;
+    const fh = 32 + hash2(i, 5.4) * 90;
+    aCtx.strokeStyle = 'rgba(10, 16, 24, 0.42)';
+    aCtx.lineWidth = 2 + hash2(i, 2.2) * 2;
+    aCtx.beginPath();
+    aCtx.moveTo(fx, fy);
+    aCtx.lineTo(fx + (hash2(i, 11.7) - 0.5) * 18, fy + fh);
+    aCtx.stroke();
+
+    bCtx.strokeStyle = '#181818';
+    bCtx.lineWidth = 3;
+    bCtx.beginPath();
+    bCtx.moveTo(fx, fy);
+    bCtx.lineTo(fx + (hash2(i, 11.7) - 0.5) * 18, fy + fh);
+    bCtx.stroke();
+  }
+
+  for (let i = 0; i < 2400; i++) {
+    const px = hash2(i, 4.9) * size;
+    const py = hash2(i, 15.3) * size;
+    aCtx.fillStyle = hash2(i, 6.1) > 0.5 ? 'rgba(130, 175, 190, 0.06)' : 'rgba(6, 10, 15, 0.14)';
+    aCtx.fillRect(px, py, 2, 2);
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, 2);
+    tex.anisotropy = 8;
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+
+  return {
+    map: wrap(albedoC, true),
+    bumpMap: wrap(bumpC, false),
+    roughnessMap: wrap(roughC, false),
+  };
+}
+
+/**
+ * Wet mossy river-bed pebble & slate maps for the Crossing 0 shallow stream ford.
+ */
+export function createStreamStoneMaps(): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const size = 512;
+  const albedoC = document.createElement('canvas');
+  const bumpC = document.createElement('canvas');
+  const roughC = document.createElement('canvas');
+  albedoC.width = bumpC.width = roughC.width = size;
+  albedoC.height = bumpC.height = roughC.height = size;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const bCtx = bumpC.getContext('2d')!;
+  const rCtx = roughC.getContext('2d')!;
+
+  aCtx.fillStyle = '#18333a';
+  aCtx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#686868';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#7c7c7c';
+  rCtx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 420; i++) {
+    const px = hash2(i, 1.7) * size;
+    const py = hash2(i, 5.9) * size;
+    const rx = 8 + hash2(i, 9.1) * 16;
+    const ry = 6 + hash2(i, 13.4) * 13;
+    const rot = hash2(i, 2.3) * Math.PI;
+    const h = hash2(i, 7.7);
+
+    const tone = Math.floor(32 + h * 34);
+    aCtx.save();
+    aCtx.translate(px, py);
+    aCtx.rotate(rot);
+    aCtx.fillStyle = h > 0.72
+      ? `rgb(${tone},${Math.floor(tone * 1.42)},${Math.floor(tone * 1.24)})`
+      : `rgb(${tone},${Math.floor(tone * 1.24)},${Math.floor(tone * 1.38)})`;
+    aCtx.beginPath();
+    aCtx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    aCtx.fill();
+    aCtx.strokeStyle = 'rgba(10, 22, 28, 0.55)';
+    aCtx.lineWidth = 2;
+    aCtx.stroke();
+    aCtx.restore();
+
+    const bVal = Math.floor(135 + h * 85);
+    bCtx.save();
+    bCtx.translate(px, py);
+    bCtx.rotate(rot);
+    bCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
+    bCtx.beginPath();
+    bCtx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    bCtx.fill();
+    bCtx.restore();
+
+    const rVal = Math.floor(88 + h * 62);
+    rCtx.save();
+    rCtx.translate(px, py);
+    rCtx.rotate(rot);
+    rCtx.fillStyle = `rgb(${rVal},${rVal},${rVal})`;
+    rCtx.beginPath();
+    rCtx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    rCtx.fill();
+    rCtx.restore();
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3.5);
+    tex.anisotropy = 8;
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+
+  return {
+    map: wrap(albedoC, true),
+    bumpMap: wrap(bumpC, false),
+    roughnessMap: wrap(roughC, false),
+  };
+}

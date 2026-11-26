@@ -20,6 +20,7 @@ import {
   createEnemy,
   createHero,
   createPeerHero,
+  ENEMY_BASE_STATS,
   type EnemyCreateOverrides,
   type EnemyEntity,
   type HeroState,
@@ -27,6 +28,7 @@ import {
   type ProjectileEntity,
 } from './CombatEntities';
 import {
+  CAMPAIGN_STAGES,
   CampaignSaveStore,
   type DungeonDef,
   type StageDef,
@@ -163,6 +165,7 @@ export class Game {
   private lastNow = 0;
   private disposed = false;
   private lastSkillEFeedbackAt = -999;
+  private waterRippleTimer = 0;
 
   // Reusable math scratch vectors
   private readonly raycaster = new THREE.Raycaster();
@@ -577,7 +580,7 @@ export class Game {
       h.hp = Math.min(h.maxHp, h.hp);
       h.delayedHp = Math.min(h.maxHp, h.delayedHp);
     }
-    const nextMaxGourds = 3 + loadout.gourdBonus + this.blessings.extraGourds;
+    const nextMaxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds;
     if (nextMaxGourds > h.maxGourds) {
       h.gourds += nextMaxGourds - h.maxGourds;
     }
@@ -908,7 +911,7 @@ export class Game {
     const loadout = this.getLoadoutStats();
     const h = this.hero;
     h.maxHp = 180 + realm.hpBonus + loadout.maxHpBonus + this.blessings.maxHpBonus;
-    h.maxGourds = 3 + loadout.gourdBonus + this.blessings.extraGourds;
+    h.maxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds;
     h.pos.copy(pos);
     h.vel.set(0, 0, 0);
     h.yaw = yaw;
@@ -956,6 +959,7 @@ export class Game {
     this.shadowAttackActive = false;
     this.q2AttackActive = false;
     this.q2DashTargetId = null;
+    this.waterRippleTimer = 0;
     h.rig.root.position.copy(pos);
     h.rig.root.rotation.y = yaw;
     h.rig.applyPose('combatIdle', 0, 0, 0.016, 0);
@@ -1109,7 +1113,7 @@ export class Game {
       this.hero.rig.applyPose('combatIdle', 0, this.elapsed, dt, 0);
       this.updatePeerHero(dt);
       this.arena.update(dt, this.elapsed, this.hero.pos);
-      this.vfx.update(dt, this.elapsed, this.hero.pos);
+      this.vfx.update(dt, this.elapsed, this.hero.pos, undefined, undefined, this.camera.position);
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, boss?.pos ?? null, this.input.mouseNdc);
 
       if (!this.cameraRig.isCutsceneActive()) {
@@ -1148,6 +1152,7 @@ export class Game {
         (kind) => {
           if (kind !== 'gear') this.audio.playDropChime(kind);
         },
+        this.camera.position,
       );
       this.arena.update(dt, this.elapsed, this.hero.pos);
       const boss = this.getActiveBoss();
@@ -1169,7 +1174,7 @@ export class Game {
     } else {
       this.targetRingMesh.visible = false;
       this.updatePeerHero(dt * 0.5);
-      this.vfx.update(dt * 0.5, this.elapsed, this.hero.pos);
+      this.vfx.update(dt * 0.5, this.elapsed, this.hero.pos, undefined, undefined, this.camera.position);
       this.arena.update(dt * 0.5, this.elapsed, this.hero.pos);
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, null, { x: 0, y: 0 });
     }
@@ -1523,6 +1528,17 @@ export class Game {
       h.rig.applyPose('hit', p, this.elapsed, dt, 0);
       if (p >= 1) h.state = 'idle';
     }
+
+    const movingInWater = (h.state === 'run' || h.state === 'dodge') && this.arena.isInShallowWater(h.pos);
+    if (movingInWater) {
+      this.waterRippleTimer -= dt;
+      if (this.waterRippleTimer <= 0) {
+        this.waterRippleTimer = 0.18;
+        this.vfx.spawnWaterRipple(h.pos, h.state === 'dodge' ? 1.45 : 0.95);
+      }
+    } else {
+      this.waterRippleTimer = 0;
+    }
   }
 
   private updateTargetRingAndThreat(dt: number): CombatThreatState {
@@ -1732,6 +1748,7 @@ export class Game {
       this.shadowAttackActive = false;
       this.q2AttackActive = false;
       this.q2DashTargetId = null;
+    this.waterRippleTimer = 0;
       h.rig.setSwordGlow(0.85);
     }
   }
@@ -2208,6 +2225,23 @@ export class Game {
     this.vfx.spawnShockRing(startPos, accent, 0.2, 1.4, 0.25);
   }
 
+  private applyFallingSwordImpact(
+    e: EnemyEntity,
+    baseDmg: number,
+    heavy: boolean,
+    yaw: number,
+    poise: number,
+    isCrit: boolean,
+    skill: string,
+    hitCounts: Map<number, number>,
+  ): void {
+    const prevHits = hitCounts.get(e.id) ?? 0;
+    hitCounts.set(e.id, prevHits + 1);
+    const isHeavyTarget = e.kind === 'boss' || e.kind === 'elite';
+    const dimMult = isHeavyTarget && prevHits >= 4 ? 0.55 : 1.0;
+    this.applyHeroAttackToEnemy(e, Math.round(baseDmg * dimMult), heavy, yaw, poise, isCrit, skill);
+  }
+
   private castSkillEAt(center: THREE.Vector3, isLocalDamage: boolean): void {
     const h = this.hero;
     this.vfx.spawnSkySwordGate(
@@ -2227,6 +2261,7 @@ export class Game {
       ? this.enemies.filter((e) => e.aiState !== 'dead' && (e.swordMarkTimer ?? 0) > 0 && e.pos.distanceTo(center) <= 14)
       : [];
     const markedIds = new Set<number>(markedEnemies.map((e) => e.id));
+    const swordHitCounts = new Map<number, number>();
 
     let pvpHitSent = false;
     const perSwordDmg = Math.round(22 * this.getHeroDamageScale());
@@ -2252,7 +2287,7 @@ export class Game {
               const resonated = markedIds.has(e.id) || (e.swordMarkTimer ?? 0) > 0;
               const dmg = resonated ? Math.round(perSwordDmg * 1.25) : perSwordDmg;
               const poise = resonated ? 18 : 9;
-              this.applyHeroAttackToEnemy(e, dmg, resonated, h.yaw, poise, resonated, 'skillE');
+              this.applyFallingSwordImpact(e, dmg, resonated, h.yaw, poise, resonated, 'skillE', swordHitCounts);
             }
           }
           if (this.mp.mode === 'solo' && this.peer && !this.peer.dead && !pvpHitSent) {
@@ -2287,7 +2322,7 @@ export class Game {
             for (const e of this.enemies) {
               if (e.aiState === 'dead') continue;
               if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.4 + e.radius) {
-                this.applyHeroAttackToEnemy(
+                this.applyFallingSwordImpact(
                   e,
                   Math.round(perSwordDmg * 1.25),
                   true,
@@ -2295,6 +2330,7 @@ export class Game {
                   18,
                   true,
                   'skillE',
+                  swordHitCounts,
                 );
               }
             }
@@ -2399,6 +2435,7 @@ export class Game {
       duration: 2.3,
     });
 
+    const swordHitCounts = new Map<number, number>();
     const rainDmg = Math.round(24 * this.getHeroDamageScale());
     for (let i = 0; i < 16; i++) {
       const ang = (i / 16) * Math.PI * 2 + this.rng() * 0.25;
@@ -2420,7 +2457,7 @@ export class Game {
           for (const e of this.enemies) {
             if (e.aiState === 'dead') continue;
             if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.6 + e.radius) {
-              this.applyHeroAttackToEnemy(e, rainDmg, false, h.yaw, 22, true, 'skillR');
+              this.applyFallingSwordImpact(e, rainDmg, false, h.yaw, 22, true, 'skillR', swordHitCounts);
             }
           }
         },
@@ -2662,16 +2699,14 @@ export class Game {
     );
 
     if (e.kind !== 'boss') {
-      if (this.rng() < 0.35) {
+      if (this.rng() < 0.2) {
         this.vfx.spawnLootDrop(e.pos, 'heal', this.rng);
       }
       if (e.kind === 'caster' || e.kind === 'elite') {
         this.vfx.spawnLootDrop(e.pos, 'spirit', this.rng);
-        this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
       }
     } else {
       this.vfx.spawnLootDrop(e.pos, 'spirit', this.rng);
-      this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
       this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
     }
 
@@ -2754,8 +2789,8 @@ export class Game {
     }
     this.audio.playHeal();
     if (kind === 'heal') {
-      h.hp = Math.min(h.maxHp, h.hp + 36);
-      this.spawnWorldCallout('+36 气血', h.pos, 'heal');
+      h.hp = Math.min(h.maxHp, h.hp + 26);
+      this.spawnWorldCallout('+26 气血', h.pos, 'heal');
     } else if (kind === 'spirit') {
       h.spirit = Math.min(h.maxSpirit, h.spirit + 35);
       h.ult = Math.min(100, h.ult + 16 * this.blessings.ultGainMult);
@@ -2835,7 +2870,7 @@ export class Game {
 
   private updateEnemies(dt: number): void {
     const h = this.hero;
-    const maxMeleeAttackers = this.getActiveStageDef().chapter === 1 ? 2 : 3;
+    const maxMeleeAttackers = this.getActiveStageDef().chapter <= 2 ? 3 : 4;
     let activeMeleeAttackers = 0;
     for (const e of this.enemies) {
       if (
@@ -2901,7 +2936,7 @@ export class Game {
         if (p >= 1) {
           e.aiState = 'orbit';
           e.stateTime = 0;
-          e.attackCooldown = 0.55;
+          e.attackCooldown = 0.45;
         }
         continue;
       }
@@ -3028,7 +3063,7 @@ export class Game {
           } else {
             e.aiState = 'recover';
             e.stateTime = 0;
-            e.stateDuration = e.kind === 'boss' ? (e.phase === 2 ? 0.4 : 0.52) : e.kind === 'elite' ? 0.48 : 0.45;
+            e.stateDuration = e.kind === 'boss' ? (e.phase === 2 ? 0.34 : 0.44) : e.kind === 'elite' ? 0.4 : 0.34;
           }
         }
       } else if (e.aiState === 'recover') {
@@ -3038,7 +3073,7 @@ export class Game {
           e.aiState = 'orbit';
           e.stateTime = 0;
           e.attackCooldown =
-            (e.kind === 'boss' ? (e.phase === 2 ? 0.65 : 0.9) : e.kind === 'elite' ? 0.85 : 0.85 + this.rng() * 0.6) /
+            (e.kind === 'boss' ? (e.phase === 2 ? 0.53 : 0.74) : e.kind === 'elite' ? 0.7 : 0.7 + this.rng() * 0.49) /
             e.speedMult;
           e.orbitDir = this.rng() > 0.5 ? 1 : -1;
         }
@@ -3106,37 +3141,38 @@ export class Game {
 
     const fast = (e.kind === 'boss' && e.phase === 2 ? 0.82 : e.kind === 'elite' ? 0.9 : 1.0) / e.speedMult;
 
+    const baseAtk = ENEMY_BASE_STATS[e.kind].atk;
     if (move === 'cleave') {
       e.stateDuration = (customWindup ?? (e.kind === 'boss' ? 0.72 : e.kind === 'elite' ? 0.66 : 0.62)) * fast;
       e.moveRange = e.kind === 'boss' ? 4.3 : e.kind === 'elite' ? 3.4 : 2.85;
-      e.moveDamage = Math.round((e.kind === 'boss' ? 24 : e.kind === 'elite' ? 20 : 15) * e.damageMult);
+      e.moveDamage = Math.round(baseAtk * (e.kind === 'boss' ? 0.92 : 0.96) * e.damageMult);
       e.moveUnblockable = false;
       e.telegraph = this.vfx.createTelegraph('fan', e.pos, e.yaw, e.moveRange * 1.45, e.moveRange);
     } else if (move === 'lunge') {
       e.stateDuration = 0.74 * fast;
       e.moveRange = 2.6;
-      e.moveDamage = Math.round((e.kind === 'boss' ? 28 : 22) * e.damageMult);
+      e.moveDamage = Math.round(baseAtk * 1.08 * e.damageMult);
       e.moveUnblockable = false;
       e.telegraphPos.copy(e.pos);
       e.telegraph = this.vfx.createTelegraph('line', e.pos, e.yaw, 2.3, 8.8);
     } else if (move === 'slam') {
       e.stateDuration = 0.92 * fast;
       e.moveRange = e.kind === 'boss' ? 5.4 : 4.2;
-      e.moveDamage = Math.round((e.kind === 'boss' ? 32 : 24) * e.damageMult);
+      e.moveDamage = Math.round(baseAtk * (e.kind === 'boss' ? 1.24 : 1.16) * e.damageMult);
       e.moveUnblockable = true;
       e.telegraphPos.copy(e.pos);
       e.telegraph = this.vfx.createTelegraph('circle', e.pos, 0, e.moveRange, e.moveRange, new THREE.Color(2.2, 0.2, 0.65));
     } else if (move === 'yinCircle') {
       e.stateDuration = 1.05;
       e.moveRange = 3.1;
-      e.moveDamage = Math.round(20 * e.damageMult);
+      e.moveDamage = Math.round(baseAtk * 1.24 * e.damageMult);
       e.moveUnblockable = true;
       e.telegraphPos.copy(targetPos ?? this.hero.pos);
       e.telegraph = this.vfx.createTelegraph('circle', e.telegraphPos, 0, e.moveRange, e.moveRange, new THREE.Color(1.4, 0.45, 2.35));
     } else if (move === 'orb' || move === 'barrage') {
       e.stateDuration = move === 'barrage' ? 0.75 : 0.68;
       e.moveRange = 14;
-      e.moveDamage = Math.round((move === 'barrage' ? 18 : 16) * e.damageMult);
+      e.moveDamage = Math.round((move === 'barrage' ? baseAtk * 0.72 : baseAtk) * e.damageMult);
       e.moveUnblockable = false;
     }
   }
@@ -3154,7 +3190,7 @@ export class Game {
         const startPos = e.pos.clone().add(new THREE.Vector3(Math.sin(ang) * 1.1, 1.25, Math.cos(ang) * 1.1));
         mesh.position.copy(startPos);
         this.scene.add(mesh);
-        const speed = e.kind === 'boss' ? 11.5 : 9.2;
+        const speed = e.kind === 'boss' ? 13.2 : 11.2;
         this.projectiles.push({
           id: this.nextEntityId++,
           friendly: false,
@@ -4146,6 +4182,20 @@ export class Game {
           this.buildTacticalState(),
         );
         return true;
+      },
+      getCanyonState: () => {
+        const curZone = this.arena.getZoneIndexAtZ(this.hero.pos.z);
+        const stage1EnemyHpSum = CAMPAIGN_STAGES[0].waves
+          .flatMap((w) => w.enemies)
+          .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
+        return {
+          zoneName: this.arena.getZoneName(curZone),
+          inWater: this.arena.isInShallowWater(this.hero.pos),
+          progressPct: this.arena.getProgressPct(this.hero.pos.z),
+          sightline: this.arena.getSightlineStats(),
+          stage1EnemyHpSum,
+          liveWaveHpSum: this.enemies.reduce((s, e) => s + (e.aiState !== 'dead' ? e.maxHp : 0), 0),
+        };
       },
       teleportToZone: (zIdx: 0 | 1 | 2) => {
         const maxZone = this.arena.getMaxZone();

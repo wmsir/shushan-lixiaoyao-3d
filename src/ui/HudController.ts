@@ -121,6 +121,42 @@ const SKILL_MAX_CD = {
   F: 1.5,
 };
 
+interface ComboCodexEntry {
+  num: string;
+  name: string;
+  descHtml: string;
+  isUlt?: boolean;
+}
+
+const COMBO_CODEX_ENTRIES: readonly ComboCodexEntry[] = [
+  {
+    num: '1',
+    name: '普攻四连',
+    descHtml: '左键 / J / 出剑 ×4 破霸体',
+  },
+  {
+    num: '2',
+    name: '踏剑追影',
+    descHtml: 'Q 命中挂印 → 再按 Q 瞬身追斩（<b>+20剑意 · -1.5s万剑CD</b>）',
+  },
+  {
+    num: '3',
+    name: '剑印引雷',
+    descHtml: 'Q 挂印 → E 万剑诀（额外 <b>+4</b> 追踪天剑 <b>+25%</b> 伤）',
+  },
+  {
+    num: '4',
+    name: '流云破势',
+    descHtml: 'Space 极限闪避 / K 弹反 → 普攻（<b>流云拔刀斩</b> / <b>破势处决</b>）',
+  },
+  {
+    num: '5',
+    name: '万剑归宗',
+    descHtml: '6秒内打满 <b>3种不同招印</b>（斩/御/万/身）→ 点金色 <b>万剑归宗</b> 或按 <b>R</b> <b>免费双大招</b>',
+    isUlt: true,
+  },
+];
+
 export class HudController {
   private readonly appRoot = this.q('#app');
   private readonly titleOverlay = this.q('#title-overlay');
@@ -296,6 +332,8 @@ export class HudController {
   constructor(private readonly callbacks: HudCallbacks) {
     this.appVersionBadge.textContent = `v${APP_VERSION}`;
     this.pauseVersionBadge.textContent = `v${APP_VERSION}`;
+    this.populateComboCodex(this.q('#title-combo-codex'));
+    this.populateComboCodex(this.q('#pause-combo-codex'));
     const bindImg = (id: string, src: string) => {
       (this.q(id) as HTMLImageElement).src = src;
     };
@@ -1320,7 +1358,7 @@ export class HudController {
       this.minimapBox.classList.add('visible');
       this.minimapZoneName.textContent = tactical.zoneName;
       this.minimapPct.textContent = `${Math.round(clamp(tactical.progressPct, 0, 100))}%`;
-      this.renderMinimap(tactical);
+      this.drawMinimap(tactical);
     } else {
       this.minimapBox.classList.remove('visible');
     }
@@ -1393,7 +1431,25 @@ export class HudController {
     }
   }
 
-  private renderMinimap(tactical: HudTacticalState): void {
+  private populateComboCodex(container: HTMLElement): void {
+    const rowsHtml = COMBO_CODEX_ENTRIES.map(
+      (entry) => `
+      <div class="combo-codex-row${entry.isUlt ? ' is-ult' : ''}">
+        <span class="combo-codex-num">${entry.num}</span>
+        <span class="combo-codex-name">${entry.name}</span>
+        <span class="combo-codex-desc">${entry.descHtml}</span>
+      </div>`,
+    ).join('');
+    container.innerHTML = `
+      <div class="combo-codex-head">
+        <span>剑诀连招谱 · 实操秘要</span>
+        <span class="combo-codex-sub">五式御剑</span>
+      </div>
+      <div class="combo-codex-list">${rowsHtml}</div>
+    `;
+  }
+
+  private drawMinimap(tactical: HudTacticalState): void {
     const ctx = this.minimapCtx;
     if (!ctx) return;
 
@@ -1411,130 +1467,363 @@ export class HudController {
 
     ctx.clearRect(0, 0, w, h);
 
-    // Subtle ink & corridor meridian backdrop
-    const bg = ctx.createLinearGradient(0, h, 0, 0);
-    bg.addColorStop(0, 'rgba(9, 18, 30, 0.92)');
-    bg.addColorStop(1, 'rgba(14, 24, 38, 0.92)');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, w, h);
-
-    ctx.strokeStyle = 'rgba(223, 192, 117, 0.1)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.5, 6);
-    ctx.lineTo(w * 0.5, h - 6);
-    ctx.stroke();
+    const now = performance.now();
+    this.drawMinimapCanyonBackdrop(ctx, w, h, now);
 
     const zoneCount = tactical.maxZone + 1;
-    const platW = 76;
+    const platW = 72;
     const platH = zoneCount === 1 ? usableH * 0.84 : zoneCount === 2 ? usableH * 0.36 : usableH * 0.23;
     const centerYForZone = (zi: number): number => {
       if (zoneCount === 1) return h * 0.5;
       if (zoneCount === 2) return zi === 0 ? h - padY - platH * 0.5 : padY + platH * 0.5;
       return zi === 0 ? h - padY - platH * 0.5 : zi === 1 ? h * 0.5 : padY + platH * 0.5;
     };
+    const activeZoneIdx: 0 | 1 | 2 =
+      zoneCount === 1
+        ? 0
+        : zoneCount === 2
+          ? tactical.heroZ < -21
+            ? 1
+            : 0
+          : tactical.heroZ < -63
+            ? 2
+            : tactical.heroZ < -21
+              ? 1
+              : 0;
 
-    const now = performance.now();
-
-    // 1. Connecting bridges (bottom-to-top) + unlocked jade route or crimson locked barrier
-    const bridgeW = 24;
-    const bridgeX = (w - bridgeW) * 0.5;
+    // 1. Crossings: Crossing 0 (碧水浅滩 blue-teal ford) & Crossing 1 (飞瀑虹桥 golden-stone arch)
     for (let zi = 0; zi < tactical.maxZone; zi++) {
       const yBottom = centerYForZone(zi) - platH * 0.5 + 2;
       const yTop = centerYForZone(zi + 1) + platH * 0.5 - 2;
-      const bH = Math.max(4, yBottom - yTop);
-      const unlocked = zi + 1 <= tactical.unlockedZone;
-
-      ctx.fillStyle = unlocked ? 'rgba(24, 54, 68, 0.85)' : 'rgba(20, 24, 34, 0.72)';
-      ctx.fillRect(bridgeX, yTop, bridgeW, bH);
-      ctx.strokeStyle = unlocked ? 'rgba(76, 217, 208, 0.56)' : 'rgba(130, 145, 165, 0.28)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(bridgeX, yTop, bridgeW, bH);
-
-      if (unlocked) {
-        ctx.save();
-        ctx.strokeStyle = '#5cf6e8';
-        ctx.lineWidth = 2;
-        ctx.shadowColor = '#4cd9d0';
-        ctx.shadowBlur = 7;
-        ctx.setLineDash([4, 3]);
-        ctx.lineDashOffset = (now * 0.018) % 14;
-        ctx.beginPath();
-        ctx.moveTo(w * 0.5, centerYForZone(zi) - 4);
-        ctx.lineTo(w * 0.5, centerYForZone(zi + 1) + 4);
-        ctx.stroke();
-        ctx.restore();
-      } else {
-        const midY = yTop + bH * 0.5;
-        ctx.save();
-        ctx.strokeStyle = '#ff4b5e';
-        ctx.lineWidth = 2;
-        ctx.shadowColor = '#ff384c';
-        ctx.shadowBlur = 6;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(bridgeX - 5, midY);
-        ctx.lineTo(bridgeX + bridgeW + 5, midY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = '#ff4b5e';
-        ctx.beginPath();
-        ctx.moveTo(w * 0.5, midY - 3.5);
-        ctx.lineTo(w * 0.5 + 3.5, midY);
-        ctx.lineTo(w * 0.5, midY + 3.5);
-        ctx.lineTo(w * 0.5 - 3.5, midY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
+      this.drawMinimapCrossing(ctx, w, yTop, yBottom, centerYForZone(zi), centerYForZone(zi + 1), zi, zi + 1 <= tactical.unlockedZone, now);
     }
 
-    // 2. Zone Platforms (0..maxZone)
-    const chamfer = 11;
+    // 2. Three Terraces (云溪山门 / 翠竹剑涧 / 锁妖绝壁) with Active Zone Highlight
     for (let zi = 0; zi <= tactical.maxZone; zi++) {
-      const cy = centerYForZone(zi);
-      const x0 = (w - platW) * 0.5;
-      const x1 = x0 + platW;
-      const y0 = cy - platH * 0.5;
-      const y1 = cy + platH * 0.5;
-      const unlocked = zi <= tactical.unlockedZone;
-      const isBossZone = zi === tactical.maxZone && tactical.maxZone > 0;
+      this.drawMinimapTerrace(
+        ctx,
+        w,
+        centerYForZone(zi),
+        platW,
+        platH,
+        zi <= tactical.unlockedZone,
+        zi === activeZoneIdx,
+        zi === tactical.maxZone && tactical.maxZone > 0,
+        now,
+      );
+    }
 
+    // 3. Entity Dots & Hero Directional Arrow
+    this.drawMinimapEntities(ctx, tactical.dots, toX, toY, now);
+    this.drawMinimapHeroArrow(ctx, toX(tactical.heroX), toY(tactical.heroZ), tactical.heroYaw);
+  }
+
+  private drawMinimapCanyonBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
+    // Deep mountain gorge ink-emerald gradient
+    const bg = ctx.createLinearGradient(0, h, 0, 0);
+    bg.addColorStop(0, '#07141d');
+    bg.addColorStop(0.5, '#0b1c29');
+    bg.addColorStop(1, '#102533');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // Winding Emerald Canyon River flowing beneath the 3 terraces
+    const traceRiver = () => {
       ctx.beginPath();
-      ctx.moveTo(x0 + chamfer, y0);
-      ctx.lineTo(x1 - chamfer, y0);
-      ctx.lineTo(x1, y0 + chamfer);
-      ctx.lineTo(x1, y1 - chamfer);
-      ctx.lineTo(x1 - chamfer, y1);
-      ctx.lineTo(x0 + chamfer, y1);
-      ctx.lineTo(x0, y1 - chamfer);
-      ctx.lineTo(x0, y0 + chamfer);
-      ctx.closePath();
+      ctx.moveTo(w * 0.64, -6);
+      ctx.bezierCurveTo(w * 0.86, h * 0.22, w * 0.16, h * 0.36, w * 0.24, h * 0.54);
+      ctx.bezierCurveTo(w * 0.32, h * 0.72, w * 0.84, h * 0.8, w * 0.42, h + 6);
+    };
 
-      ctx.fillStyle = unlocked
-        ? isBossZone
-          ? 'rgba(40, 22, 34, 0.88)'
-          : 'rgba(18, 36, 52, 0.88)'
-        : 'rgba(13, 21, 33, 0.72)';
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Outer gorge river bank glow
+    traceRiver();
+    ctx.strokeStyle = 'rgba(14, 74, 72, 0.42)';
+    ctx.lineWidth = 26;
+    ctx.stroke();
+
+    // Main emerald canyon river body
+    const riverGrad = ctx.createLinearGradient(0, 0, 0, h);
+    riverGrad.addColorStop(0, 'rgba(20, 118, 108, 0.78)');
+    riverGrad.addColorStop(0.5, 'rgba(30, 152, 138, 0.82)');
+    riverGrad.addColorStop(1, 'rgba(18, 106, 100, 0.78)');
+    traceRiver();
+    ctx.strokeStyle = riverGrad;
+    ctx.lineWidth = 17;
+    ctx.stroke();
+
+    // Bright jade current vein + subtle animated shimmer
+    traceRiver();
+    ctx.strokeStyle = 'rgba(82, 232, 212, 0.32)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    traceRiver();
+    ctx.strokeStyle = 'rgba(156, 252, 240, 0.42)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([5, 8]);
+    ctx.lineDashOffset = -(now * 0.015) % 13;
+    ctx.stroke();
+    ctx.restore();
+
+    // Subtle cliff ridge edges flanking left & right
+    const leftRidge: Array<[number, number]> = [
+      [0, 0],
+      [14, 0],
+      [11, h * 0.14],
+      [16, h * 0.27],
+      [10, h * 0.42],
+      [15, h * 0.56],
+      [9, h * 0.71],
+      [14, h * 0.86],
+      [10, h],
+      [0, h],
+    ];
+    const rightRidge: Array<[number, number]> = [
+      [w, 0],
+      [w - 11, 0],
+      [w - 15, h * 0.16],
+      [w - 9, h * 0.31],
+      [w - 16, h * 0.46],
+      [w - 10, h * 0.6],
+      [w - 15, h * 0.75],
+      [w - 9, h * 0.89],
+      [w - 13, h],
+      [w, h],
+    ];
+
+    for (const ridge of [leftRidge, rightRidge]) {
+      ctx.save();
+      ctx.beginPath();
+      ridge.forEach(([px, py], idx) => (idx === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(9, 17, 26, 0.88)';
       ctx.fill();
 
-      ctx.strokeStyle = unlocked
-        ? isBossZone
-          ? 'rgba(235, 118, 128, 0.62)'
-          : 'rgba(76, 217, 208, 0.56)'
-        : 'rgba(148, 166, 188, 0.24)';
-      ctx.lineWidth = unlocked ? 1.4 : 1;
-      ctx.stroke();
-
-      // Subtle inner courtyard seal ring
+      // Inner cliff rim highlight
       ctx.beginPath();
-      ctx.arc(w * 0.5, cy, Math.min(platW, platH) * 0.24, 0, Math.PI * 2);
-      ctx.strokeStyle = isBossZone ? 'rgba(245, 148, 120, 0.2)' : 'rgba(223, 192, 117, 0.16)';
-      ctx.lineWidth = 1;
+      for (let i = 1; i < ridge.length - 1; i++) {
+        const [px, py] = ridge[i];
+        if (i === 1) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.strokeStyle = 'rgba(116, 174, 172, 0.3)';
+      ctx.lineWidth = 1.1;
       ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  private drawMinimapCrossing(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    yTop: number,
+    yBottom: number,
+    yZoneFrom: number,
+    yZoneTo: number,
+    crossingIdx: number,
+    unlocked: boolean,
+    now: number,
+  ): void {
+    const bH = Math.max(4, yBottom - yTop);
+    const midY = yTop + bH * 0.5;
+    const bridgeW = 24;
+    const bridgeX = (w - bridgeW) * 0.5;
+
+    if (crossingIdx === 0) {
+      // Crossing 0: 「碧水浅滩」 blue-teal shallow water ripple band + stepping stones
+      const ripplePulse = 0.5 + 0.5 * Math.sin(now * 0.0045);
+      ctx.save();
+      const fordGrad = ctx.createLinearGradient(w * 0.5 - 26, 0, w * 0.5 + 26, 0);
+      fordGrad.addColorStop(0, 'rgba(32, 168, 178, 0.06)');
+      fordGrad.addColorStop(0.5, unlocked ? 'rgba(66, 224, 232, 0.44)' : 'rgba(42, 134, 148, 0.28)');
+      fordGrad.addColorStop(1, 'rgba(32, 168, 178, 0.06)');
+      ctx.fillStyle = fordGrad;
+      ctx.fillRect(w * 0.5 - 26, yTop + 1, 52, Math.max(4, bH - 2));
+
+      // Animated blue-teal ripple waves across the ford
+      ctx.strokeStyle = `rgba(128, 250, 248, ${(0.42 + ripplePulse * 0.28).toFixed(2)})`;
+      ctx.lineWidth = 1.1;
+      for (let r = -1; r <= 1; r++) {
+        const ry = midY + r * Math.min(4.5, bH * 0.26);
+        ctx.beginPath();
+        ctx.moveTo(w * 0.5 - 20, ry);
+        ctx.quadraticCurveTo(w * 0.5, ry + (r % 2 === 0 ? -2.2 : 2.2), w * 0.5 + 20, ry);
+        ctx.stroke();
+      }
+
+      // Stepping stones across the shallow stream
+      for (const offset of [-4, 0, 4]) {
+        ctx.fillStyle = unlocked ? 'rgba(164, 236, 228, 0.72)' : 'rgba(116, 146, 158, 0.52)';
+        ctx.beginPath();
+        ctx.ellipse(w * 0.5 + (offset === 0 ? 1.5 : -1.5), midY + offset, 4.2, 2.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    } else {
+      // Crossing 1: 「飞瀑虹桥」 golden-stone arch bridge + waterfall mist streaks
+      ctx.save();
+      // Subtle waterfall mist alongside the rainbow bridge
+      ctx.strokeStyle = 'rgba(170, 246, 252, 0.34)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([3, 3]);
+      ctx.lineDashOffset = -(now * 0.02) % 6;
+      for (const sideX of [bridgeX - 7, bridgeX + bridgeW + 7]) {
+        ctx.beginPath();
+        ctx.moveTo(sideX, yTop - 1);
+        ctx.lineTo(sideX + (sideX < w * 0.5 ? -2 : 2), yBottom + 1);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      // Golden-stone deck & twin arch rails
+      ctx.fillStyle = unlocked ? 'rgba(84, 58, 24, 0.92)' : 'rgba(38, 30, 24, 0.78)';
+      ctx.fillRect(bridgeX, yTop, bridgeW, bH);
+      ctx.strokeStyle = unlocked ? '#f4cb6e' : 'rgba(182, 146, 86, 0.45)';
+      ctx.lineWidth = 1.6;
+      for (const edgeX of [bridgeX, bridgeX + bridgeW]) {
+        ctx.beginPath();
+        ctx.moveTo(edgeX, yBottom);
+        ctx.quadraticCurveTo(edgeX + (edgeX === bridgeX ? -3.5 : 3.5), midY, edgeX, yTop);
+        ctx.stroke();
+      }
+      // Golden arch ribs across bridge span
+      ctx.strokeStyle = unlocked ? 'rgba(255, 226, 148, 0.68)' : 'rgba(182, 146, 86, 0.35)';
+      ctx.lineWidth = 1;
+      for (const frac of [0.28, 0.72]) {
+        const ay = yTop + bH * frac;
+        ctx.beginPath();
+        ctx.moveTo(bridgeX + 2, ay);
+        ctx.quadraticCurveTo(w * 0.5, ay - 2.4, bridgeX + bridgeW - 2, ay);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
-    // 3. Entity Dots (loot -> ally -> enemy -> elite -> boss)
+    // Unlocked glowing route line or locked crimson barrier seal
+    if (unlocked) {
+      ctx.save();
+      ctx.strokeStyle = crossingIdx === 1 ? '#ffe28c' : '#64f8eb';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = crossingIdx === 1 ? '#f4c55c' : '#4cd9d0';
+      ctx.shadowBlur = 7;
+      ctx.setLineDash([4, 3]);
+      ctx.lineDashOffset = (now * 0.018) % 14;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.5, yZoneFrom - 4);
+      ctx.lineTo(w * 0.5, yZoneTo + 4);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.strokeStyle = '#ff4b5e';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#ff384c';
+      ctx.shadowBlur = 6;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(bridgeX - 5, midY);
+      ctx.lineTo(bridgeX + bridgeW + 5, midY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ff4b5e';
+      ctx.beginPath();
+      ctx.moveTo(w * 0.5, midY - 3.5);
+      ctx.lineTo(w * 0.5 + 3.5, midY);
+      ctx.lineTo(w * 0.5, midY + 3.5);
+      ctx.lineTo(w * 0.5 - 3.5, midY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  private drawMinimapTerrace(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    cy: number,
+    platW: number,
+    platH: number,
+    unlocked: boolean,
+    isActive: boolean,
+    isBossZone: boolean,
+    now: number,
+  ): void {
+    const chamfer = 11;
+    const x0 = (w - platW) * 0.5;
+    const x1 = x0 + platW;
+    const y0 = cy - platH * 0.5;
+    const y1 = cy + platH * 0.5;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x0 + chamfer, y0);
+    ctx.lineTo(x1 - chamfer, y0);
+    ctx.lineTo(x1, y0 + chamfer);
+    ctx.lineTo(x1, y1 - chamfer);
+    ctx.lineTo(x1 - chamfer, y1);
+    ctx.lineTo(x0 + chamfer, y1);
+    ctx.lineTo(x0, y1 - chamfer);
+    ctx.lineTo(x0, y0 + chamfer);
+    ctx.closePath();
+
+    ctx.fillStyle = unlocked
+      ? isBossZone
+        ? 'rgba(42, 20, 32, 0.9)'
+        : 'rgba(15, 34, 48, 0.9)'
+      : 'rgba(12, 20, 32, 0.72)';
+    ctx.fill();
+
+    if (isActive) {
+      const aura = ctx.createRadialGradient(w * 0.5, cy, 2, w * 0.5, cy, platW * 0.52);
+      aura.addColorStop(0, isBossZone ? 'rgba(255, 198, 108, 0.24)' : 'rgba(88, 244, 224, 0.24)');
+      aura.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = aura;
+      ctx.fill();
+
+      const pulse = 0.72 + 0.28 * Math.sin(now * 0.006);
+      ctx.strokeStyle = isBossZone
+        ? `rgba(255, 214, 118, ${pulse.toFixed(2)})`
+        : `rgba(116, 250, 234, ${pulse.toFixed(2)})`;
+      ctx.shadowColor = isBossZone ? '#f7c768' : '#4cd9d0';
+      ctx.shadowBlur = 7;
+      ctx.lineWidth = 1.8;
+    } else {
+      ctx.strokeStyle = unlocked
+        ? isBossZone
+          ? 'rgba(235, 118, 128, 0.56)'
+          : 'rgba(76, 217, 208, 0.48)'
+        : 'rgba(148, 166, 188, 0.24)';
+      ctx.lineWidth = unlocked ? 1.2 : 1;
+    }
+    ctx.stroke();
+
+    // Subtle inner courtyard seal ring
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(w * 0.5, cy, Math.min(platW, platH) * 0.24, 0, Math.PI * 2);
+    ctx.strokeStyle = isActive
+      ? isBossZone
+        ? 'rgba(255, 214, 126, 0.45)'
+        : 'rgba(120, 248, 232, 0.42)'
+      : isBossZone
+        ? 'rgba(245, 148, 120, 0.2)'
+        : 'rgba(223, 192, 117, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawMinimapEntities(
+    ctx: CanvasRenderingContext2D,
+    dots: MinimapEntityDot[],
+    toX: (x: number) => number,
+    toY: (z: number) => number,
+    now: number,
+  ): void {
     const drawStar = (cx: number, cy: number, outerR: number, innerR: number) => {
       ctx.beginPath();
       for (let i = 0; i < 8; i++) {
@@ -1555,7 +1844,7 @@ export class HudController {
       elite: 3,
       boss: 4,
     };
-    const sortedDots = [...tactical.dots].sort((a, b) => order[a.kind] - order[b.kind]);
+    const sortedDots = [...dots].sort((a, b) => order[a.kind] - order[b.kind]);
 
     for (const dot of sortedDots) {
       const dx = toX(dot.x);
@@ -1611,7 +1900,6 @@ export class HudController {
         ctx.fill();
         ctx.stroke();
 
-        // Tiny gold crown glyph
         ctx.fillStyle = '#ffe384';
         ctx.beginPath();
         ctx.moveTo(dx - 3.5, dy - 4.5);
@@ -1626,13 +1914,12 @@ export class HudController {
       }
       ctx.restore();
     }
+  }
 
-    // 4. Hero rotated jade directional arrow
-    const hx = toX(tactical.heroX);
-    const hy = toY(tactical.heroZ);
+  private drawMinimapHeroArrow(ctx: CanvasRenderingContext2D, hx: number, hy: number, heroYaw: number): void {
     ctx.save();
     ctx.translate(hx, hy);
-    ctx.rotate(Math.PI - tactical.heroYaw);
+    ctx.rotate(Math.PI - heroYaw);
     ctx.shadowColor = '#4cd9d0';
     ctx.shadowBlur = 8;
     ctx.fillStyle = '#7cfaf0';
