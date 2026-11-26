@@ -114,6 +114,100 @@ export function createCourtyardStoneMaps(): {
   };
 }
 
+/**
+ * Carved moonlit jade-stone bridge deck maps with subtle side key-fret inlays
+ * and disciplined satin roughness (0.58-0.88) for corridor bridges.
+ */
+export function createJadeBridgeDeckMaps(): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const w = 512;
+  const h = 512;
+  const albedoC = document.createElement('canvas');
+  const bumpC = document.createElement('canvas');
+  const roughC = document.createElement('canvas');
+  albedoC.width = bumpC.width = roughC.width = w;
+  albedoC.height = bumpC.height = roughC.height = h;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const bCtx = bumpC.getContext('2d')!;
+  const rCtx = roughC.getContext('2d')!;
+
+  aCtx.fillStyle = '#334654';
+  aCtx.fillRect(0, 0, w, h);
+  bCtx.fillStyle = '#868686';
+  bCtx.fillRect(0, 0, w, h);
+  rCtx.fillStyle = '#c8c8c8';
+  rCtx.fillRect(0, 0, w, h);
+
+  const rows = 8;
+  const rowH = h / rows;
+  for (let row = 0; row < rows; row++) {
+    const y = row * rowH;
+    const hVal = hash2(row * 5, 11.3);
+    const tone = Math.floor(54 + hVal * 18);
+    aCtx.fillStyle = `rgb(${tone},${Math.floor(tone * 1.28 + 10)},${Math.floor(tone * 1.38 + 16)})`;
+    aCtx.fillRect(28, y + 3, w - 56, rowH - 6);
+
+    // Center spine stone seam & jade runner trim
+    aCtx.strokeStyle = 'rgba(14, 22, 30, 0.55)';
+    aCtx.lineWidth = 4;
+    aCtx.strokeRect(28, y + 2, w - 56, rowH - 4);
+    aCtx.strokeStyle = 'rgba(130, 214, 212, 0.18)';
+    aCtx.lineWidth = 2;
+    aCtx.strokeRect(34, y + 6, w - 68, rowH - 12);
+
+    const bVal = Math.floor(156 + hVal * 52);
+    bCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
+    bCtx.fillRect(28, y + 3, w - 56, rowH - 6);
+    bCtx.strokeStyle = '#202020';
+    bCtx.lineWidth = 4;
+    bCtx.strokeRect(28, y + 2, w - 56, rowH - 4);
+
+    const rVal = Math.floor(152 + hVal * 48);
+    rCtx.fillStyle = `rgb(${rVal},${rVal},${rVal})`;
+    rCtx.fillRect(28, y + 3, w - 56, rowH - 6);
+  }
+
+  // Carved side border runners
+  for (const bx of [0, w - 26]) {
+    aCtx.fillStyle = '#283644';
+    aCtx.fillRect(bx, 0, 26, h);
+    aCtx.strokeStyle = 'rgba(218, 184, 108, 0.42)';
+    aCtx.lineWidth = 2;
+    aCtx.strokeRect(bx + 3, 2, 20, h - 4);
+    bCtx.fillStyle = '#b4b4b4';
+    bCtx.fillRect(bx, 0, 26, h);
+    rCtx.fillStyle = '#b0b0b0';
+    rCtx.fillRect(bx, 0, 26, h);
+  }
+
+  for (let i = 0; i < 1800; i++) {
+    const px = hash2(i, 2.9) * w;
+    const py = hash2(i, 7.3) * h;
+    aCtx.fillStyle = hash2(i, 4.7) > 0.5 ? 'rgba(190,235,235,0.04)' : 'rgba(8,14,20,0.10)';
+    aCtx.fillRect(px, py, 2, 2);
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 2.2);
+    tex.anisotropy = 8;
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+
+  return {
+    map: wrap(albedoC, true),
+    bumpMap: wrap(bumpC, false),
+    roughnessMap: wrap(roughC, false),
+  };
+}
+
 export function createCarvedStoneTexture(): THREE.CanvasTexture {
   const w = 256;
   const h = 512;

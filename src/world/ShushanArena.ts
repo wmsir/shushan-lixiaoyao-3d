@@ -10,11 +10,14 @@ import {
   createArchwayPlaqueTexture,
   createCarvedStoneTexture,
   createCourtyardStoneMaps,
+  createJadeBridgeDeckMaps,
   createLacquerWoodTexture,
   createShushanSkyDome,
   createSoftParticleTexture,
 } from './Materials';
 import skyUrl from '../assets/shushan-sky.jpg';
+
+export type ArenaLayout = 'corridor' | 'arena';
 
 interface OccludableProp {
   position: THREE.Vector3;
@@ -30,6 +33,23 @@ interface LanternRef {
   phase: number;
 }
 
+interface SpiritBarrierGate {
+  group: THREE.Group;
+  curtain: THREE.Mesh;
+  mat: THREE.ShaderMaterial;
+  openProgress: number;
+  zPos: number;
+}
+
+const ZONE_CENTERS = [0, -42, -84] as const;
+const ZONE_NAMES = ['山门前坪', '八卦剑坪', '锁妖主坛'] as const;
+const ZONE_RADII = [16.5, 16.5, 17.5] as const;
+const BRIDGE_HALF_WIDTH = 4.2;
+const BRIDGE_SPANS = [
+  { zMax: -15, zMin: -27, barrierZ: -15.5 },
+  { zMax: -57, zMin: -69, barrierZ: -57.5 },
+] as const;
+
 export class ShushanArena {
   readonly group = new THREE.Group();
   readonly circleObstacles: CircleObstacle[] = [];
@@ -39,12 +59,14 @@ export class ShushanArena {
   private readonly skyDome: THREE.Mesh;
   private readonly baguaMat: THREE.ShaderMaterial;
   private readonly bossSealMat: THREE.ShaderMaterial;
+  private readonly bossRingPlane: THREE.Mesh;
   private readonly grassMat: THREE.ShaderMaterial;
   private readonly petalPoints: THREE.Points;
   private readonly petalData: Float32Array;
   private readonly fireflyPoints: THREE.Points;
   private readonly fireflyData: Float32Array;
   private readonly mistPlanes: THREE.Mesh[] = [];
+  private readonly mountainGroup = new THREE.Group();
   private readonly floatingPeaks: THREE.Group[] = [];
   private readonly skySwordRing = new THREE.Group();
   private readonly moonbeams: THREE.Mesh[] = [];
@@ -52,8 +74,33 @@ export class ShushanArena {
   private readonly occludables: OccludableProp[] = [];
   private readonly rng: () => number;
 
+  private readonly archwayGroup = new THREE.Group();
+  private readonly arenaArchwayCapsules: CapsuleObstacle[] = [];
+  private readonly zone0Obstacles: CircleObstacle[] = [];
+  private readonly zone1Obstacles: CircleObstacle[] = [];
+  private readonly zone2Obstacles: CircleObstacle[] = [];
+  private readonly zone0FullCurb: THREE.Mesh;
+  private readonly zone0OpenCurb: THREE.Mesh;
+
+  private readonly corridorGroup = new THREE.Group();
+  private readonly bridge0Group = new THREE.Group();
+  private readonly zone1Group = new THREE.Group();
+  private readonly bridge1Group = new THREE.Group();
+  private readonly zone2Group = new THREE.Group();
+  private zone1DoubleOpenCurb!: THREE.Group;
+  private zone1SouthOpenCurb!: THREE.Mesh;
+  private chevronMat0!: THREE.ShaderMaterial;
+  private chevronMat1!: THREE.ShaderMaterial;
+  private readonly barriers: SpiritBarrierGate[] = [];
+
+  private layout: ArenaLayout = 'arena';
+  private maxZone: 0 | 1 | 2 = 0;
+  private unlockedZone: 0 | 1 | 2 = 0;
+  private backdropAnchorZ = 0;
+
   private bossIntensity = 0;
   private floorMat!: THREE.MeshStandardMaterial;
+  private cliffMat!: THREE.MeshStandardMaterial;
 
   constructor(rng: () => number) {
     this.rng = rng;
@@ -82,9 +129,10 @@ export class ShushanArena {
     terrace.receiveShadow = true;
     this.group.add(terrace);
 
+    this.cliffMat = new THREE.MeshStandardMaterial({ color: '#1b2430', roughness: 0.96, metalness: 0.02 });
     const cliff = new THREE.Mesh(
       new THREE.CylinderGeometry(20.6, 13.0, 22, 16),
-      new THREE.MeshStandardMaterial({ color: '#1b2430', roughness: 0.96, metalness: 0.02 }),
+      this.cliffMat,
     );
     cliff.position.y = -12.3;
     this.group.add(cliff);
@@ -95,12 +143,24 @@ export class ShushanArena {
       roughness: 0.82,
       metalness: 0.08,
     });
-    const curb = new THREE.Mesh(new THREE.TorusGeometry(19.1, 0.36, 10, 48), trimMat);
-    curb.rotation.x = Math.PI / 2;
-    curb.position.y = 0.08;
-    curb.receiveShadow = true;
-    curb.castShadow = true;
-    this.group.add(curb);
+    this.zone0FullCurb = new THREE.Mesh(new THREE.TorusGeometry(19.1, 0.36, 10, 48), trimMat);
+    this.zone0FullCurb.rotation.x = Math.PI / 2;
+    this.zone0FullCurb.position.y = 0.08;
+    this.zone0FullCurb.receiveShadow = true;
+    this.zone0FullCurb.castShadow = true;
+    this.group.add(this.zone0FullCurb);
+
+    // Open-north curb used in corridor mode so Bridge 0 connects flush at Z = -15 without a stone lip
+    this.zone0OpenCurb = new THREE.Mesh(
+      new THREE.TorusGeometry(19.1, 0.36, 10, 44, Math.PI * 2 - 0.50),
+      trimMat,
+    );
+    this.zone0OpenCurb.rotation.set(Math.PI / 2, Math.PI / 2 + 0.25, 0);
+    this.zone0OpenCurb.position.y = 0.08;
+    this.zone0OpenCurb.receiveShadow = true;
+    this.zone0OpenCurb.castShadow = true;
+    this.zone0OpenCurb.visible = false;
+    this.group.add(this.zone0OpenCurb);
 
     // 3. Central Glowing Taoist Bagua Sword Seal (disciplined HDR so it never bleaches white)
     this.baguaMat = new THREE.ShaderMaterial({
@@ -208,10 +268,10 @@ export class ShushanArena {
         }
       `,
     });
-    const bossRingPlane = new THREE.Mesh(new THREE.PlaneGeometry(36.4, 36.4), this.bossSealMat);
-    bossRingPlane.rotation.x = -Math.PI / 2;
-    bossRingPlane.position.y = 0.036;
-    this.group.add(bossRingPlane);
+    this.bossRingPlane = new THREE.Mesh(new THREE.PlaneGeometry(36.4, 36.4), this.bossSealMat);
+    this.bossRingPlane.rotation.x = -Math.PI / 2;
+    this.bossRingPlane.position.y = 0.036;
+    this.group.add(this.bossRingPlane);
 
     // 4. Grand North Shushan Archway (锁妖剑台牌坊 with carved gilded plaque!)
     this.buildShushanArchway(carvedTex, lacquerTex);
@@ -242,13 +302,19 @@ export class ShushanArena {
     this.buildFloatingImmortalPeaks(carvedTex, lacquerTex);
     this.buildSkySwordArray();
     this.buildMoonbeamShafts();
+
+    // 12. 3-Zone Connected Expedition Corridor Map (hidden in 'arena' mode)
+    this.corridorGroup.visible = false;
+    this.group.add(this.corridorGroup);
+    this.buildCorridorWorld(carvedTex, lacquerTex, trimMat);
+    this.syncLayoutObstacles();
   }
 
   private buildShushanArchway(
     carvedTex: THREE.CanvasTexture,
     lacquerTex: THREE.CanvasTexture,
   ): void {
-    const arch = new THREE.Group();
+    const arch = this.archwayGroup;
     arch.position.set(0, 0, -16.6);
 
     const pillarMat = new THREE.MeshStandardMaterial({
@@ -367,7 +433,7 @@ export class ShushanArena {
 
     this.group.add(arch);
 
-    this.capsuleObstacles.push(
+    this.arenaArchwayCapsules.push(
       { ax: -5.6, az: -16.6, bx: -2.4, bz: -16.6, r: 0.75 },
       { ax: 2.4, az: -16.6, bx: 5.6, bz: -16.6, r: 0.75 },
     );
@@ -457,7 +523,7 @@ export class ShushanArena {
       pGroup.add(finial);
 
       this.group.add(pGroup);
-      this.circleObstacles.push({ x: px, z: pz, r: 0.92 });
+      this.zone0Obstacles.push({ x: px, z: pz, r: 0.92 });
       this.occludables.push({
         position: new THREE.Vector3(px, 2.5, pz),
         radius: 2.2,
@@ -557,7 +623,7 @@ export class ShushanArena {
       }
 
       this.group.add(lGroup);
-      this.circleObstacles.push({ x: lx, z: lz, r: 0.48 });
+      this.zone0Obstacles.push({ x: lx, z: lz, r: 0.48 });
     });
   }
 
@@ -642,7 +708,7 @@ export class ShushanArena {
       rock.castShadow = true;
       rock.receiveShadow = true;
       this.group.add(rock);
-      this.circleObstacles.push({ x: rx, z: rz, r: sc * 1.05 });
+      this.zone0Obstacles.push({ x: rx, z: rz, r: sc * 1.05 });
     }
   }
 
@@ -710,12 +776,13 @@ export class ShushanArena {
       const ang = (i / count) * Math.PI * 2 + 0.32;
       // Leave north-center corridor open so painted Shushan moonlit sky frames the archway cleanly
       if (Math.sin(ang) < -0.78 && Math.abs(Math.cos(ang)) < 0.5) continue;
-      const dist = 74 + (i % 2) * 18;
+      const dist = 84 + (i % 2) * 16;
       const ridge = new THREE.Mesh(ridgeGeo, peakMat);
       ridge.position.set(Math.cos(ang) * dist, 1.5 + (i % 3) * 2.5, Math.sin(ang) * dist);
       ridge.lookAt(0, 1.5, 0);
-      this.group.add(ridge);
+      this.mountainGroup.add(ridge);
     }
+    this.group.add(this.mountainGroup);
   }
 
   /**
@@ -765,11 +832,14 @@ export class ShushanArena {
 
     const mesh = new THREE.InstancedMesh(bladeGeo, grassMat, count);
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < count; i++) {
+    let placed = 0;
+    while (placed < count) {
       const ang = this.rng() * Math.PI * 2;
       const r = 16.0 + this.rng() * 2.8;
       const gx = Math.cos(ang) * r + (this.rng() - 0.5) * 0.6;
       const gz = Math.sin(ang) * r + (this.rng() - 0.5) * 0.6;
+      // Keep north bridge mouth clear so grass never pokes through Bridge 0 slabs
+      if (gz < -14.2 && Math.abs(gx) < 4.7) continue;
       dummy.position.set(gx, 0.0, gz);
       dummy.rotation.set(
         (this.rng() - 0.5) * 0.32,
@@ -780,7 +850,8 @@ export class ShushanArena {
       const sy = 0.65 + this.rng() * 0.95;
       dummy.scale.set(sx, sy, sx);
       dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(placed, dummy.matrix);
+      placed++;
     }
     mesh.instanceMatrix.needsUpdate = true;
     mesh.frustumCulled = false;
@@ -1219,6 +1290,887 @@ export class ShushanArena {
     }
   }
 
+  private buildCorridorWorld(
+    carvedTex: THREE.CanvasTexture,
+    lacquerTex: THREE.CanvasTexture,
+    trimMat: THREE.MeshStandardMaterial,
+  ): void {
+    const bridgeMaps = createJadeBridgeDeckMaps();
+    const bridgeDeckMat = new THREE.MeshStandardMaterial({
+      map: bridgeMaps.map,
+      bumpMap: bridgeMaps.bumpMap,
+      bumpScale: 0.09,
+      roughnessMap: bridgeMaps.roughnessMap,
+      roughness: 0.82,
+      metalness: 0.08,
+      color: new THREE.Color('#a4c4cf'),
+    });
+    const chainBridgeDeckMat = new THREE.MeshStandardMaterial({
+      map: bridgeMaps.map,
+      bumpMap: bridgeMaps.bumpMap,
+      bumpScale: 0.1,
+      roughnessMap: bridgeMaps.roughnessMap,
+      roughness: 0.86,
+      metalness: 0.12,
+      color: new THREE.Color('#7f8d9c'),
+    });
+    const jadeRailMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#7da8ad',
+      roughness: 0.56,
+      metalness: 0.14,
+    });
+    const bronzeChainMat = new THREE.MeshStandardMaterial({
+      color: '#9c7840',
+      emissive: new THREE.Color('#2c1a06'),
+      emissiveIntensity: 0.25,
+      roughness: 0.42,
+      metalness: 0.78,
+    });
+
+    this.chevronMat0 = this.createGuideChevronMaterial();
+    this.chevronMat1 = this.createGuideChevronMaterial();
+
+    // Bridge 0: 云海玉桥 (Z = -15 .. -27) + Spirit Barrier Gate at Z = -15.5
+    this.buildCorridorBridge({
+      target: this.bridge0Group,
+      centerZ: -21,
+      barrierZ: -15.5,
+      deckMat: bridgeDeckMat,
+      railMat: jadeRailMat,
+      trimMat,
+      carvedTex,
+      lacquerTex,
+      chevronMat: this.chevronMat0,
+      hasChains: false,
+      chainMat: bronzeChainMat,
+    });
+    this.corridorGroup.add(this.bridge0Group);
+
+    // Zone 1: 八卦剑坪 (Z = -42)
+    this.buildZonePlatform({
+      target: this.zone1Group,
+      centerZ: -42,
+      radius: 19.2,
+      cliffTop: 20.2,
+      cliffBottom: 12.5,
+      height: 1.4,
+      baguaSize: 15.5,
+      trimMat,
+      carvedTex,
+      lacquerTex,
+      obstaclesOut: this.zone1Obstacles,
+      isFinalBossZone: false,
+    });
+    this.corridorGroup.add(this.zone1Group);
+
+    // Bridge 1: 锁妖索桥 (Z = -57 .. -69) + Spirit Barrier Gate at Z = -57.5
+    this.buildCorridorBridge({
+      target: this.bridge1Group,
+      centerZ: -63,
+      barrierZ: -57.5,
+      deckMat: chainBridgeDeckMat,
+      railMat: trimMat,
+      trimMat,
+      carvedTex,
+      lacquerTex,
+      chevronMat: this.chevronMat1,
+      hasChains: true,
+      chainMat: bronzeChainMat,
+    });
+    this.corridorGroup.add(this.bridge1Group);
+
+    // Zone 2: 锁妖主坛 (Z = -84)
+    this.buildZonePlatform({
+      target: this.zone2Group,
+      centerZ: -84,
+      radius: 20.4,
+      cliffTop: 21.4,
+      cliffBottom: 13.6,
+      height: 1.6,
+      baguaSize: 17.5,
+      trimMat,
+      carvedTex,
+      lacquerTex,
+      obstaclesOut: this.zone2Obstacles,
+      isFinalBossZone: true,
+    });
+    this.corridorGroup.add(this.zone2Group);
+  }
+
+  private createGuideChevronMaterial(): THREE.ShaderMaterial {
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uUnlocked: { value: 0.18 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uUnlocked;
+        varying vec2 vUv;
+        void main() {
+          float dx = abs(vUv.x - 0.5);
+          if (dx > 0.45) discard;
+          // Chevrons point toward +vUv.y (-Z forward along the bridge)
+          float phase = fract(vUv.y * 4.5 + dx * 1.35 - uTime * (0.55 + uUnlocked * 1.15));
+          float band = smoothstep(0.06, 0.18, phase) * smoothstep(0.46, 0.24, phase);
+          float sideFade = smoothstep(0.45, 0.18, dx);
+          float endFade = smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
+          float railLine = smoothstep(0.025, 0.005, abs(dx - 0.40)) * 0.45;
+          float m = clamp(band * sideFade + railLine, 0.0, 1.0) * endFade;
+          if (m < 0.02) discard;
+          vec3 unlockedCol = mix(vec3(0.24, 0.86, 0.90), vec3(0.98, 0.78, 0.34), smoothstep(0.15, 0.4, dx));
+          vec3 lockedCol = vec3(0.92, 0.38, 0.26);
+          vec3 col = mix(lockedCol, unlockedCol, smoothstep(0.2, 0.9, uUnlocked));
+          gl_FragColor = vec4(col, m * (0.28 + uUnlocked * 0.56));
+        }
+      `,
+    });
+  }
+
+  private createSpiritBarrierGate(
+    barrierZ: number,
+    carvedTex: THREE.CanvasTexture,
+    bronzeMat: THREE.MeshStandardMaterial,
+  ): SpiritBarrierGate {
+    const gateGroup = new THREE.Group();
+    gateGroup.position.set(0, 0, barrierZ);
+
+    const pylonMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#73889e',
+      roughness: 0.78,
+      metalness: 0.1,
+    });
+    const crystalMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.55, 1.75, 1.85),
+    });
+
+    const baseGeo = new THREE.BoxGeometry(0.9, 0.5, 0.9);
+    const colGeo = new THREE.CylinderGeometry(0.28, 0.36, 3.2, 8);
+    const capGeo = new THREE.OctahedronGeometry(0.32, 0);
+    for (const sx of [-4.55, 4.55]) {
+      const base = new THREE.Mesh(baseGeo, pylonMat);
+      base.position.set(sx, 0.25, 0);
+      base.castShadow = true;
+      base.receiveShadow = true;
+      const col = new THREE.Mesh(colGeo, pylonMat);
+      col.position.set(sx, 2.05, 0);
+      col.castShadow = true;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.05, 6, 14), bronzeMat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(sx, 3.65, 0);
+      const crystal = new THREE.Mesh(capGeo, crystalMat);
+      crystal.position.set(sx, 4.15, 0);
+      gateGroup.add(base, col, ring, crystal);
+    }
+
+    const barrierMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uOpen: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uOpen;
+        varying vec2 vUv;
+        void main() {
+          float dissolve = 1.0 - smoothstep(0.05, 0.98, uOpen);
+          if (dissolve < 0.01) discard;
+          vec2 c = vUv * 2.0 - 1.0;
+          // Parting curtain as barrier dissolves open
+          float partGap = uOpen * 1.15;
+          float curtainMask = smoothstep(partGap - 0.14, partGap + 0.14, abs(c.x));
+          float r = length(vec2(c.x * 1.65, c.y));
+          float sealRing = smoothstep(0.032, 0.008, abs(r - 0.62)) + smoothstep(0.024, 0.006, abs(r - 0.34));
+          float grid = pow(abs(sin(vUv.x * 26.0 + uTime * 2.2)), 6.0) * 0.45
+                     + pow(abs(sin(vUv.y * 14.0 - uTime * 2.6)), 6.0) * 0.45;
+          float edgeFade = smoothstep(0.0, 0.08, vUv.x) * smoothstep(1.0, 0.92, vUv.x)
+                         * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.84, vUv.y);
+          float pulse = 0.78 + 0.22 * sin(uTime * 4.2 + vUv.x * 8.0);
+          float baseWall = 0.26 + grid * 0.55 + sealRing * 0.9;
+          float alpha = baseWall * edgeFade * curtainMask * dissolve * pulse * 0.74;
+          if (alpha < 0.015) discard;
+          vec3 lockedCol = mix(vec3(0.98, 0.32, 0.34), vec3(0.98, 0.76, 0.32), sealRing + grid * 0.4);
+          vec3 openBurst = vec3(0.32, 0.92, 0.95);
+          vec3 col = mix(lockedCol, openBurst, smoothstep(0.05, 0.55, uOpen));
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+
+    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(8.5, 4.1), barrierMat);
+    curtain.position.set(0, 2.05, 0);
+    gateGroup.add(curtain);
+
+    return {
+      group: gateGroup,
+      curtain,
+      mat: barrierMat,
+      openProgress: 0,
+      zPos: barrierZ,
+    };
+  }
+
+  private buildCorridorBridge(opts: {
+    target: THREE.Group;
+    centerZ: number;
+    barrierZ: number;
+    deckMat: THREE.MeshStandardMaterial;
+    railMat: THREE.MeshStandardMaterial;
+    trimMat: THREE.MeshStandardMaterial;
+    carvedTex: THREE.CanvasTexture;
+    lacquerTex: THREE.CanvasTexture;
+    chevronMat: THREE.ShaderMaterial;
+    hasChains: boolean;
+    chainMat: THREE.MeshStandardMaterial;
+  }): void {
+    const {
+      target,
+      centerZ,
+      barrierZ,
+      deckMat,
+      railMat,
+      trimMat,
+      carvedTex,
+      lacquerTex,
+      chevronMat,
+      hasChains,
+      chainMat,
+    } = opts;
+
+    // Main bridge stone-jade deck (top at y = -0.012 so zero z-fighting with circular plazas)
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(8.8, 1.1, 13.4), deckMat);
+    deck.position.set(0, -0.562, centerZ);
+    deck.receiveShadow = true;
+    deck.castShadow = true;
+    target.add(deck);
+
+    // Under-deck structural arch spine & deep cliff piers
+    const spine = new THREE.Mesh(new THREE.BoxGeometry(7.2, 1.8, 12.2), trimMat);
+    spine.position.set(0, -1.95, centerZ);
+    target.add(spine);
+
+    const pierGeo = new THREE.BoxGeometry(1.4, 15.0, 1.6);
+    for (const pz of [centerZ + 3.4, centerZ - 3.4]) {
+      for (const px of [-3.0, 3.0]) {
+        const pier = new THREE.Mesh(pierGeo, trimMat);
+        pier.position.set(px, -9.2, pz);
+        target.add(pier);
+      }
+    }
+
+    // Low side curbs & balustrade posts
+    const curbGeo = new THREE.BoxGeometry(0.42, 0.34, 12.4);
+    const postGeo = new THREE.BoxGeometry(0.38, 1.05, 0.38);
+    const postCapGeo = new THREE.SphereGeometry(0.22, 8, 8);
+    const railGeo = new THREE.BoxGeometry(0.16, 0.14, 11.4);
+
+    for (const sx of [-4.48, 4.48]) {
+      const sideCurb = new THREE.Mesh(curbGeo, railMat);
+      sideCurb.position.set(sx, 0.16, centerZ);
+      sideCurb.receiveShadow = true;
+      sideCurb.castShadow = true;
+      target.add(sideCurb);
+
+      if (!hasChains) {
+        const topRail = new THREE.Mesh(railGeo, railMat);
+        topRail.position.set(sx, 0.86, centerZ);
+        topRail.castShadow = true;
+        target.add(topRail);
+      }
+
+      for (let k = 0; k < 5; k++) {
+        const pz = centerZ + 5.5 - k * 2.75;
+        const post = new THREE.Mesh(postGeo, trimMat);
+        post.position.set(sx, 0.52, pz);
+        post.castShadow = true;
+        const cap = new THREE.Mesh(postCapGeo, hasChains ? chainMat : railMat);
+        cap.position.set(sx, 1.14, pz);
+        target.add(post, cap);
+      }
+    }
+
+    // Catenary bronze-iron lock chains for 锁妖索桥 (Bridge 1)
+    if (hasChains) {
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0.92, 1.375),
+        new THREE.Vector3(0, 0.68, 0),
+        new THREE.Vector3(0, 0.92, -1.375),
+      ]);
+      const chainGeo = new THREE.TubeGeometry(curve, 12, 0.065, 6, false);
+      for (const sx of [-4.48, 4.48]) {
+        for (let k = 0; k < 4; k++) {
+          const midZ = centerZ + 4.125 - k * 2.75;
+          const chain = new THREE.Mesh(chainGeo, chainMat);
+          chain.position.set(sx, 0, midZ);
+          chain.castShadow = true;
+          target.add(chain);
+        }
+      }
+    }
+
+    // Bridge stone lanterns at entry & exit
+    const lPedGeo = new THREE.CylinderGeometry(0.18, 0.24, 0.72, 6);
+    const lFlameGeo = new THREE.OctahedronGeometry(0.16, 1);
+    const lCapGeo = new THREE.ConeGeometry(0.42, 0.34, 6);
+    const flameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.9, 1.15, 0.42) });
+    const capMat = new THREE.MeshStandardMaterial({ map: lacquerTex, color: '#4f3834', roughness: 0.68 });
+    for (const lz of [centerZ + 4.4, centerZ - 4.4]) {
+      for (const lx of [-4.48, 4.48]) {
+        const lGroup = new THREE.Group();
+        lGroup.position.set(lx, 1.05, lz);
+        const ped = new THREE.Mesh(lPedGeo, trimMat);
+        ped.position.y = 0.36;
+        const flame = new THREE.Mesh(lFlameGeo, flameMat);
+        flame.position.y = 0.88;
+        const cap = new THREE.Mesh(lCapGeo, capMat);
+        cap.position.y = 1.22;
+        lGroup.add(ped, flame, cap);
+        target.add(lGroup);
+      }
+    }
+
+    // Glowing blue-gold floor guide chevrons pointing -Z
+    const chevronPlane = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 11.4), chevronMat);
+    chevronPlane.rotation.x = -Math.PI / 2;
+    chevronPlane.position.set(0, 0.022, centerZ);
+    target.add(chevronPlane);
+
+    // Spirit Barrier Gate at bridge entrance
+    const gate = this.createSpiritBarrierGate(barrierZ, carvedTex, chainMat);
+    target.add(gate.group);
+    this.barriers.push(gate);
+  }
+
+  private buildZonePlatform(opts: {
+    target: THREE.Group;
+    centerZ: number;
+    radius: number;
+    cliffTop: number;
+    cliffBottom: number;
+    height: number;
+    baguaSize: number;
+    trimMat: THREE.MeshStandardMaterial;
+    carvedTex: THREE.CanvasTexture;
+    lacquerTex: THREE.CanvasTexture;
+    obstaclesOut: CircleObstacle[];
+    isFinalBossZone: boolean;
+  }): void {
+    const {
+      target,
+      centerZ,
+      radius,
+      cliffTop,
+      cliffBottom,
+      height,
+      baguaSize,
+      trimMat,
+      carvedTex,
+      lacquerTex,
+      obstaclesOut,
+      isFinalBossZone,
+    } = opts;
+
+    const terrace = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius + 1.2, height, 32),
+      this.floorMat,
+    );
+    terrace.position.set(0, -height * 0.5, centerZ);
+    terrace.receiveShadow = true;
+    target.add(terrace);
+
+    const cliff = new THREE.Mesh(
+      new THREE.CylinderGeometry(cliffTop, cliffBottom, 22, 16),
+      this.cliffMat,
+    );
+    cliff.position.set(0, -12.3, centerZ);
+    target.add(cliff);
+
+    const curbR = radius - 0.45;
+    if (isFinalBossZone) {
+      // Open only on +Z (south entrance from Bridge 1)
+      const southOpenCurb = new THREE.Mesh(
+        new THREE.TorusGeometry(curbR, 0.38, 10, 44, Math.PI * 2 - 0.50),
+        trimMat,
+      );
+      southOpenCurb.rotation.set(Math.PI / 2, -Math.PI / 2 + 0.25, 0);
+      southOpenCurb.position.set(0, 0.08, centerZ);
+      southOpenCurb.castShadow = true;
+      southOpenCurb.receiveShadow = true;
+      target.add(southOpenCurb);
+    } else {
+      // Zone 1 can have either south+north openings (maxZone === 2) or south-only opening (maxZone === 1)
+      this.zone1DoubleOpenCurb = new THREE.Group();
+      const rightArc = new THREE.Mesh(
+        new THREE.TorusGeometry(curbR, 0.36, 10, 22, Math.PI - 0.50),
+        trimMat,
+      );
+      rightArc.rotation.set(Math.PI / 2, Math.PI / 2 - 0.25, 0);
+      rightArc.position.set(0, 0.08, centerZ);
+      rightArc.castShadow = true;
+      const leftArc = new THREE.Mesh(
+        new THREE.TorusGeometry(curbR, 0.36, 10, 22, Math.PI - 0.50),
+        trimMat,
+      );
+      leftArc.rotation.set(Math.PI / 2, -Math.PI / 2 - 0.25, 0);
+      leftArc.position.set(0, 0.08, centerZ);
+      leftArc.castShadow = true;
+      this.zone1DoubleOpenCurb.add(rightArc, leftArc);
+      target.add(this.zone1DoubleOpenCurb);
+
+      this.zone1SouthOpenCurb = new THREE.Mesh(
+        new THREE.TorusGeometry(curbR, 0.36, 10, 44, Math.PI * 2 - 0.50),
+        trimMat,
+      );
+      this.zone1SouthOpenCurb.rotation.set(Math.PI / 2, -Math.PI / 2 + 0.25, 0);
+      this.zone1SouthOpenCurb.position.set(0, 0.08, centerZ);
+      this.zone1SouthOpenCurb.castShadow = true;
+      this.zone1SouthOpenCurb.visible = false;
+      target.add(this.zone1SouthOpenCurb);
+    }
+
+    // Illuminated Bagua Stone Seal
+    const baguaPlane = new THREE.Mesh(new THREE.PlaneGeometry(baguaSize, baguaSize), this.baguaMat);
+    baguaPlane.rotation.x = -Math.PI / 2;
+    baguaPlane.position.set(0, 0.024, centerZ);
+    target.add(baguaPlane);
+
+    // 4 Corner Carved Rune Pillars (strictly outside |x| >= 11.4 so bridges stay wide open)
+    const pBaseGeo = new THREE.CylinderGeometry(0.76, 0.94, 0.65, 8);
+    const pShaftGeo = new THREE.CylinderGeometry(0.5, 0.62, 5.2, 8);
+    const pBandGeo = new THREE.TorusGeometry(0.56, 0.05, 8, 20);
+    const pCapGeo = new THREE.CylinderGeometry(0.78, 0.52, 0.45, 8);
+    const pFinialGeo = new THREE.ConeGeometry(0.18, 0.88, 6);
+
+    const pxOff = isFinalBossZone ? 12.2 : 11.4;
+    const pzOff = isFinalBossZone ? 9.0 : 8.6;
+    const pillarSpots: Array<[number, number, number]> = [
+      [-pxOff, centerZ - pzOff, 1.06],
+      [pxOff, centerZ - pzOff, 1.08],
+      [-pxOff, centerZ + pzOff, 0.98],
+      [pxOff, centerZ + pzOff, 1.0],
+    ];
+    for (const [px, pz, sy] of pillarSpots) {
+      const pGroup = new THREE.Group();
+      pGroup.position.set(px, 0, pz);
+      const matStone = new THREE.MeshStandardMaterial({
+        map: carvedTex,
+        color: '#8899ad',
+        roughness: 0.8,
+        metalness: 0.08,
+        transparent: true,
+        opacity: 1,
+      });
+      const matRune = new THREE.MeshStandardMaterial({
+        color: isFinalBossZone ? '#e84c5c' : '#2cd8d2',
+        emissive: new THREE.Color(isFinalBossZone ? '#b02438' : '#1eaab8'),
+        emissiveIntensity: 0.95,
+        roughness: 0.35,
+        metalness: 0.3,
+        transparent: true,
+        opacity: 1,
+      });
+      const matBronze = new THREE.MeshStandardMaterial({
+        color: '#b88c4a',
+        emissive: new THREE.Color('#3b2408'),
+        emissiveIntensity: 0.28,
+        roughness: 0.36,
+        metalness: 0.68,
+        transparent: true,
+        opacity: 1,
+      });
+
+      const base = new THREE.Mesh(pBaseGeo, matStone);
+      base.position.y = 0.325;
+      base.castShadow = true;
+      base.receiveShadow = true;
+      const shaft = new THREE.Mesh(pShaftGeo, matStone);
+      shaft.scale.y = sy;
+      shaft.position.y = 0.65 + 5.2 * sy * 0.5;
+      shaft.castShadow = true;
+      shaft.receiveShadow = true;
+      const band = new THREE.Mesh(pBandGeo, matRune);
+      band.rotation.x = Math.PI / 2;
+      band.position.y = 2.5;
+      const topY = 0.65 + 5.2 * sy;
+      const collar = new THREE.Mesh(pBandGeo, matBronze);
+      collar.rotation.x = Math.PI / 2;
+      collar.scale.setScalar(1.06);
+      collar.position.y = topY - 0.12;
+      const cap = new THREE.Mesh(pCapGeo, matStone);
+      cap.position.y = topY + 0.22;
+      const finial = new THREE.Mesh(pFinialGeo, matBronze);
+      finial.position.y = topY + 0.84;
+
+      pGroup.add(base, shaft, band, collar, cap, finial);
+      target.add(pGroup);
+      obstaclesOut.push({ x: px, z: pz, r: 0.92 });
+      this.occludables.push({
+        position: new THREE.Vector3(px, 2.5, pz),
+        radius: 2.2,
+        materials: [matStone, matRune, matBronze],
+        currentOpacity: 1,
+      });
+    }
+
+    // 4 Carved Stone Lanterns
+    const lPedGeo = new THREE.CylinderGeometry(0.28, 0.42, 1.35, 6);
+    const lRimGeo = new THREE.CylinderGeometry(0.36, 0.32, 0.12, 6);
+    const lFlameGeo = new THREE.OctahedronGeometry(0.22, 1);
+    const lCapGeo = new THREE.ConeGeometry(0.66, 0.48, 6);
+    const lanternStoneMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#7a8a9c', roughness: 0.84 });
+    const lanternBronzeMat = new THREE.MeshStandardMaterial({
+      color: '#b88444',
+      emissive: new THREE.Color('#472909'),
+      emissiveIntensity: 0.32,
+      roughness: 0.38,
+      metalness: 0.65,
+    });
+    const roofCapMat = new THREE.MeshStandardMaterial({ map: lacquerTex, color: '#4f3834', roughness: 0.68 });
+    const flameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.9, 1.15, 0.42) });
+
+    const lxOff = isFinalBossZone ? 14.6 : 13.8;
+    const lzOff = 5.2;
+    const lanternSpots: Array<[number, number]> = [
+      [-lxOff, centerZ - lzOff],
+      [lxOff, centerZ - lzOff],
+      [-lxOff, centerZ + lzOff],
+      [lxOff, centerZ + lzOff],
+    ];
+    lanternSpots.forEach(([lx, lz], idx) => {
+      const lGroup = new THREE.Group();
+      lGroup.position.set(lx, 0, lz);
+      const ped = new THREE.Mesh(lPedGeo, lanternStoneMat);
+      ped.position.y = 0.68;
+      ped.castShadow = true;
+      const rim = new THREE.Mesh(lRimGeo, lanternBronzeMat);
+      rim.position.y = 1.38;
+      const flame = new THREE.Mesh(lFlameGeo, flameMat);
+      flame.position.y = 1.62;
+      const cap = new THREE.Mesh(lCapGeo, roofCapMat);
+      cap.position.y = 2.08;
+      cap.castShadow = true;
+      lGroup.add(ped, rim, flame, cap);
+      if (idx < 2) {
+        const light = new THREE.PointLight('#ff9c42', 11.5, 16.0, 1.85);
+        light.position.set(0, 1.75, 0);
+        lGroup.add(light);
+        this.lanterns.push({ light, flame, baseIntensity: 11.5, phase: centerZ * 0.1 + idx * 1.9 });
+      }
+      target.add(lGroup);
+      obstaclesOut.push({ x: lx, z: lz, r: 0.48 });
+    });
+
+    // Cliffside Pine Trees & Perimeter Boulders (strictly clear of bridge lanes)
+    const barkMat = new THREE.MeshStandardMaterial({ color: '#3b2d26', roughness: 0.94 });
+    const needleMat = new THREE.MeshStandardMaterial({ color: '#1b473c', roughness: 0.88, metalness: 0.02 });
+    const rockMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#445263',
+      roughness: 0.92,
+      metalness: 0.04,
+      flatShading: true,
+    });
+    const trunk1Geo = new THREE.CylinderGeometry(0.26, 0.42, 2.2, 7);
+    const trunk2Geo = new THREE.CylinderGeometry(0.18, 0.27, 2.1, 7);
+    const padGeo = new THREE.DodecahedronGeometry(1.0, 1);
+    const rockGeo = new THREE.DodecahedronGeometry(1.0, 1);
+
+    const pxTree = isFinalBossZone ? 16.5 : 15.6;
+    const pineSpots: Array<[number, number, number, number]> = [
+      [-pxTree, centerZ - 11.5, 1.18, 0.5],
+      [pxTree, centerZ - 11.5, 1.15, -0.8],
+      [-pxTree, centerZ + 11.2, 1.08, 1.8],
+      [pxTree, centerZ + 11.2, 1.12, -2.0],
+    ];
+    for (const [tx, tz, sc, rotY] of pineSpots) {
+      const pine = new THREE.Group();
+      pine.position.set(tx, -0.1, tz);
+      pine.rotation.y = rotY;
+      pine.scale.setScalar(sc);
+      const seg1 = new THREE.Mesh(trunk1Geo, barkMat);
+      seg1.position.set(0, 1.0, 0);
+      seg1.rotation.z = 0.16;
+      seg1.castShadow = true;
+      const seg2 = new THREE.Mesh(trunk2Geo, barkMat);
+      seg2.position.set(-0.32, 2.8, 0.12);
+      seg2.rotation.z = -0.22;
+      seg2.castShadow = true;
+      pine.add(seg1, seg2);
+      const pads: Array<[number, number, number, number, number]> = [
+        [-0.85, 3.85, 0.2, 2.1, 0.62],
+        [0.65, 3.25, -0.35, 1.7, 0.55],
+        [-0.1, 4.65, 0.1, 1.65, 0.55],
+      ];
+      for (const [px, py, pz, pr, ph] of pads) {
+        const pad = new THREE.Mesh(padGeo, needleMat);
+        pad.scale.set(pr, ph, pr * 0.85);
+        pad.position.set(px, py, pz);
+        pad.castShadow = true;
+        pad.receiveShadow = true;
+        pine.add(pad);
+      }
+      target.add(pine);
+    }
+
+    const rockSpots: Array<[number, number, number]> = [
+      [-15.2, centerZ - 1.8, 1.1],
+      [15.4, centerZ + 1.5, 1.08],
+      [-9.2, centerZ - 13.8, 1.05],
+      [9.4, centerZ + 13.6, 1.02],
+    ];
+    for (const [rx, rz, sc] of rockSpots) {
+      const rock = new THREE.Mesh(rockGeo, rockMat);
+      rock.scale.set(sc * 1.25, sc * 0.68, sc * 1.02);
+      rock.position.set(rx, sc * 0.3, rz);
+      rock.rotation.set(this.rng() * 0.35, this.rng() * 6.28, this.rng() * 0.25);
+      rock.castShadow = true;
+      rock.receiveShadow = true;
+      target.add(rock);
+      obstaclesOut.push({ x: rx, z: rz, r: sc * 1.05 });
+    }
+
+    // Instanced perimeter sage-moss grass around this zone's rim
+    const grassCount = 320;
+    const bladeGeo = new THREE.ConeGeometry(0.048, 0.44, 3, 2);
+    bladeGeo.translate(0, 0.22, 0);
+    const grassMesh = new THREE.InstancedMesh(bladeGeo, this.grassMat, grassCount);
+    const dummy = new THREE.Object3D();
+    let placed = 0;
+    while (placed < grassCount) {
+      const ang = this.rng() * Math.PI * 2;
+      const gr = radius - 3.2 + this.rng() * 2.5;
+      const gx = Math.cos(ang) * gr + (this.rng() - 0.5) * 0.5;
+      const gz = centerZ + Math.sin(ang) * gr + (this.rng() - 0.5) * 0.5;
+      if (Math.abs(gx) < 5.0 && (gz > centerZ + radius - 5.2 || gz < centerZ - radius + 5.2)) {
+        continue;
+      }
+      dummy.position.set(gx, 0, gz);
+      dummy.rotation.set((this.rng() - 0.5) * 0.32, this.rng() * Math.PI * 2, (this.rng() - 0.5) * 0.32);
+      const sx = 0.75 + this.rng() * 0.65;
+      const sy = 0.65 + this.rng() * 0.95;
+      dummy.scale.set(sx, sy, sx);
+      dummy.updateMatrix();
+      grassMesh.setMatrixAt(placed, dummy.matrix);
+      placed++;
+    }
+    grassMesh.instanceMatrix.needsUpdate = true;
+    grassMesh.frustumCulled = false;
+    target.add(grassMesh);
+  }
+
+  private syncLayoutObstacles(): void {
+    this.circleObstacles.length = 0;
+    this.capsuleObstacles.length = 0;
+
+    for (const o of this.zone0Obstacles) this.circleObstacles.push(o);
+
+    if (this.layout === 'arena') {
+      for (const c of this.arenaArchwayCapsules) this.capsuleObstacles.push(c);
+      return;
+    }
+
+    if (this.maxZone >= 1) {
+      for (const o of this.zone1Obstacles) this.circleObstacles.push(o);
+    }
+    if (this.maxZone >= 2) {
+      for (const o of this.zone2Obstacles) this.circleObstacles.push(o);
+    }
+
+    const archZ = this.maxZone === 2 ? -101.0 : this.maxZone === 1 ? -58.0 : -16.6;
+    this.capsuleObstacles.push(
+      { ax: -5.6, az: archZ, bx: -2.4, bz: archZ, r: 0.75 },
+      { ax: 2.4, az: archZ, bx: 5.6, bz: archZ, r: 0.75 },
+    );
+  }
+
+  setArenaLayout(layout: ArenaLayout, maxZone: 0 | 1 | 2 = 2): void {
+    this.layout = layout;
+    this.maxZone = layout === 'arena' ? 0 : maxZone;
+    this.unlockedZone = 0;
+
+    if (layout === 'arena') {
+      this.corridorGroup.visible = false;
+      this.zone0FullCurb.visible = true;
+      this.zone0OpenCurb.visible = false;
+      this.archwayGroup.position.set(0, 0, -16.6);
+      this.bossRingPlane.position.set(0, 0.036, 0);
+      this.skySwordRing.position.set(0, 11.2, -23);
+    } else {
+      this.corridorGroup.visible = true;
+      this.zone0FullCurb.visible = this.maxZone === 0;
+      this.zone0OpenCurb.visible = this.maxZone >= 1;
+      this.bridge0Group.visible = this.maxZone >= 1;
+      this.zone1Group.visible = this.maxZone >= 1;
+      this.bridge1Group.visible = this.maxZone >= 2;
+      this.zone2Group.visible = this.maxZone >= 2;
+
+      if (this.zone1DoubleOpenCurb && this.zone1SouthOpenCurb) {
+        this.zone1DoubleOpenCurb.visible = this.maxZone >= 2;
+        this.zone1SouthOpenCurb.visible = this.maxZone === 1;
+      }
+
+      const archZ = this.maxZone === 2 ? -101.0 : this.maxZone === 1 ? -58.0 : -16.6;
+      this.archwayGroup.position.set(0, 0, archZ);
+      this.bossRingPlane.position.set(0, 0.036, this.getZoneCenterZ(this.maxZone));
+      this.skySwordRing.position.set(0, 12.8, this.getZoneCenterZ(this.maxZone) - 18);
+    }
+
+    for (const b of this.barriers) {
+      b.openProgress = 0;
+      b.mat.uniforms.uOpen.value = 0;
+      b.curtain.visible = true;
+    }
+
+    this.syncLayoutObstacles();
+  }
+
+  setUnlockedZone(zoneIdx: 0 | 1 | 2): void {
+    const clamped = Math.min(zoneIdx, this.maxZone) as 0 | 1 | 2;
+    this.unlockedZone = clamped;
+  }
+
+  getUnlockedZone(): 0 | 1 | 2 {
+    return this.unlockedZone;
+  }
+
+  getMaxZone(): 0 | 1 | 2 {
+    return this.maxZone;
+  }
+
+  getZoneCenterZ(zoneIdx: 0 | 1 | 2): number {
+    return ZONE_CENTERS[zoneIdx];
+  }
+
+  getZoneIndexAtZ(z: number): 0 | 1 | 2 {
+    if (this.layout === 'arena') return 0;
+    let idx: 0 | 1 | 2 = z > -21 ? 0 : z > -63 ? 1 : 2;
+    if (idx > this.maxZone) idx = this.maxZone;
+    return idx;
+  }
+
+  getZoneName(zoneIdx: 0 | 1 | 2): string {
+    return ZONE_NAMES[zoneIdx];
+  }
+
+  getProgressPct(z: number): number {
+    const zMax = 14;
+    const zMin =
+      this.layout === 'arena' || this.maxZone === 0
+        ? -14
+        : this.maxZone === 1
+          ? -56
+          : -98;
+    return clamp(((zMax - z) / (zMax - zMin)) * 100, 0, 100);
+  }
+
+  isOutOfBounds(pos: THREE.Vector3, margin = 0): boolean {
+    if (this.layout === 'arena') {
+      return Math.hypot(pos.x, pos.z) > this.playableRadius + margin;
+    }
+
+    for (let zi = 0; zi <= this.maxZone; zi++) {
+      const cz = ZONE_CENTERS[zi];
+      const r = Math.max(0.5, ZONE_RADII[zi] + margin);
+      const dz = pos.z - cz;
+      if (pos.x * pos.x + dz * dz <= r * r) return false;
+    }
+
+    const halfW = Math.max(0.4, BRIDGE_HALF_WIDTH + margin);
+    if (Math.abs(pos.x) <= halfW) {
+      for (let bi = 0; bi < this.maxZone; bi++) {
+        const span = BRIDGE_SPANS[bi];
+        if (pos.z >= span.zMin - margin && pos.z <= span.zMax + margin) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private clampToCorridorUnion(pos: THREE.Vector3, radius: number): void {
+    // Fast check: if already inside any active disc or bridge rect, no clamping needed
+    for (let zi = 0; zi <= this.maxZone; zi++) {
+      const cz = ZONE_CENTERS[zi];
+      const maxR = Math.max(0.5, ZONE_RADII[zi] - radius);
+      const dz = pos.z - cz;
+      if (pos.x * pos.x + dz * dz <= maxR * maxR) return;
+    }
+    const halfW = Math.max(0.4, BRIDGE_HALF_WIDTH - radius);
+    for (let bi = 0; bi < this.maxZone; bi++) {
+      const span = BRIDGE_SPANS[bi];
+      if (
+        Math.abs(pos.x) <= halfW &&
+        pos.z >= span.zMin - 0.5 &&
+        pos.z <= span.zMax + 0.5
+      ) {
+        return;
+      }
+    }
+
+    // Outside all active regions: project onto closest point across the union
+    let bestX = pos.x;
+    let bestZ = pos.z;
+    let bestD2 = Infinity;
+
+    for (let zi = 0; zi <= this.maxZone; zi++) {
+      const cz = ZONE_CENTERS[zi];
+      const maxR = Math.max(0.5, ZONE_RADII[zi] - radius);
+      const dz = pos.z - cz;
+      const dist = Math.hypot(pos.x, dz);
+      const cx = dist > 1e-5 ? (pos.x / dist) * maxR : 0;
+      const czClamped = dist > 1e-5 ? cz + (dz / dist) * maxR : cz;
+      const dx = pos.x - cx;
+      const ddz = pos.z - czClamped;
+      const d2 = dx * dx + ddz * ddz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestX = cx;
+        bestZ = czClamped;
+      }
+    }
+
+    for (let bi = 0; bi < this.maxZone; bi++) {
+      const span = BRIDGE_SPANS[bi];
+      const rx = clamp(pos.x, -halfW, halfW);
+      const rz = clamp(pos.z, span.zMin - 0.5, span.zMax + 0.5);
+      const dx = pos.x - rx;
+      const dz = pos.z - rz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestX = rx;
+        bestZ = rz;
+      }
+    }
+
+    pos.x = bestX;
+    pos.z = bestZ;
+  }
+
   constrainPosition(pos: THREE.Vector3, radius: number, prevPos?: THREE.Vector3): void {
     for (let iter = 0; iter < 2; iter++) {
       for (const obs of this.circleObstacles) {
@@ -1227,11 +2179,31 @@ export class ShushanArena {
       for (const cap of this.capsuleObstacles) {
         resolveCircleVsCapsule(pos, radius, cap);
       }
-      const dist = Math.hypot(pos.x, pos.z);
-      const maxR = this.playableRadius - radius;
-      if (dist > maxR && dist > 1e-5) {
-        pos.x = (pos.x / dist) * maxR;
-        pos.z = (pos.z / dist) * maxR;
+
+      if (this.layout === 'arena') {
+        const dist = Math.hypot(pos.x, pos.z);
+        const maxR = this.playableRadius - radius;
+        if (dist > maxR && dist > 1e-5) {
+          pos.x = (pos.x / dist) * maxR;
+          pos.z = (pos.z / dist) * maxR;
+        }
+      } else {
+        // Block advancing past locked Spirit Barrier Gates
+        if (this.maxZone >= 1 && this.unlockedZone < 1) {
+          const b0 = BRIDGE_SPANS[0].barrierZ;
+          const onSouthSide = prevPos ? prevPos.z >= b0 - 0.2 : pos.z > b0 - 3.0;
+          if (onSouthSide && pos.z < b0 + radius) {
+            pos.z = b0 + radius;
+          }
+        }
+        if (this.maxZone >= 2 && this.unlockedZone < 2) {
+          const b1 = BRIDGE_SPANS[1].barrierZ;
+          const onSouthSide = prevPos ? prevPos.z >= b1 - 0.2 : pos.z > b1 - 3.0;
+          if (onSouthSide && pos.z < b1 + radius) {
+            pos.z = b1 + radius;
+          }
+        }
+        this.clampToCorridorUnion(pos, radius);
       }
     }
     if (prevPos && (!Number.isFinite(pos.x) || !Number.isFinite(pos.z))) {
@@ -1266,6 +2238,15 @@ export class ShushanArena {
   }
 
   update(dt: number, elapsed: number, focusPos: THREE.Vector3): void {
+    const targetAnchorZ = this.layout === 'corridor' ? focusPos.z : 0;
+    if (Math.abs(targetAnchorZ - this.backdropAnchorZ) > 24) {
+      this.backdropAnchorZ = targetAnchorZ;
+    } else {
+      this.backdropAnchorZ += (targetAnchorZ - this.backdropAnchorZ) * Math.min(1, dt * 6);
+    }
+    this.skyDome.position.z = this.backdropAnchorZ;
+    this.mountainGroup.position.z = this.backdropAnchorZ;
+
     (this.skyDome.material as THREE.ShaderMaterial).uniforms.uTime.value = elapsed;
     this.baguaMat.uniforms.uTime.value = elapsed;
     const curBoss = this.baguaMat.uniforms.uBossIntensity.value as number;
@@ -1274,6 +2255,21 @@ export class ShushanArena {
     this.bossSealMat.uniforms.uTime.value = elapsed;
     this.bossSealMat.uniforms.uIntensity.value = nextBoss;
     this.grassMat.uniforms.uTime.value = elapsed;
+
+    if (this.layout === 'corridor') {
+      this.chevronMat0.uniforms.uTime.value = elapsed;
+      this.chevronMat0.uniforms.uUnlocked.value = this.unlockedZone >= 1 ? 1.0 : 0.18;
+      this.chevronMat1.uniforms.uTime.value = elapsed;
+      this.chevronMat1.uniforms.uUnlocked.value = this.unlockedZone >= 2 ? 1.0 : 0.18;
+      for (let bi = 0; bi < this.barriers.length; bi++) {
+        const b = this.barriers[bi];
+        const targetOpen = this.unlockedZone >= bi + 1 ? 1 : 0;
+        b.openProgress += (targetOpen - b.openProgress) * Math.min(1, dt * 4.2);
+        b.mat.uniforms.uTime.value = elapsed;
+        b.mat.uniforms.uOpen.value = b.openProgress;
+        b.curtain.visible = b.openProgress < 0.985;
+      }
+    }
 
     for (const l of this.lanterns) {
       const flick = 1 + 0.12 * Math.sin(elapsed * 7.3 + l.phase) + 0.06 * Math.sin(elapsed * 13.7 + l.phase);
@@ -1285,7 +2281,7 @@ export class ShushanArena {
       const ang = (m.userData.baseAngle as number) + elapsed * 0.025;
       const dist = m.userData.dist as number;
       m.position.x = Math.cos(ang) * dist;
-      m.position.z = Math.sin(ang) * dist;
+      m.position.z = Math.sin(ang) * dist + this.backdropAnchorZ;
     }
 
     for (const pk of this.floatingPeaks) {
@@ -1307,12 +2303,12 @@ export class ShushanArena {
       pArr[i * 3] += (Math.sin(elapsed * 1.1 + ph) * 0.45 + 0.35 * dr) * dt;
       pArr[i * 3 + 1] -= sp * dt;
       pArr[i * 3 + 2] += Math.cos(elapsed * 0.9 + ph) * 0.35 * dt;
-      if (pArr[i * 3 + 1] < 0.05) {
+      if (pArr[i * 3 + 1] < 0.05 || Math.abs(pArr[i * 3 + 2] - this.backdropAnchorZ) > 24) {
         const ringA = ph + elapsed * 0.37;
         const ringR = 11.4 + ((ph * 3.17) % 6.6);
         pArr[i * 3] = Math.cos(ringA) * ringR + focusPos.x * 0.08;
         pArr[i * 3 + 1] = 8.5 + (ph % 2.8);
-        pArr[i * 3 + 2] = Math.sin(ringA) * ringR + focusPos.z * 0.08;
+        pArr[i * 3 + 2] = Math.sin(ringA) * ringR + this.backdropAnchorZ;
       }
     }
     pAttr.needsUpdate = true;
@@ -1325,7 +2321,7 @@ export class ShushanArena {
       const ph = this.fireflyData[i * 3 + 2];
       fArr[i * 3] = Math.cos(a) * r;
       fArr[i * 3 + 1] = 0.85 + Math.sin(elapsed * 1.45 + ph) * 0.45 + (ph % 1.3);
-      fArr[i * 3 + 2] = Math.sin(a) * r;
+      fArr[i * 3 + 2] = Math.sin(a) * r + this.backdropAnchorZ;
     }
     fAttr.needsUpdate = true;
   }

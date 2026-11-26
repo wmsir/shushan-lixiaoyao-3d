@@ -49,6 +49,30 @@ export type ScreenMode =
 
 export type CombatThreatState = 'none' | 'parryable' | 'unblockable';
 
+export interface MinimapEntityDot {
+  x: number;
+  z: number;
+  kind: 'enemy' | 'elite' | 'boss' | 'loot' | 'ally';
+}
+
+export interface HudTacticalState {
+  corridorMode: boolean;
+  heroX: number;
+  heroZ: number;
+  heroYaw: number;
+  zMax: number;
+  zMin: number;
+  maxZone: 0 | 1 | 2;
+  unlockedZone: 0 | 1 | 2;
+  zoneName: string;
+  progressPct: number;
+  dots: MinimapEntityDot[];
+  q2Ready: boolean;
+  comboSigils: Array<'A' | 'Q' | 'E' | 'D'>;
+  comboUltReady: boolean;
+  comboUltTimer: number;
+}
+
 export interface HudCallbacks {
   onStart: (stageId: number) => void;
   onConfirmDialogue: () => void;
@@ -71,6 +95,7 @@ export interface HudCallbacks {
   onSalvageRolled: (uid: string) => { ok: boolean; jade: number; reason: string };
   onSalvageLow: (maxRarity: 'common' | 'rare') => { count: number; jade: number };
   onClaimBounty: (bountyId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
+  onCastComboUlt?: () => void;
 }
 
 export interface ResultDisplayOptions {
@@ -155,6 +180,19 @@ export class HudController {
   private readonly tCdEEl = this.q('#t-cd-e');
   private readonly tCdREl = this.q('#t-cd-r');
   private readonly tGourdCountEl = this.q('#t-gourd-count');
+
+  // Tactical Corridor Minimap, Q2 & 3-Sigil Combo Ult HUD
+  private readonly minimapBox = this.q('#minimap-box');
+  private readonly minimapZoneName = this.q('#minimap-zone-name');
+  private readonly minimapPct = this.q('#minimap-pct');
+  private readonly minimapCanvas = this.q('#minimap-canvas') as HTMLCanvasElement;
+  private readonly minimapCtx = this.minimapCanvas.getContext('2d');
+  private readonly slotQName = this.q('#slot-q .skill-name');
+  private readonly tSlotQName = this.q('#btn-skill-q .t-lbl');
+  private readonly slotRName = this.q('#slot-r .skill-name');
+  private readonly tSlotRName = this.q('#btn-skill-r .t-lbl');
+  private readonly sigilEls = [this.q('#sigil-0'), this.q('#sigil-1'), this.q('#sigil-2')];
+  private readonly comboUltBtn = this.q('#btn-combo-ult');
 
   private readonly dangerWarning = this.q('#danger-warning');
   private readonly touchAtkBtn = this.q('#btn-attack');
@@ -375,6 +413,11 @@ export class HudController {
     });
     this.q('#btn-mp-quick').addEventListener('click', () => this.callbacks.onMpQuick('coop', this.selectedStage));
     this.q('#btn-mp-leave').addEventListener('click', () => this.callbacks.onMpLeave());
+    this.comboUltBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.callbacks.onCastComboUlt?.();
+      this.comboUltBtn.blur();
+    });
   }
 
   syncCampaignProgress(store: CampaignSaveStore, focusStage?: number): void {
@@ -988,6 +1031,12 @@ export class HudController {
       this.touchDodgeBtn.classList.remove('action-hint-dodge');
       this.touchBlockBtn.classList.remove('action-hint-parry');
       this.touchAtkBtn.classList.remove('shadow-ready');
+      this.minimapBox.classList.remove('visible');
+      this.comboUltBtn.classList.remove('visible');
+      this.slotQ.classList.remove('q2-ready');
+      this.tSlotQ.classList.remove('q2-ready');
+      this.slotR.classList.remove('combo-ready');
+      this.tSlotR.classList.remove('combo-ready');
     }
   }
 
@@ -1160,6 +1209,7 @@ export class HudController {
     boss: EnemyEntity | null,
     peer: PeerHeroState | null = null,
     threat: CombatThreatState = 'none',
+    tactical?: HudTacticalState,
   ): void {
     const hpPct = clamp(hero.hp / hero.maxHp, 0, 1) * 100;
     const delayPct = clamp(hero.delayedHp / hero.maxHp, 0, 1) * 100;
@@ -1201,9 +1251,79 @@ export class HudController {
       this.bossBar.classList.remove('visible');
     }
 
-    this.updateSkillPair(this.slotQ, this.tSlotQ, this.sweepQ, this.tSweepQ, this.cdQEl, this.tCdQEl, hero.cdQ, SKILL_MAX_CD.Q, hero.spirit >= 20, false);
+    const q2Ready = Boolean(tactical?.q2Ready);
+    const comboUltReady = Boolean(tactical?.comboUltReady);
+
+    this.updateSkillPair(
+      this.slotQ,
+      this.tSlotQ,
+      this.sweepQ,
+      this.tSweepQ,
+      this.cdQEl,
+      this.tCdQEl,
+      q2Ready ? 0 : hero.cdQ,
+      SKILL_MAX_CD.Q,
+      q2Ready || hero.spirit >= 20,
+      q2Ready,
+    );
     this.updateSkillPair(this.slotE, this.tSlotE, this.sweepE, this.tSweepE, this.cdEEl, this.tCdEEl, hero.cdE, SKILL_MAX_CD.E, hero.spirit >= 45, false);
-    this.updateSkillPair(this.slotR, this.tSlotR, this.sweepR, this.tSweepR, this.cdREl, this.tCdREl, hero.cdR, SKILL_MAX_CD.R, hero.ult >= 100, hero.ult >= 100 && hero.cdR <= 0);
+    this.updateSkillPair(
+      this.slotR,
+      this.tSlotR,
+      this.sweepR,
+      this.tSweepR,
+      this.cdREl,
+      this.tCdREl,
+      comboUltReady ? 0 : hero.cdR,
+      SKILL_MAX_CD.R,
+      comboUltReady || hero.ult >= 100,
+      comboUltReady || (hero.ult >= 100 && hero.cdR <= 0),
+    );
+
+    this.slotQ.classList.toggle('q2-ready', q2Ready);
+    this.tSlotQ.classList.toggle('q2-ready', q2Ready);
+    this.slotQName.textContent = q2Ready ? '踏剑追影' : '御剑术';
+    this.tSlotQName.textContent = q2Ready ? '踏剑' : '御剑';
+
+    this.slotR.classList.toggle('combo-ready', comboUltReady);
+    this.tSlotR.classList.toggle('combo-ready', comboUltReady);
+    this.slotRName.textContent = comboUltReady ? '万剑归宗' : '天剑';
+    this.tSlotRName.textContent = comboUltReady ? '归宗' : '天剑';
+
+    const sigils = tactical?.comboSigils ?? [];
+    const sigilGlyph: Record<'A' | 'Q' | 'E' | 'D', string> = {
+      A: '斩',
+      Q: '御',
+      E: '万',
+      D: '身',
+    };
+    for (let i = 0; i < this.sigilEls.length; i++) {
+      const el = this.sigilEls[i];
+      const code = sigils[i];
+      if (code) {
+        el.textContent = sigilGlyph[code];
+        el.classList.add('filled');
+        el.dataset.sigil = code;
+      } else {
+        el.textContent = '';
+        el.classList.remove('filled');
+        delete el.dataset.sigil;
+      }
+    }
+    this.comboUltBtn.classList.toggle('visible', comboUltReady);
+    this.comboUltBtn.textContent =
+      comboUltReady && tactical && tactical.comboUltTimer > 0 && tactical.comboUltTimer < 9.5
+        ? `万剑归宗 ${tactical.comboUltTimer.toFixed(1)}s`
+        : '万剑归宗';
+
+    if (tactical?.corridorMode) {
+      this.minimapBox.classList.add('visible');
+      this.minimapZoneName.textContent = tactical.zoneName;
+      this.minimapPct.textContent = `${Math.round(clamp(tactical.progressPct, 0, 100))}%`;
+      this.renderMinimap(tactical);
+    } else {
+      this.minimapBox.classList.remove('visible');
+    }
 
     const healDisabled = hero.gourds <= 0 || hero.cdHeal > 0;
     const healPct = clamp(hero.cdHeal / SKILL_MAX_CD.F, 0, 1) * 360;
@@ -1271,6 +1391,262 @@ export class HudController {
       el.textContent = txt;
       el.classList.toggle('visible', cd > 0.05);
     }
+  }
+
+  private renderMinimap(tactical: HudTacticalState): void {
+    const ctx = this.minimapCtx;
+    if (!ctx) return;
+
+    const w = this.minimapCanvas.width;
+    const h = this.minimapCanvas.height;
+    const padY = 14;
+    const usableH = h - padY * 2;
+    const zSpan = Math.max(1, tactical.zMax - tactical.zMin);
+
+    const toY = (z: number): number => {
+      const norm = clamp((tactical.zMax - z) / zSpan, 0, 1);
+      return h - padY - norm * usableH;
+    };
+    const toX = (x: number): number => clamp(w * 0.5 + (x / 22) * (w * 0.42), 8, w - 8);
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Subtle ink & corridor meridian backdrop
+    const bg = ctx.createLinearGradient(0, h, 0, 0);
+    bg.addColorStop(0, 'rgba(9, 18, 30, 0.92)');
+    bg.addColorStop(1, 'rgba(14, 24, 38, 0.92)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = 'rgba(223, 192, 117, 0.1)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, 6);
+    ctx.lineTo(w * 0.5, h - 6);
+    ctx.stroke();
+
+    const zoneCount = tactical.maxZone + 1;
+    const platW = 76;
+    const platH = zoneCount === 1 ? usableH * 0.84 : zoneCount === 2 ? usableH * 0.36 : usableH * 0.23;
+    const centerYForZone = (zi: number): number => {
+      if (zoneCount === 1) return h * 0.5;
+      if (zoneCount === 2) return zi === 0 ? h - padY - platH * 0.5 : padY + platH * 0.5;
+      return zi === 0 ? h - padY - platH * 0.5 : zi === 1 ? h * 0.5 : padY + platH * 0.5;
+    };
+
+    const now = performance.now();
+
+    // 1. Connecting bridges (bottom-to-top) + unlocked jade route or crimson locked barrier
+    const bridgeW = 24;
+    const bridgeX = (w - bridgeW) * 0.5;
+    for (let zi = 0; zi < tactical.maxZone; zi++) {
+      const yBottom = centerYForZone(zi) - platH * 0.5 + 2;
+      const yTop = centerYForZone(zi + 1) + platH * 0.5 - 2;
+      const bH = Math.max(4, yBottom - yTop);
+      const unlocked = zi + 1 <= tactical.unlockedZone;
+
+      ctx.fillStyle = unlocked ? 'rgba(24, 54, 68, 0.85)' : 'rgba(20, 24, 34, 0.72)';
+      ctx.fillRect(bridgeX, yTop, bridgeW, bH);
+      ctx.strokeStyle = unlocked ? 'rgba(76, 217, 208, 0.56)' : 'rgba(130, 145, 165, 0.28)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bridgeX, yTop, bridgeW, bH);
+
+      if (unlocked) {
+        ctx.save();
+        ctx.strokeStyle = '#5cf6e8';
+        ctx.lineWidth = 2;
+        ctx.shadowColor = '#4cd9d0';
+        ctx.shadowBlur = 7;
+        ctx.setLineDash([4, 3]);
+        ctx.lineDashOffset = (now * 0.018) % 14;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.5, centerYForZone(zi) - 4);
+        ctx.lineTo(w * 0.5, centerYForZone(zi + 1) + 4);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        const midY = yTop + bH * 0.5;
+        ctx.save();
+        ctx.strokeStyle = '#ff4b5e';
+        ctx.lineWidth = 2;
+        ctx.shadowColor = '#ff384c';
+        ctx.shadowBlur = 6;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(bridgeX - 5, midY);
+        ctx.lineTo(bridgeX + bridgeW + 5, midY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff4b5e';
+        ctx.beginPath();
+        ctx.moveTo(w * 0.5, midY - 3.5);
+        ctx.lineTo(w * 0.5 + 3.5, midY);
+        ctx.lineTo(w * 0.5, midY + 3.5);
+        ctx.lineTo(w * 0.5 - 3.5, midY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // 2. Zone Platforms (0..maxZone)
+    const chamfer = 11;
+    for (let zi = 0; zi <= tactical.maxZone; zi++) {
+      const cy = centerYForZone(zi);
+      const x0 = (w - platW) * 0.5;
+      const x1 = x0 + platW;
+      const y0 = cy - platH * 0.5;
+      const y1 = cy + platH * 0.5;
+      const unlocked = zi <= tactical.unlockedZone;
+      const isBossZone = zi === tactical.maxZone && tactical.maxZone > 0;
+
+      ctx.beginPath();
+      ctx.moveTo(x0 + chamfer, y0);
+      ctx.lineTo(x1 - chamfer, y0);
+      ctx.lineTo(x1, y0 + chamfer);
+      ctx.lineTo(x1, y1 - chamfer);
+      ctx.lineTo(x1 - chamfer, y1);
+      ctx.lineTo(x0 + chamfer, y1);
+      ctx.lineTo(x0, y1 - chamfer);
+      ctx.lineTo(x0, y0 + chamfer);
+      ctx.closePath();
+
+      ctx.fillStyle = unlocked
+        ? isBossZone
+          ? 'rgba(40, 22, 34, 0.88)'
+          : 'rgba(18, 36, 52, 0.88)'
+        : 'rgba(13, 21, 33, 0.72)';
+      ctx.fill();
+
+      ctx.strokeStyle = unlocked
+        ? isBossZone
+          ? 'rgba(235, 118, 128, 0.62)'
+          : 'rgba(76, 217, 208, 0.56)'
+        : 'rgba(148, 166, 188, 0.24)';
+      ctx.lineWidth = unlocked ? 1.4 : 1;
+      ctx.stroke();
+
+      // Subtle inner courtyard seal ring
+      ctx.beginPath();
+      ctx.arc(w * 0.5, cy, Math.min(platW, platH) * 0.24, 0, Math.PI * 2);
+      ctx.strokeStyle = isBossZone ? 'rgba(245, 148, 120, 0.2)' : 'rgba(223, 192, 117, 0.16)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // 3. Entity Dots (loot -> ally -> enemy -> elite -> boss)
+    const drawStar = (cx: number, cy: number, outerR: number, innerR: number) => {
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const r = i % 2 === 0 ? outerR : innerR;
+        const a = (i * Math.PI) / 4 - Math.PI / 2;
+        const px = cx + Math.cos(a) * r;
+        const py = cy + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    };
+
+    const order: Record<MinimapEntityDot['kind'], number> = {
+      loot: 0,
+      ally: 1,
+      enemy: 2,
+      elite: 3,
+      boss: 4,
+    };
+    const sortedDots = [...tactical.dots].sort((a, b) => order[a.kind] - order[b.kind]);
+
+    for (const dot of sortedDots) {
+      const dx = toX(dot.x);
+      const dy = toY(dot.z);
+      ctx.save();
+      if (dot.kind === 'loot') {
+        ctx.fillStyle = '#ffd859';
+        ctx.shadowColor = '#ffcb3d';
+        ctx.shadowBlur = 6;
+        drawStar(dx, dy, 4.8, 1.9);
+        ctx.fill();
+      } else if (dot.kind === 'ally') {
+        ctx.fillStyle = '#54f0be';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(dx, dy, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (dot.kind === 'enemy') {
+        ctx.fillStyle = '#ff4b5c';
+        ctx.strokeStyle = 'rgba(20, 6, 10, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(dx, dy, 2.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (dot.kind === 'elite') {
+        ctx.fillStyle = '#ff9d3b';
+        ctx.strokeStyle = '#ffe29a';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(dx, dy - 4.4);
+        ctx.lineTo(dx + 4.4, dy);
+        ctx.lineTo(dx, dy + 4.4);
+        ctx.lineTo(dx - 4.4, dy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (dot.kind === 'boss') {
+        const pulse = 1 + 0.18 * Math.sin(now * 0.008);
+        ctx.strokeStyle = 'rgba(255, 84, 106, 0.65)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(dx, dy, 6.8 * pulse, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ff2e4d';
+        ctx.strokeStyle = '#ffd87a';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(dx, dy, 4.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Tiny gold crown glyph
+        ctx.fillStyle = '#ffe384';
+        ctx.beginPath();
+        ctx.moveTo(dx - 3.5, dy - 4.5);
+        ctx.lineTo(dx - 3.5, dy - 7.8);
+        ctx.lineTo(dx - 1.4, dy - 6.0);
+        ctx.lineTo(dx, dy - 8.5);
+        ctx.lineTo(dx + 1.4, dy - 6.0);
+        ctx.lineTo(dx + 3.5, dy - 7.8);
+        ctx.lineTo(dx + 3.5, dy - 4.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // 4. Hero rotated jade directional arrow
+    const hx = toX(tactical.heroX);
+    const hy = toY(tactical.heroZ);
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(Math.PI - tactical.heroYaw);
+    ctx.shadowColor = '#4cd9d0';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#7cfaf0';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -6.5);
+    ctx.lineTo(4.6, 5);
+    ctx.lineTo(0, 2.3);
+    ctx.lineTo(-4.6, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   private q(sel: string): HTMLElement {

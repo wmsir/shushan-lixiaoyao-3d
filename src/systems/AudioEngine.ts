@@ -18,9 +18,10 @@ import voiceCounter from '../assets/voices/voice-counter.mp3';
 import voiceDodge from '../assets/voices/voice-dodge.mp3';
 import voiceHeal from '../assets/voices/voice-heal.mp3';
 import voiceVictory from '../assets/voices/voice-victory.mp3';
+import voiceComboUrl from '../assets/voices/voice-combo.mp3';
 
 export type MusicMood = 'title' | 'skirmish' | 'boss1' | 'boss2' | 'victory';
-export type HeroVoiceKind = 'skillQ' | 'skillE' | 'skillR' | 'counter' | 'dodge' | 'heal' | 'victory';
+export type HeroVoiceKind = 'skillQ' | 'skillE' | 'skillR' | 'comboUlt' | 'counter' | 'dodge' | 'heal' | 'victory';
 
 interface VoiceClipDef {
   url: string;
@@ -42,6 +43,7 @@ const VOICE_BANKS: Record<HeroVoiceKind, VoiceClipDef[]> = {
     { url: voiceR1, line: '仗剑红尘已是癫——天剑，降世！', priority: 4, cooldownSec: 3.5 },
     { url: voiceR2, line: '破晓斩长空，一剑镇乾坤——天剑！', priority: 4, cooldownSec: 3.5 },
   ],
+  comboUlt: [{ url: voiceComboUrl, line: '剑诀合一，万剑归宗，斩！', priority: 5, cooldownSec: 2.2 }],
   counter: [{ url: voiceCounter, line: '破绽在此，接招！', priority: 2, cooldownSec: 1.6 }],
   dodge: [{ url: voiceDodge, line: '想打中我？差得远呢！', priority: 1, cooldownSec: 2.2 }],
   heal: [{ url: voiceHeal, line: '好酒！御剑江湖，岂能无酒！', priority: 2, cooldownSec: 2.2 }],
@@ -66,6 +68,7 @@ export class AudioEngine {
     skillQ: 0,
     skillE: 0,
     skillR: 0,
+    comboUlt: 0,
     counter: 0,
     dodge: 0,
     heal: 0,
@@ -202,7 +205,7 @@ export class AudioEngine {
       void this.ensureVoiceBuffer(clip.url);
     }
 
-    if (kind === 'skillR' && this.musicGain && this.ctx) {
+    if ((kind === 'skillR' || kind === 'comboUlt') && this.musicGain && this.ctx) {
       const t = this.ctx.currentTime;
       this.musicGain.gain.cancelScheduledValues(t);
       this.musicGain.gain.setTargetAtTime(0.08, t, 0.08);

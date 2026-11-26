@@ -12,6 +12,7 @@ export type HeroActionState =
   | 'skillQ'
   | 'skillE'
   | 'skillR'
+  | 'comboUlt'
   | 'drink'
   | 'hit'
   | 'dead';
@@ -55,6 +56,16 @@ export interface HeroState {
   counterTargetId: number | null;
   counterWindowTimer: number;
   shadowStrikeTimer: number;
+
+  // Honor-of-Kings skill synergy & 3-sigil combo chain
+  q2ReadyTimer: number;
+  q2TargetId: number | null;
+  dodgeEmpowered: boolean;
+  dodgeEmpowerTimer: number;
+  comboSigils: Array<'A' | 'Q' | 'E' | 'D'>;
+  comboSigilTimer: number;
+  comboUltReady: boolean;
+  comboUltTimer: number;
 
   // Cooldowns
   cdQ: number;
@@ -122,6 +133,7 @@ export interface EnemyEntity {
   hitstopTimer: number;
   shakeTimer: number;
   deathTimer: number;
+  swordMarkTimer?: number;
 
   telegraph: TelegraphHandle | null;
   telegraphPos: THREE.Vector3;
@@ -134,6 +146,7 @@ export interface ProjectileEntity {
   id: number;
   friendly: boolean;
   kind: 'flyingSword' | 'yinOrb';
+  appliesMark?: boolean;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   radius: number;
@@ -184,6 +197,15 @@ export function createHero(): HeroState {
     counterTargetId: null,
     counterWindowTimer: 0,
     shadowStrikeTimer: 0,
+
+    q2ReadyTimer: 0,
+    q2TargetId: null,
+    dodgeEmpowered: false,
+    dodgeEmpowerTimer: 0,
+    comboSigils: [],
+    comboSigilTimer: 0,
+    comboUltReady: false,
+    comboUltTimer: 0,
 
     cdQ: 0,
     cdE: 0,
@@ -387,6 +409,7 @@ export function createEnemy(
     hitstopTimer: 0,
     shakeTimer: 0,
     deathTimer: 0,
+    swordMarkTimer: 0,
 
     telegraph: null,
     telegraphPos: new THREE.Vector3(),

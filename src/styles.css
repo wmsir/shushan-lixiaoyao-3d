@@ -879,11 +879,20 @@ body,
   opacity: 1;
 }
 
-/* Top-Left Hero Vitality Cluster (authored beveled bars with dark ink scrim) */
-.hero-cluster {
+/* Top-Left Hero Vitality Cluster + Live Corridor Minimap Stack */
+.top-left-stack {
   position: fixed;
   left: 16px;
   top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.hero-cluster {
+  position: relative;
   width: 292px;
   padding: 10px 12px 10px;
   border-radius: 8px;
@@ -893,6 +902,59 @@ body,
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+.minimap-box {
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 124px;
+  padding: 5px 6px 6px;
+  border-radius: 8px;
+  background: linear-gradient(160deg, rgba(7, 13, 22, 0.84) 0%, rgba(8, 16, 28, 0.72) 100%);
+  border: 1px solid rgba(223, 192, 117, 0.34);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(247, 225, 162, 0.14);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.minimap-box.visible {
+  display: flex;
+}
+
+.minimap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+#minimap-zone-name {
+  font-family: var(--font-serif);
+  color: var(--gold-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#minimap-pct {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--jade);
+  flex-shrink: 0;
+}
+
+#minimap-canvas {
+  display: block;
+  width: 110px;
+  height: 176px;
+  border-radius: 5px;
+  border: 1px solid rgba(76, 217, 208, 0.24);
+  background: rgba(6, 12, 20, 0.9);
 }
 
 .hero-nameplate {
@@ -1281,6 +1343,146 @@ body,
 @keyframes medalRipple {
   0% { transform: scale(0.92); opacity: 0.95; }
   100% { transform: scale(1.48); opacity: 0; }
+}
+
+/* Honor-of-Kings 3-Sigil Combo Bar & Golden Combo Ultimate Trigger */
+.combo-sigil-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 112px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(9, 17, 29, 0.84), rgba(6, 11, 20, 0.72));
+  border: 1px solid rgba(223, 192, 117, 0.32);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  z-index: 23;
+}
+
+.combo-sigils-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sigil-slot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px dashed rgba(223, 192, 117, 0.34);
+  background: rgba(10, 18, 30, 0.82);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 240, 200, 0.35);
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.sigil-slot.filled {
+  border-style: solid;
+  transform: scale(1.06);
+  color: #fff8e2;
+  border-color: rgba(247, 225, 162, 0.86);
+  background: radial-gradient(circle at 35% 30%, rgba(44, 128, 134, 0.9), rgba(14, 34, 52, 0.96));
+  box-shadow: 0 0 12px rgba(76, 217, 208, 0.55);
+}
+
+.sigil-slot.filled[data-sigil='A'] {
+  background: radial-gradient(circle at 35% 30%, rgba(196, 62, 68, 0.92), rgba(74, 18, 26, 0.96));
+  border-color: rgba(255, 178, 140, 0.88);
+  box-shadow: 0 0 12px rgba(235, 86, 94, 0.6);
+}
+
+.sigil-slot.filled[data-sigil='Q'] {
+  background: radial-gradient(circle at 35% 30%, rgba(44, 158, 162, 0.92), rgba(14, 48, 58, 0.96));
+  border-color: rgba(112, 248, 236, 0.88);
+  box-shadow: 0 0 12px rgba(76, 217, 208, 0.62);
+}
+
+.sigil-slot.filled[data-sigil='E'] {
+  background: radial-gradient(circle at 35% 30%, rgba(182, 128, 38, 0.94), rgba(74, 44, 12, 0.96));
+  border-color: rgba(255, 224, 132, 0.92);
+  box-shadow: 0 0 12px rgba(248, 198, 72, 0.62);
+}
+
+.sigil-slot.filled[data-sigil='D'] {
+  background: radial-gradient(circle at 35% 30%, rgba(62, 134, 178, 0.92), rgba(18, 44, 72, 0.96));
+  border-color: rgba(154, 224, 255, 0.88);
+  box-shadow: 0 0 12px rgba(102, 198, 255, 0.58);
+}
+
+.combo-ult-btn {
+  display: none;
+  pointer-events: auto;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1.5px solid #ffe89e;
+  background: linear-gradient(135deg, #f6cf66 0%, #c87b1e 50%, #7d3210 100%);
+  color: #fffbeb;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  cursor: pointer;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.88);
+  box-shadow: 0 0 18px rgba(255, 208, 78, 0.82), inset 0 1px 0 rgba(255, 252, 228, 0.65);
+  animation: comboUltPulse 0.95s ease-in-out infinite;
+}
+
+.combo-ult-btn.visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.combo-ult-btn:hover {
+  transform: scale(1.05);
+}
+
+.combo-ult-btn:active {
+  transform: scale(0.95);
+}
+
+@keyframes comboUltPulse {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(255, 208, 78, 0.72), inset 0 1px 0 rgba(255, 252, 228, 0.6);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 26px rgba(255, 224, 112, 0.98), 0 0 10px rgba(76, 217, 208, 0.5);
+    filter: brightness(1.16);
+  }
+}
+
+.medal-btn.q2-ready {
+  background: linear-gradient(145deg, #c6fff8 0%, #30c8bd 38%, #104e58 68%, #ffe184 100%);
+  box-shadow:
+    0 0 24px rgba(76, 217, 208, 0.86),
+    0 0 12px rgba(248, 212, 104, 0.64),
+    0 8px 18px rgba(0, 0, 0, 0.78);
+  animation: ultPulse 0.75s ease-in-out infinite;
+}
+
+.medal-btn.q2-ready::before {
+  border-color: rgba(132, 255, 242, 0.85);
+}
+
+.medal-btn.combo-ready {
+  background: linear-gradient(145deg, #fff6cb 0%, #f0b844 36%, #942a1a 68%, #ffe384 100%);
+  box-shadow:
+    0 0 28px rgba(255, 206, 76, 0.92),
+    0 0 14px rgba(255, 92, 92, 0.62),
+    0 8px 20px rgba(0, 0, 0, 0.78);
+  animation: ultPulse 0.7s ease-in-out infinite;
 }
 
 /* Bottom-Center Circular Xianxia Skill Icons (Desktop Mode) */
@@ -2718,6 +2920,14 @@ body,
   display: none !important;
 }
 
+#app.force-wheel .combo-sigil-bar,
+#app.mobile-mode .combo-sigil-bar {
+  left: auto;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 236px);
+  transform: none;
+}
+
 #app.mobile-mode .title-controls-grid.mobile-only {
   display: grid !important;
 }
@@ -2734,12 +2944,27 @@ body,
   padding-right: 0;
 }
 
-#app.mobile-mode .hero-cluster {
+#app.mobile-mode .top-left-stack {
   left: 8px;
   top: 8px;
+  gap: 5px;
+}
+
+#app.mobile-mode .hero-cluster {
   width: 174px;
   padding: 5px 8px;
   gap: 3px;
+}
+
+#app.mobile-mode .minimap-box {
+  width: 96px;
+  padding: 4px 5px;
+  gap: 3px;
+}
+
+#app.mobile-mode #minimap-canvas {
+  width: 84px;
+  height: 134px;
 }
 
 #app.mobile-mode .hero-seal {
@@ -2808,12 +3033,30 @@ body,
   .skill-bar {
     display: none;
   }
-  .hero-cluster {
+  .combo-sigil-bar {
+    left: auto;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 236px);
+    transform: none;
+  }
+  .top-left-stack {
     left: 8px;
     top: 8px;
+    gap: 5px;
+  }
+  .hero-cluster {
     width: 174px;
     padding: 5px 8px;
     gap: 3px;
+  }
+  .minimap-box {
+    width: 96px;
+    padding: 4px 5px;
+    gap: 3px;
+  }
+  #minimap-canvas {
+    width: 84px;
+    height: 134px;
   }
   .hero-seal {
     width: 24px;
@@ -2874,6 +3117,53 @@ body,
 
 /* Landscape mobile (Android APK & iOS IPA full-screen ergonomic layout) */
 @media (max-height: 520px) and (orientation: landscape) {
+  .top-left-stack,
+  #app.mobile-mode .top-left-stack {
+    left: 8px;
+    top: 6px;
+    gap: 4px;
+  }
+  .hero-cluster,
+  #app.mobile-mode .hero-cluster {
+    padding: 4px 7px;
+    gap: 2px;
+  }
+  .minimap-box,
+  #app.mobile-mode .minimap-box {
+    width: 82px;
+    padding: 3px 5px;
+    gap: 2px;
+  }
+  .minimap-head {
+    font-size: 10px;
+  }
+  #minimap-pct {
+    font-size: 9.5px;
+  }
+  #minimap-canvas,
+  #app.mobile-mode #minimap-canvas {
+    width: 70px;
+    height: 78px;
+  }
+  .combo-sigil-bar,
+  #app.mobile-mode .combo-sigil-bar,
+  #app.force-wheel .combo-sigil-bar {
+    left: auto;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 232px);
+    transform: none;
+    padding: 3px 6px;
+    gap: 6px;
+  }
+  .sigil-slot {
+    width: 22px;
+    height: 22px;
+    font-size: 11.5px;
+  }
+  .combo-ult-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+  }
   .top-center-stack,
   #app.mobile-mode .top-center-stack {
     top: 10px;

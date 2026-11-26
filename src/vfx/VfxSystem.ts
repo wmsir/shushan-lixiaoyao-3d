@@ -31,16 +31,44 @@ interface ArrayVfx {
   duration: number;
 }
 
+interface SkySwordGateVfx {
+  group: THREE.Group;
+  center: THREE.Vector3;
+  radius: number;
+  color: THREE.Color;
+  cloudMat: THREE.ShaderMaterial;
+  runeMat: THREE.ShaderMaterial;
+  innerMat: THREE.ShaderMaterial;
+  beamGroup: THREE.Group;
+  ownedGeos: THREE.BufferGeometry[];
+  ownedMats: THREE.Material[];
+  age: number;
+  duration: number;
+  sparkTimer: number;
+}
+
 interface FallingSwordVfx {
   group: THREE.Group;
-  trail: THREE.Mesh;
+  reticle: THREE.Mesh;
+  reticleMat: THREE.ShaderMaterial;
+  wakeGroup: THREE.Group;
+  tassels: THREE.Mesh[];
+  fadeMats: Array<{ mat: THREE.Material & { opacity: number }; baseOpacity: number }>;
+  ownedMats: THREE.Material[];
   startPos: THREE.Vector3;
+  impalePos: THREE.Vector3;
   targetPos: THREE.Vector3;
+  baseQuat: THREE.Quaternion;
+  tremorAxis: THREE.Vector3;
+  baseScale: number;
+  color: THREE.Color;
   age: number;
+  hoverDuration: number;
   fallDuration: number;
   lingerDuration: number;
   impacted: boolean;
   giant: boolean;
+  sparkTimer: number;
   onImpact?: (pos: THREE.Vector3) => void;
 }
 
@@ -128,6 +156,7 @@ export class VfxSystem {
 
   private readonly slashes: SlashVfx[] = [];
   private readonly arrays: ArrayVfx[] = [];
+  private readonly skyGates: SkySwordGateVfx[] = [];
   private readonly swords: FallingSwordVfx[] = [];
   private readonly rings: ShockRingVfx[] = [];
   private readonly sparks: SparkItem[] = [];
@@ -139,6 +168,25 @@ export class VfxSystem {
   private readonly wideArcGeo = createArcSectorGeometry(1.15, 3.25, Math.PI * 1.15, 32);
   private readonly sparkGeo = new THREE.BoxGeometry(0.055, 0.055, 0.34);
   private readonly planeGeo = new THREE.PlaneGeometry(1, 1);
+
+  private readonly jianGeos = (() => {
+    const tassel = new THREE.CylinderGeometry(0.007, 0.024, 0.46, 5);
+    tassel.translate(0, 0.23, 0);
+    const wakeRibbon = new THREE.PlaneGeometry(0.11, 2.2);
+    wakeRibbon.translate(0, 1.1, 0);
+    return {
+      blade: new THREE.CylinderGeometry(0.088, 0.064, 1.38, 4),
+      tip: new THREE.ConeGeometry(0.064, 0.34, 4),
+      fuller: new THREE.CylinderGeometry(0.017, 0.008, 1.24, 4),
+      guardWing: new THREE.ConeGeometry(0.042, 0.3, 5),
+      guardJewel: new THREE.OctahedronGeometry(0.068, 1),
+      grip: new THREE.CylinderGeometry(0.028, 0.033, 0.36, 8),
+      pommelRing: new THREE.TorusGeometry(0.056, 0.016, 8, 18),
+      tassel,
+      wakeRibbon,
+      haloRing: new THREE.TorusGeometry(0.32, 0.014, 6, 20),
+    };
+  })();
 
   /**
    * Spawns a Mesh+Shader Sword-Qi Arc with scrolling streaks, razor core, noise erosion,
@@ -321,133 +369,500 @@ export class VfxSystem {
   }
 
   /**
-   * Spawns a true 3D sculpted Spirit Sword plunging from the sky with comet trail
-   * and ground impact shockwave (used for 万剑诀 and 天剑大招).
+   * Spawns a shimmering overhead Cloud-Rift / Taoist Sky Sword Gate floating high above combat
+   * (y = 10.5..14.5m) with rotating golden/azure Bagua-rune rings, radial rift beams, and vortex sparks.
+   */
+  spawnSkySwordGate(pos: THREE.Vector3, radius: number, color: THREE.Color, duration = 1.6): void {
+    const gateY = pos.y >= 10.5 && pos.y <= 14.5 ? pos.y : clamp(11.4 + Math.min(2.6, radius * 0.25), 10.5, 14.5);
+    const gateGroup = new THREE.Group();
+    gateGroup.position.set(pos.x, gateY, pos.z);
+    gateGroup.rotation.order = 'YXZ';
+    gateGroup.rotation.x = -Math.PI / 2 + 0.16;
+
+    const cloudMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uProg: { value: 0 },
+        uColor: { value: color.clone() },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uProg;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+
+        void main() {
+          float r = length(vUv);
+          float open = smoothstep(0.0, 0.16, uProg) * (1.0 - smoothstep(0.82, 1.0, uProg));
+          if (r > 1.0 || open < 0.01) discard;
+          float a = atan(vUv.y, vUv.x + 1e-5);
+          float swirl = noise(vec2(a * 2.5 + uTime * 0.9 - r * 3.2, r * 4.5 - uTime * 0.6));
+          float cloudMask = smoothstep(1.0, 0.26, r) * (0.58 + 0.42 * swirl);
+          float rimGlow = smoothstep(0.18, 0.0, abs(r - 0.54 - swirl * 0.14));
+          vec3 voidCol = vec3(0.03, 0.05, 0.11);
+          vec3 rimCol = mix(uColor * 0.72, vec3(1.15, 0.95, 0.48), 0.28);
+          vec3 col = mix(voidCol, rimCol, clamp(rimGlow * 0.85 + swirl * 0.25, 0.0, 1.0));
+          float alpha = cloudMask * open * 0.82;
+          if (alpha < 0.02) discard;
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+
+    const runeMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uProg: { value: 0 },
+        uColor: { value: color.clone() },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uProg;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+
+        void main() {
+          float r = length(vUv);
+          float reveal = smoothstep(0.0, 0.18, uProg);
+          if (r > reveal || r > 1.0) discard;
+          float a = atan(vUv.y, vUv.x + 1e-5);
+
+          float ring1 = smoothstep(0.034, 0.008, abs(r - 0.92));
+          float ring2 = smoothstep(0.026, 0.006, abs(r - 0.72));
+          float ring3 = smoothstep(0.024, 0.006, abs(r - 0.42));
+
+          float octA = mod(a + uTime * 1.2 + 0.3927, 0.7854) - 0.3927;
+          float oct = smoothstep(0.025, 0.006, abs(r - 0.82 / max(0.35, cos(octA))));
+
+          float hexA = mod(a - uTime * 1.65 + 0.5236, 1.0472) - 0.5236;
+          float hex = smoothstep(0.022, 0.006, abs(r - 0.56 / max(0.35, cos(hexA))));
+
+          float trigrams = step(0.38, sin((a + uTime * 0.85) * 24.0)) * smoothstep(0.085, 0.02, abs(r - 0.82));
+          float spokes = step(0.88, cos((a - uTime * 0.6) * 8.0)) * smoothstep(0.38, 0.92, r) * (1.0 - smoothstep(0.92, 0.98, r));
+          float core = smoothstep(0.45, 0.0, r) * 0.55;
+
+          float mask = clamp(ring1 + ring2 + ring3 + oct * 0.9 + hex * 0.85 + trigrams * 0.65 + spokes * 0.5 + core, 0.0, 1.25);
+          float fade = smoothstep(0.0, 0.14, uProg) * (1.0 - smoothstep(0.76, 1.0, uProg));
+          if (mask * fade < 0.02) discard;
+
+          vec3 goldTint = vec3(1.55, 1.22, 0.48);
+          vec3 col = mix(uColor * 1.15, goldTint, clamp(ring2 + trigrams * 0.5, 0.0, 0.65));
+          gl_FragColor = vec4(col, mask * fade * 0.78);
+        }
+      `,
+    });
+
+    const innerMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uProg: { value: 0 },
+        uColor: { value: color.clone() },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uProg;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+
+        void main() {
+          float r = length(vUv);
+          if (r > 1.0) discard;
+          float a = atan(vUv.y, vUv.x + 1e-5);
+          float rays = 0.5 + 0.5 * sin(a * 12.0 - uTime * 3.8 + r * 6.0);
+          float ring = smoothstep(0.045, 0.01, abs(r - 0.78));
+          float eye = smoothstep(0.75, 0.0, r) * (0.45 + 0.55 * rays);
+          float fade = smoothstep(0.0, 0.14, uProg) * (1.0 - smoothstep(0.74, 1.0, uProg));
+          float alpha = (ring + eye * 0.72) * fade * 0.7;
+          if (alpha < 0.02) discard;
+          gl_FragColor = vec4(uColor * 1.35, alpha);
+        }
+      `,
+    });
+
+    const cloudMesh = new THREE.Mesh(this.planeGeo, cloudMat);
+    cloudMesh.scale.setScalar(radius * 2.5);
+    const runeMesh = new THREE.Mesh(this.planeGeo, runeMat);
+    runeMesh.position.z = -0.04;
+    runeMesh.scale.setScalar(radius * 2.15);
+    const innerMesh = new THREE.Mesh(this.planeGeo, innerMat);
+    innerMesh.position.z = -0.12;
+    innerMesh.scale.setScalar(radius * 1.35);
+
+    const beamGroup = new THREE.Group();
+    const beamGeo = new THREE.PlaneGeometry(Math.max(0.28, radius * 0.14), 6.2);
+    beamGeo.translate(0, -3.1, 0);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: color.clone().multiplyScalar(1.1),
+      transparent: true,
+      opacity: 0.26,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const beamCount = 6;
+    for (let b = 0; b < beamCount; b++) {
+      const ang = (b / beamCount) * Math.PI * 2;
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      beam.position.set(Math.cos(ang) * radius * 0.52, Math.sin(ang) * radius * 0.52, -0.08);
+      // Tilt beam to project downward along gate -Z (world -Y)
+      beam.rotation.order = 'YXZ';
+      beam.rotation.x = Math.PI / 2 - 0.12;
+      beam.rotation.z = ang + Math.PI / 2;
+      beamGroup.add(beam);
+    }
+
+    gateGroup.add(cloudMesh, runeMesh, innerMesh, beamGroup);
+    this.group.add(gateGroup);
+
+    this.skyGates.push({
+      group: gateGroup,
+      center: new THREE.Vector3(pos.x, gateY, pos.z),
+      radius,
+      color: color.clone(),
+      cloudMat,
+      runeMat,
+      innerMat,
+      beamGroup,
+      ownedGeos: [beamGeo],
+      ownedMats: [cloudMat, runeMat, innerMat, beamMat],
+      age: 0,
+      duration,
+      sparkTimer: 0,
+    });
+  }
+
+  /**
+   * Spawns a cinema-grade multi-part forged 3D Chinese Jian plunging from a high sky rift
+   * with 3-phase choreography (Sky Manifest -> Supersonic Plunge -> Stone Impale & Damped Tremor).
    */
   spawnFallingSword(opts: {
     targetPos: THREE.Vector3;
     giant?: boolean;
+    comboUlt?: boolean;
     delay?: number;
     color?: THREE.Color;
+    tiltRad?: number;
     onImpact?: (pos: THREE.Vector3) => void;
   }): void {
     const giant = !!opts.giant;
-    const sc = giant ? 3.2 : 1.05;
-    const col = opts.color ?? (giant ? new THREE.Color(2.2, 1.7, 0.55) : new THREE.Color(0.55, 2.05, 2.2));
+    const comboUlt = !!opts.comboUlt;
+    const sc = giant ? 3.15 : comboUlt ? 1.25 : 1.08;
+    const col =
+      opts.color?.clone() ??
+      (giant
+        ? new THREE.Color(2.2, 1.7, 0.55)
+        : comboUlt
+          ? new THREE.Color(0.95, 2.1, 1.95)
+          : new THREE.Color(0.55, 2.05, 2.2));
+
+    // Ensure an overhead Sky Sword Gate exists above this strike zone
+    const hasNearbyGate = this.skyGates.some(
+      (gate) =>
+        gate.age < gate.duration * 0.72 &&
+        Math.hypot(gate.center.x - opts.targetPos.x, gate.center.z - opts.targetPos.z) <= gate.radius + 2.4,
+    );
+    if (!hasNearbyGate) {
+      this.spawnSkySwordGate(
+        new THREE.Vector3(opts.targetPos.x, giant ? 13.6 : 11.8, opts.targetPos.z),
+        giant ? 5.6 : 4.4,
+        col,
+        giant ? 1.9 : 1.6,
+      );
+    }
 
     const g = new THREE.Group();
-    const steelBladeMat = new THREE.MeshStandardMaterial({
-      color: giant ? '#e8dcc0' : '#d2e8f2',
-      emissive: col.clone().multiplyScalar(0.32),
-      emissiveIntensity: 0.72,
-      roughness: 0.22,
-      metalness: 0.92,
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: giant ? '#f3e5c4' : '#deebf5',
+      emissive: col.clone().multiplyScalar(0.18),
+      emissiveIntensity: 0.42,
+      roughness: 0.16,
+      metalness: 0.94,
+      transparent: true,
+      opacity: 1,
+    });
+    const fullerMat = new THREE.MeshStandardMaterial({
+      color: col,
+      emissive: col,
+      emissiveIntensity: 1.45,
+      roughness: 0.2,
+      metalness: 0.35,
       transparent: true,
       opacity: 0.98,
-    });
-    const runeCoreMat = new THREE.MeshBasicMaterial({
-      color: col,
-      transparent: true,
-      opacity: 0.92,
     });
     const guardMat = new THREE.MeshStandardMaterial({
-      color: '#c8a256',
-      emissive: new THREE.Color('#6b4814'),
-      emissiveIntensity: 0.45,
-      roughness: 0.3,
-      metalness: 0.88,
+      color: giant ? '#e5b856' : '#cfa24e',
+      emissive: new THREE.Color('#664310'),
+      emissiveIntensity: 0.42,
+      roughness: 0.26,
+      metalness: 0.9,
       transparent: true,
-      opacity: 0.98,
+      opacity: 1,
+    });
+    const gripMat = new THREE.MeshStandardMaterial({
+      color: '#2c2220',
+      emissive: new THREE.Color('#181110'),
+      emissiveIntensity: 0.2,
+      roughness: 0.48,
+      metalness: 0.4,
+      transparent: true,
+      opacity: 1,
+    });
+    const tasselMat = new THREE.MeshStandardMaterial({
+      color: giant ? '#f0a830' : '#d62b2b',
+      emissive: new THREE.Color(giant ? '#995810' : '#7a1212'),
+      emissiveIntensity: 0.52,
+      roughness: 0.42,
+      metalness: 0.18,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.96,
+    });
+    const wakeMat = new THREE.MeshBasicMaterial({
+      color: col,
+      transparent: true,
+      opacity: giant ? 0.42 : 0.3,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
     });
 
-    // Sculpted Forged-Steel Beveled Diamond Spirit Sword pointing downward (-Y)
-    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.01, 1.52, 4), steelBladeMat);
-    blade.scale.set(1.0, 1.0, 0.34);
+    // 1-2. Double-edged Damascus beveled blade + sharpened tip (tip anchor at y = 0)
+    const blade = new THREE.Mesh(this.jianGeos.blade, steelMat);
+    blade.scale.set(1.0, 1.0, 0.28);
     blade.rotation.y = Math.PI / 4;
-    blade.position.y = 0.76;
+    blade.position.y = 0.91;
 
-    // Glowing recessed rune fuller along spine
-    const fuller = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.005, 1.38, 4), runeCoreMat);
-    fuller.scale.set(1.0, 1.0, 0.65);
+    const tip = new THREE.Mesh(this.jianGeos.tip, steelMat);
+    tip.scale.set(1.0, 1.0, 0.28);
+    tip.rotation.set(Math.PI, Math.PI / 4, 0);
+    tip.position.y = 0.05;
+
+    // 3. Luminous recessed spine rune fuller (emissiveIntensity >= 1.1)
+    const fuller = new THREE.Mesh(this.jianGeos.fuller, fullerMat);
+    fuller.scale.set(0.85, 1.0, 0.48);
     fuller.rotation.y = Math.PI / 4;
-    fuller.position.y = 0.75;
+    fuller.position.y = 0.92;
 
-    // Ornate carved wing crossguard & pommel
-    const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.036, 0.48, 6), guardMat);
-    guard.rotation.z = Math.PI / 2;
-    guard.position.y = 1.52;
-    const guardCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.062, 1), guardMat);
-    guardCore.scale.set(1.15, 0.85, 0.55);
-    guardCore.position.y = 1.52;
-    const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.032, 0.36, 6), guardMat);
-    hilt.position.y = 1.72;
-    const pommel = new THREE.Mesh(new THREE.OctahedronGeometry(0.044, 0), guardMat);
-    pommel.position.y = 1.92;
+    // 4-6. Wide sculpted dragon-wing curved crossguard + central guard jewel
+    const guardLeft = new THREE.Mesh(this.jianGeos.guardWing, guardMat);
+    guardLeft.scale.set(1.0, 1.0, 0.55);
+    guardLeft.rotation.z = 1.24;
+    guardLeft.position.set(-0.14, 1.63, 0);
 
-    // Translucent spirit-qi sheath halo around forged steel blade
-    const sheathMat = new THREE.MeshBasicMaterial({
-      color: col,
-      transparent: true,
-      opacity: giant ? 0.34 : 0.24,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    const sheath = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.02, 1.58, 6, 1, true), sheathMat);
-    sheath.position.y = 0.76;
+    const guardRight = new THREE.Mesh(this.jianGeos.guardWing, guardMat);
+    guardRight.scale.set(1.0, 1.0, 0.55);
+    guardRight.rotation.z = -1.24;
+    guardRight.position.set(0.14, 1.63, 0);
 
-    // Volumetric comet tail behind hilt
-    const trailMat = new THREE.MeshBasicMaterial({
-      color: col,
-      transparent: true,
-      opacity: giant ? 0.52 : 0.38,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    const trail = new THREE.Mesh(new THREE.ConeGeometry(giant ? 0.26 : 0.16, giant ? 3.8 : 2.6, 10, 1, true), trailMat);
-    trail.position.y = giant ? 3.8 : 3.05;
-    trail.rotation.x = Math.PI;
+    const guardJewel = new THREE.Mesh(this.jianGeos.guardJewel, fullerMat);
+    guardJewel.scale.set(1.25, 0.92, 0.68);
+    guardJewel.position.y = 1.59;
 
-    g.add(blade, fuller, guard, guardCore, hilt, pommel, sheath, trail);
+    // 7-10. Ridged grip + heavy bronze/gold ring pommel + twin trailing silk sword tassels
+    const grip = new THREE.Mesh(this.jianGeos.grip, gripMat);
+    grip.position.y = 1.79;
 
-    // Helical golden-cyan celestial lightning rings around giant Tianjian sword
-    if (giant) {
-      const arcMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(2.1, 1.85, 0.85),
+    const pommelRing = new THREE.Mesh(this.jianGeos.pommelRing, guardMat);
+    pommelRing.position.y = 2.02;
+
+    const tasselA = new THREE.Mesh(this.jianGeos.tassel, tasselMat);
+    tasselA.position.set(-0.036, 2.03, 0.012);
+    tasselA.rotation.set(0.08, 0, 0.12);
+
+    const tasselB = new THREE.Mesh(this.jianGeos.tassel, tasselMat);
+    tasselB.position.set(0.036, 2.03, -0.012);
+    tasselB.rotation.set(-0.08, 0, -0.12);
+
+    // 11-12. Subtle thin air-wake ribbons ONLY behind the hilt (never obscuring blade/guard)
+    const wakeGroup = new THREE.Group();
+    wakeGroup.position.y = 2.08;
+    const wakeRibbonA = new THREE.Mesh(this.jianGeos.wakeRibbon, wakeMat);
+    const wakeRibbonB = new THREE.Mesh(this.jianGeos.wakeRibbon, wakeMat);
+    wakeRibbonB.rotation.y = Math.PI / 2;
+    wakeGroup.add(wakeRibbonA, wakeRibbonB);
+
+    g.add(
+      blade,
+      tip,
+      fuller,
+      guardLeft,
+      guardRight,
+      guardJewel,
+      grip,
+      pommelRing,
+      tasselA,
+      tasselB,
+      wakeGroup,
+    );
+
+    const ownedMats: THREE.Material[] = [steelMat, fullerMat, guardMat, gripMat, tasselMat, wakeMat];
+    const fadeMats: Array<{ mat: THREE.Material & { opacity: number }; baseOpacity: number }> = [
+      { mat: steelMat, baseOpacity: 1 },
+      { mat: fullerMat, baseOpacity: 0.98 },
+      { mat: guardMat, baseOpacity: 1 },
+      { mat: gripMat, baseOpacity: 1 },
+      { mat: tasselMat, baseOpacity: 0.96 },
+      { mat: wakeMat, baseOpacity: giant ? 0.42 : 0.3 },
+    ];
+
+    if (giant || comboUlt) {
+      const haloMat = new THREE.MeshBasicMaterial({
+        color: giant ? new THREE.Color(2.1, 1.85, 0.85) : col,
         transparent: true,
-        opacity: 0.65,
+        opacity: 0.54,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      for (let r = 0; r < 3; r++) {
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32 + r * 0.14, 0.018, 6, 20), arcMat);
-        ring.position.y = 0.55 + r * 0.42;
-        ring.rotation.set(Math.PI / 2 + (r - 1) * 0.28, r * 0.7, 0);
+      ownedMats.push(haloMat);
+      fadeMats.push({ mat: haloMat, baseOpacity: 0.54 });
+      const ringCount = giant ? 3 : 2;
+      for (let r = 0; r < ringCount; r++) {
+        const ring = new THREE.Mesh(this.jianGeos.haloRing, haloMat);
+        ring.scale.setScalar(0.75 + r * 0.28);
+        ring.position.y = 1.95 + r * 0.26;
+        ring.rotation.set(Math.PI / 2 + (r - 1) * 0.24, r * 0.6, 0);
         g.add(ring);
       }
     }
+
     g.scale.setScalar(sc);
 
-    const startOffset = giant ? new THREE.Vector3(0.4, 15.5, -0.4) : new THREE.Vector3((Math.random() - 0.5) * 2.2, 10.5, (Math.random() - 0.5) * 2.2);
-    const startPos = opts.targetPos.clone().add(startOffset);
+    // Dramatic 8°-18° tilt angle along azimuth biased so crossguard & Damascus edge catch camera light
+    const tiltRad = opts.tiltRad ?? ((giant ? 10 + Math.random() * 5 : 8 + Math.random() * 10) * Math.PI) / 180;
+    const azimuth = Math.random() * Math.PI * 2;
+    const sinT = Math.sin(tiltRad);
+    const cosT = Math.cos(tiltRad);
+    const upAxis = new THREE.Vector3(Math.cos(azimuth) * sinT, cosT, Math.sin(azimuth) * sinT).normalize();
+    const tremorAxis = new THREE.Vector3(-upAxis.z, 0, upAxis.x);
+    if (tremorAxis.lengthSq() < 1e-4) tremorAxis.set(1, 0, 0);
+    tremorAxis.normalize();
+
+    const impalePos = new THREE.Vector3(opts.targetPos.x, 0.05, opts.targetPos.z);
+    const skyHeight = giant ? 14.2 + Math.random() * 1.1 : 11.5 + Math.random() * 3.0;
+    const startPos = impalePos.clone().addScaledVector(upAxis, skyHeight / Math.max(0.5, cosT));
     g.position.copy(startPos);
 
-    // Tilt sword along exact descent trajectory
-    const dir = new THREE.Vector3().subVectors(opts.targetPos, startPos).normalize();
-    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+    const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), upAxis);
+    g.quaternion.copy(baseQuat);
 
-    this.group.add(g);
+    // Crisp ground lock-on reticle during Phase 1 & Phase 2
+    const reticleMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uProg: { value: 0 },
+        uColor: { value: col.clone() },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uProg;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+        void main() {
+          float r = length(vUv);
+          if (r > 1.0) discard;
+          float a = atan(vUv.y, vUv.x + 1e-5);
+          float outerRing = smoothstep(0.045, 0.012, abs(r - 0.92));
+          float lockRadius = mix(0.88, 0.24, uProg);
+          float lockRing = smoothstep(0.05, 0.012, abs(r - lockRadius));
+          float crossHair = (smoothstep(0.05, 0.01, abs(vUv.x)) + smoothstep(0.05, 0.01, abs(vUv.y)))
+            * smoothstep(0.18, 0.35, r) * (1.0 - smoothstep(0.75, 0.95, r));
+          float tick = step(0.72, cos(a * 4.0)) * smoothstep(0.09, 0.02, abs(r - 0.65));
+          float mask = clamp(outerRing + lockRing * 1.2 + crossHair * 0.7 + tick * 0.5, 0.0, 1.3);
+          float alpha = mask * (0.45 + 0.55 * uProg);
+          if (alpha < 0.02) discard;
+          gl_FragColor = vec4(uColor * 1.2, alpha);
+        }
+      `,
+    });
+    ownedMats.push(reticleMat);
+
+    const reticle = new THREE.Mesh(this.planeGeo, reticleMat);
+    reticle.rotation.x = -Math.PI / 2;
+    reticle.position.set(opts.targetPos.x, 0.055, opts.targetPos.z);
+    reticle.scale.setScalar(giant ? 5.6 : 1.9);
+
+    g.visible = false;
+    reticle.visible = false;
+    this.group.add(g, reticle);
+
     this.swords.push({
       group: g,
-      trail,
+      reticle,
+      reticleMat,
+      wakeGroup,
+      tassels: [tasselA, tasselB],
+      fadeMats,
+      ownedMats,
       startPos,
+      impalePos,
       targetPos: opts.targetPos.clone(),
+      baseQuat,
+      tremorAxis,
+      baseScale: sc,
+      color: col,
       age: -(opts.delay ?? 0),
-      fallDuration: giant ? 0.34 : 0.22,
-      lingerDuration: giant ? 1.15 : 0.65,
+      hoverDuration: giant ? 0.24 : 0.16,
+      fallDuration: giant ? 0.34 : 0.24,
+      lingerDuration: giant ? 1.45 : 0.95,
       impacted: false,
       giant,
+      sparkTimer: 0,
       onImpact: opts.onImpact,
     });
   }
@@ -1158,57 +1573,147 @@ export class VfxSystem {
       }
     }
 
-    // 3. Falling 3D spirit swords
+    // 2b. Sky Sword Gates (Cloud-Rift + Bagua-Rune Portal)
+    for (let i = this.skyGates.length - 1; i >= 0; i--) {
+      const gate = this.skyGates[i];
+      gate.age += dt;
+      const p = gate.age / gate.duration;
+      if (p >= 1) {
+        this.group.remove(gate.group);
+        for (const m of gate.ownedMats) m.dispose();
+        for (const geo of gate.ownedGeos) geo.dispose();
+        this.skyGates.splice(i, 1);
+      } else {
+        gate.cloudMat.uniforms.uTime.value = elapsed;
+        gate.cloudMat.uniforms.uProg.value = p;
+        gate.runeMat.uniforms.uTime.value = elapsed;
+        gate.runeMat.uniforms.uProg.value = p;
+        gate.innerMat.uniforms.uTime.value = elapsed;
+        gate.innerMat.uniforms.uProg.value = p;
+        gate.beamGroup.rotation.z += dt * 0.45;
+        const beamFade = clamp(p / 0.18, 0, 1) * (1 - clamp((p - 0.72) / 0.28, 0, 1));
+        for (const child of gate.beamGroup.children) {
+          if (child instanceof THREE.Mesh) {
+            (child.material as THREE.MeshBasicMaterial).opacity = 0.26 * beamFade;
+          }
+        }
+        // Emit swirling vortex sparks inside the rift aperture while active
+        gate.sparkTimer += dt;
+        if (p < 0.85 && gate.sparkTimer >= 0.055) {
+          gate.sparkTimer = 0;
+          const ang = Math.random() * Math.PI * 2;
+          const rad = (0.35 + Math.random() * 0.6) * gate.radius;
+          const spPos = new THREE.Vector3(
+            gate.center.x + Math.cos(ang) * rad,
+            gate.center.y - 0.25,
+            gate.center.z + Math.sin(ang) * rad,
+          );
+          const spDir = new THREE.Vector3(-Math.sin(ang) * 0.65, -0.85, Math.cos(ang) * 0.65);
+          this.spawnHitSparks(spPos, spDir, gate.color, 2);
+        }
+      }
+    }
+
+    // 3. Falling 3D forged Chinese Jians (Manifest -> Supersonic Plunge -> Stone Impale & Damped Tremor)
+    const tremorQ = new THREE.Quaternion();
     for (let i = this.swords.length - 1; i >= 0; i--) {
       const sw = this.swords[i];
       sw.age += dt;
       if (sw.age < 0) {
         sw.group.visible = false;
+        sw.reticle.visible = false;
         continue;
       }
       sw.group.visible = true;
-      if (sw.age <= sw.fallDuration) {
-        const u = easeOutQuart(sw.age / sw.fallDuration);
-        sw.group.position.lerpVectors(sw.startPos, sw.targetPos, u);
+
+      // Animate silk tassels behind the hilt
+      sw.tassels.forEach((ts, idx) => {
+        const sign = idx === 0 ? 1 : -1;
+        ts.rotation.x = Math.sin(elapsed * 12 + idx * 1.7 + i) * 0.16;
+        ts.rotation.z = sign * (0.12 + Math.cos(elapsed * 10 + idx * 1.3) * 0.11);
+      });
+
+      if (sw.age < sw.hoverDuration) {
+        // Phase 1: Sky Manifest inside high rift + ground lock-on reticle
+        const m = clamp(sw.age / sw.hoverDuration, 0, 1);
+        const appear = clamp(m / 0.45, 0, 1);
+        sw.group.position.copy(sw.startPos);
+        sw.group.position.y += Math.sin(m * Math.PI) * (sw.giant ? 0.45 : 0.25);
+        sw.group.scale.setScalar(lerp(0.35, 1.0, easeOutQuart(m)) * sw.baseScale);
+        sw.group.quaternion.copy(sw.baseQuat);
+        sw.wakeGroup.visible = false;
+        sw.reticle.visible = true;
+        sw.reticleMat.uniforms.uProg.value = m * 0.65;
+        for (const fm of sw.fadeMats) fm.mat.opacity = fm.baseOpacity * appear;
+      } else if (sw.age <= sw.hoverDuration + sw.fallDuration) {
+        // Phase 2: Supersonic Accelerated Plunge straight along shaft vector
+        const u = clamp((sw.age - sw.hoverDuration) / sw.fallDuration, 0, 1);
+        const plungeT = Math.pow(u, 2.3);
+        sw.group.position.lerpVectors(sw.startPos, sw.impalePos, plungeT);
+        sw.group.scale.setScalar(sw.baseScale);
+        sw.group.quaternion.copy(sw.baseQuat);
+        sw.wakeGroup.visible = true;
+        sw.wakeGroup.scale.set(1, 0.45 + Math.pow(u, 1.3) * 1.15, 1);
+        sw.reticle.visible = true;
+        sw.reticleMat.uniforms.uProg.value = 0.65 + u * 0.35;
+        for (const fm of sw.fadeMats) fm.mat.opacity = fm.baseOpacity;
       } else {
-        sw.group.position.copy(sw.targetPos);
+        // Phase 3: Physical Stone Impale & Damped Spring Vibration
+        sw.group.position.copy(sw.impalePos);
+        sw.group.scale.setScalar(sw.baseScale);
         if (!sw.impacted) {
           sw.impacted = true;
-          sw.trail.visible = false;
+          sw.wakeGroup.visible = false;
+          sw.reticle.visible = false;
           this.spawnShockRing(
-            sw.targetPos,
-            sw.giant ? new THREE.Color(2.3, 1.75, 0.55) : new THREE.Color(0.55, 2.0, 2.2),
+            sw.impalePos,
+            sw.color,
             sw.giant ? 0.8 : 0.3,
             sw.giant ? 6.8 : 2.1,
             sw.giant ? 0.55 : 0.34,
           );
           this.spawnGroundCrater(
-            sw.targetPos,
+            sw.impalePos,
             sw.giant ? 4.4 : 1.15,
-            sw.giant ? new THREE.Color(1.9, 1.35, 0.35) : new THREE.Color(0.45, 1.45, 1.65),
+            sw.color,
             sw.giant ? 4.2 : 2.2,
           );
           this.spawnHitSparks(
-            sw.targetPos.clone().add(new THREE.Vector3(0, 0.25, 0)),
+            sw.impalePos.clone().add(new THREE.Vector3(0, 0.25, 0)),
             new THREE.Vector3(0, 1, 0),
-            sw.giant ? new THREE.Color(2.3, 1.75, 0.55) : new THREE.Color(0.7, 2.0, 2.25),
+            sw.color,
             sw.giant ? 26 : 10,
           );
           sw.onImpact?.(sw.targetPos);
         }
-        const lingerP = (sw.age - sw.fallDuration) / sw.lingerDuration;
+
+        const impaleT = sw.age - (sw.hoverDuration + sw.fallDuration);
+        const lingerP = impaleT / sw.lingerDuration;
         if (lingerP >= 1) {
-          this.group.remove(sw.group);
+          this.group.remove(sw.group, sw.reticle);
+          for (const m of sw.ownedMats) m.dispose();
           this.swords.splice(i, 1);
         } else {
-          // Dissolve upward cleanly
-          const fade = 1 - clamp((lingerP - 0.45) / 0.55, 0, 1);
-          sw.group.traverse((obj) => {
-            if (obj instanceof THREE.Mesh) {
-              const m = obj.material as THREE.MeshBasicMaterial | THREE.MeshStandardMaterial;
-              if (m && 'opacity' in m) m.opacity = fade * (m.blending === THREE.AdditiveBlending ? 0.45 : 1);
+          // Damped spring blade-tremor for ~0.25s after striking stone
+          if (impaleT < 0.35) {
+            const tremor = Math.sin(impaleT * 42) * Math.exp(-impaleT * 6) * (sw.giant ? 0.065 : 0.095);
+            tremorQ.setFromAxisAngle(sw.tremorAxis, tremor);
+            sw.group.quaternion.copy(sw.baseQuat).multiply(tremorQ);
+          } else {
+            sw.group.quaternion.copy(sw.baseQuat);
+          }
+
+          // Dissolve cleanly into rising spirit sparks after holding crisp steel silhouette
+          const fade = 1 - clamp((lingerP - 0.56) / 0.44, 0, 1);
+          for (const fm of sw.fadeMats) fm.mat.opacity = fm.baseOpacity * fade;
+          if (lingerP > 0.54) {
+            sw.sparkTimer += dt;
+            if (sw.sparkTimer >= 0.085) {
+              sw.sparkTimer = 0;
+              const sparkOrigin = sw.impalePos.clone().add(new THREE.Vector3(0, 0.4 + Math.random() * 1.1, 0));
+              this.spawnHitSparks(sparkOrigin, new THREE.Vector3(0, 1.2, 0), sw.color, sw.giant ? 3 : 1);
             }
-          });
+          }
         }
       }
     }
@@ -1356,7 +1861,16 @@ export class VfxSystem {
       a.mat.dispose();
     }
     this.arrays.length = 0;
-    for (const sw of this.swords) this.group.remove(sw.group);
+    for (const gate of this.skyGates) {
+      this.group.remove(gate.group);
+      for (const m of gate.ownedMats) m.dispose();
+      for (const geo of gate.ownedGeos) geo.dispose();
+    }
+    this.skyGates.length = 0;
+    for (const sw of this.swords) {
+      this.group.remove(sw.group, sw.reticle);
+      for (const m of sw.ownedMats) m.dispose();
+    }
     this.swords.length = 0;
     for (const r of this.rings) {
       this.group.remove(r.mesh);
@@ -1402,5 +1916,23 @@ export class VfxSystem {
       if (count > maxChildMeshes) maxChildMeshes = count;
     }
     return { ghostGroups: this.ghosts.length, maxChildMeshes, hasCapsule };
+  }
+
+  getFallingSwordStats(): { activeSwords: number; maxChildMeshesPerSword: number; impaledCount: number } {
+    let maxChildMeshesPerSword = 0;
+    let impaledCount = 0;
+    for (const sw of this.swords) {
+      if (sw.impacted) impaledCount += 1;
+      let count = 0;
+      sw.group.traverse((o) => {
+        if (o instanceof THREE.Mesh) count += 1;
+      });
+      if (count > maxChildMeshesPerSword) maxChildMeshesPerSword = count;
+    }
+    return {
+      activeSwords: this.swords.length,
+      maxChildMeshesPerSword,
+      impaledCount,
+    };
   }
 }

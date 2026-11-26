@@ -28,7 +28,7 @@
         <div class="title-card">
           <div class="title-kicker">
             <span>SHUSHAN DEMON-LOCK COURT · 20 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.54</span>
+            <span id="app-version-badge" class="version-pill">v1.55</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
@@ -199,42 +199,53 @@
 
       <!-- Active Gameplay Xianxia HUD -->
       <section id="game-hud" aria-live="polite">
-        <!-- Top-Left: Li Xiaoyao Hero Vitality Cluster -->
-        <div class="hero-cluster">
-          <div class="hero-nameplate">
-            <span class="hero-seal">李</span>
-            <div class="hero-name-col">
-              <div class="hero-name-row">
-                <strong id="hero-title-name">李逍遥</strong>
-                <span id="hud-blessing-pill" class="hud-blessing-pill"></span>
+        <div class="top-left-stack">
+          <!-- Top-Left: Li Xiaoyao Hero Vitality Cluster -->
+          <div class="hero-cluster">
+            <div class="hero-nameplate">
+              <span class="hero-seal">李</span>
+              <div class="hero-name-col">
+                <div class="hero-name-row">
+                  <strong id="hero-title-name">李逍遥</strong>
+                  <span id="hud-blessing-pill" class="hud-blessing-pill"></span>
+                </div>
+                <span class="hero-sub"><span id="hud-realm-name">炼气初境</span> · 剑意 <b id="ult-pct">35%</b></span>
               </div>
-              <span class="hero-sub"><span id="hud-realm-name">炼气初境</span> · 剑意 <b id="ult-pct">35%</b></span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">气血</span>
+              <div class="bar-track hp-track">
+                <div id="hp-delay" class="bar-delay"></div>
+                <div id="hp-fill" class="bar-fill hp-fill"></div>
+                <span id="hp-text" class="bar-value">180 / 180</span>
+              </div>
+            </div>
+            <div class="bar-row compact">
+              <span class="bar-label">真气</span>
+              <div class="bar-track spirit-track">
+                <div id="spirit-fill" class="bar-fill spirit-fill"></div>
+              </div>
+            </div>
+            <div class="bar-row compact">
+              <span class="bar-label">体势</span>
+              <div class="bar-track stamina-track">
+                <div id="stamina-fill" class="bar-fill stamina-fill"></div>
+              </div>
+            </div>
+            <!-- Co-op Teammate Mini Status -->
+            <div id="ally-mini" class="ally-mini">
+              <span id="ally-mini-name">同伴 · 玄影剑侠</span>
+              <div class="bar-track ally-track"><div id="ally-hp-fill" class="bar-fill ally-fill"></div></div>
             </div>
           </div>
-          <div class="bar-row">
-            <span class="bar-label">气血</span>
-            <div class="bar-track hp-track">
-              <div id="hp-delay" class="bar-delay"></div>
-              <div id="hp-fill" class="bar-fill hp-fill"></div>
-              <span id="hp-text" class="bar-value">180 / 180</span>
+
+          <!-- Top-Left Below Hero Cluster: Live Corridor Minimap -->
+          <div id="minimap-box" class="minimap-box" aria-hidden="true">
+            <div class="minimap-head">
+              <span id="minimap-zone-name">山门前坪</span>
+              <span id="minimap-pct">0%</span>
             </div>
-          </div>
-          <div class="bar-row compact">
-            <span class="bar-label">真气</span>
-            <div class="bar-track spirit-track">
-              <div id="spirit-fill" class="bar-fill spirit-fill"></div>
-            </div>
-          </div>
-          <div class="bar-row compact">
-            <span class="bar-label">体势</span>
-            <div class="bar-track stamina-track">
-              <div id="stamina-fill" class="bar-fill stamina-fill"></div>
-            </div>
-          </div>
-          <!-- Co-op Teammate Mini Status -->
-          <div id="ally-mini" class="ally-mini">
-            <span id="ally-mini-name">同伴 · 玄影剑侠</span>
-            <div class="bar-track ally-track"><div id="ally-hp-fill" class="bar-fill ally-fill"></div></div>
+            <canvas id="minimap-canvas" width="110" height="176"></canvas>
           </div>
         </div>
 
@@ -271,6 +282,16 @@
         <!-- Unblockable Crimson Danger Seal -->
         <div id="danger-warning" class="danger-warning" aria-hidden="true">
           <span class="danger-char">危</span>
+        </div>
+
+        <!-- Honor-of-Kings 3-Sigil Combo Bar & Golden Combo Ultimate Trigger -->
+        <div id="combo-sigil-bar" class="combo-sigil-bar">
+          <div class="combo-sigils-row" aria-label="剑诀连携印记">
+            <span id="sigil-0" class="sigil-slot"></span>
+            <span id="sigil-1" class="sigil-slot"></span>
+            <span id="sigil-2" class="sigil-slot"></span>
+          </div>
+          <button id="btn-combo-ult" class="combo-ult-btn" type="button">万剑归宗</button>
         </div>
 
         <!-- Bottom-Center: High-Simulation Sculpted Bronze-Jade Skill Medallions (Desktop Mode) -->
@@ -354,7 +375,7 @@
         <div class="modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.54</span>
+            <span id="pause-version-badge" class="version-pill">v1.55</span>
           </div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
           <div class="modal-actions">

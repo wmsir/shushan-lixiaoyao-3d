@@ -6,7 +6,14 @@ import { ShushanArena } from '../world/ShushanArena';
 import { VfxSystem } from '../vfx/VfxSystem';
 import { AudioEngine } from '../systems/AudioEngine';
 import { CameraRig } from '../systems/CameraRig';
-import { HudController, type CombatThreatState, type ResultDisplayOptions, type ScreenMode } from '../ui/HudController';
+import {
+  HudController,
+  type CombatThreatState,
+  type HudTacticalState,
+  type MinimapEntityDot,
+  type ResultDisplayOptions,
+  type ScreenMode,
+} from '../ui/HudController';
 import {
   buildFlyingSwordMesh,
   buildYinOrbMesh,
@@ -128,6 +135,10 @@ export class Game {
   private blessings: RunBlessingState = createEmptyBlessings();
   private pendingCutsceneAfterDialogue = false;
   private shadowAttackActive = false;
+  private q2AttackActive = false;
+  private q2DashTargetId: number | null = null;
+  private corridorMode = false;
+  private moonKeyLight: THREE.DirectionalLight | null = null;
 
   private frame = 0;
   private elapsed = 0;
@@ -427,6 +438,9 @@ export class Game {
         }
         return res;
       },
+      onCastComboUlt: () => {
+        this.tryCastComboUlt();
+      },
     });
 
     this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
@@ -470,6 +484,8 @@ export class Game {
     moonKey.shadow.camera.bottom = -sc;
     moonKey.shadow.bias = -0.0005;
     this.scene.add(moonKey);
+    this.scene.add(moonKey.target);
+    this.moonKeyLight = moonKey;
 
     const warmFill = new THREE.DirectionalLight('#ffcf9e', 0.92);
     warmFill.position.set(11, 10, 15);
@@ -573,6 +589,8 @@ export class Game {
     this.clearCombatEntities();
     this.activeDungeon = null;
     this.stageDroppedGear = [];
+    this.corridorMode = false;
+    this.arena.setArenaLayout('arena', 0);
     this.targetRingMesh.visible = false;
     this.pendingCutsceneAfterDialogue = false;
     this.resetHero(new THREE.Vector3(0, 0, 2.2), Math.PI);
@@ -591,6 +609,8 @@ export class Game {
 
   private enterShowcaseMode(): void {
     this.clearCombatEntities();
+    this.corridorMode = false;
+    this.arena.setArenaLayout('arena', 0);
     this.targetRingMesh.visible = false;
     this.resetHero(new THREE.Vector3(-0.95, 0, 0.55), 0.16);
     this.applyCurrentLoadoutVisuals();
@@ -627,7 +647,7 @@ export class Game {
 
     this.enterStage(targetStage, !jumpToBoss, true, jumpToBoss, !skipDialogue && !jumpToBoss);
     this.cameraRig.snapTo(this.hero.pos);
-    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
   }
 
   startDungeon(dungeonId: string, skipDialogue = false): void {
@@ -652,7 +672,7 @@ export class Game {
 
     this.enterStage(dungeon.stageDef.id, true, true, false, !skipDialogue);
     this.cameraRig.snapTo(this.hero.pos);
-    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
   }
 
   confirmStageDialogue(): boolean {
@@ -666,10 +686,6 @@ export class Game {
       this.hud.setMode('cutscene');
       this.audio.setDucked(true);
       this.cameraRig.startCutscene(boss.pos, 2.55);
-      const stageDef = this.getActiveStageDef();
-      const chDef = getChapterDef(stageDef.chapter);
-      const kicker = this.activeDungeon ? `秘境打宝 · ${this.activeDungeon.name}` : `${chDef.roman} · 第 ${stageDef.id} 关`;
-      this.hud.showStageBanner(kicker, `${stageDef.name} · ${stageDef.subtitle}`, 1.3);
     } else {
       this.mode = 'playing';
       this.hud.setMode('playing');
@@ -716,6 +732,8 @@ export class Game {
     this.peer = peer;
 
     if (isSolo) {
+      this.corridorMode = false;
+      this.arena.setArenaLayout('arena', 0);
       this.currentStageId = 20;
       this.stagePhase = 'combat';
       const ch = getChapterDef(4);
@@ -725,8 +743,6 @@ export class Game {
       this.mode = 'playing';
       this.hud.setMode('playing');
       this.audio.setMood('boss1');
-      this.hud.showStageBanner('锁妖剑台 · 1v1 切磋', `${this.localHeroName} 对阵 ${peerName}`, 1.4);
-      this.hud.showSubtitle('以剑会友，善用四段连招、0.26秒完美弹反与三大剑诀！', 2.4);
       this.vfx.spawnBaguaArray({
         pos: new THREE.Vector3(0, 0.08, 0),
         radius: 6.2,
@@ -735,10 +751,9 @@ export class Game {
       });
     } else {
       this.enterStage(clamp(Math.floor(stageId), 1, 20), false, isHost);
-      this.hud.showSubtitle(`同门【${peerName}】已入剑阵，合力破妖！`, 3.0);
     }
     this.cameraRig.snapTo(this.hero.pos);
-    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
   }
 
   private clearPeerHero(): void {
@@ -746,6 +761,16 @@ export class Game {
       this.scene.remove(this.peer.rig.root);
       this.peer = null;
     }
+  }
+
+  private getZoneForWave(stageDef: StageDef, waveIdx: number): 0 | 1 | 2 {
+    if (!this.corridorMode) return 0;
+    const total = stageDef.waves.length;
+    if (total <= 1) return 0;
+    if (total === 2) return waveIdx === 0 ? 0 : 1;
+    if (waveIdx === 0) return 0;
+    if (waveIdx >= total - 1) return 2;
+    return 1;
   }
 
   private enterStage(
@@ -764,6 +789,18 @@ export class Game {
     this.stageTimer = 0;
     this.hazardTimer = stageDef.hazardIntervalSec ? stageDef.hazardIntervalSec * 0.75 : 0;
     this.pendingCutsceneAfterDialogue = false;
+
+    const isCorridor = this.mp.mode !== 'solo';
+    const maxZone: 0 | 1 | 2 = stageDef.waves.length >= 3 ? 2 : 1;
+    this.corridorMode = isCorridor;
+    this.arena.setArenaLayout(isCorridor ? 'corridor' : 'arena', maxZone);
+    const startZone = this.getZoneForWave(stageDef, this.currentWaveIdx);
+    this.arena.setUnlockedZone(startZone);
+    if (jumpLastWave && isCorridor && startZone > 0) {
+      const zCenter = this.arena.getZoneCenterZ(startZone);
+      this.hero.pos.set(0, 0, zCenter + 7.2);
+      this.hero.rig.root.position.copy(this.hero.pos);
+    }
 
     this.arena.setStageTheme(this.activeDungeon ? stageDef.chapter * 5 : this.currentStageId, chDef);
     this.scene.background = new THREE.Color(chDef.bgHex);
@@ -804,6 +841,12 @@ export class Game {
 
     this.hud.clearSubtitle();
 
+    const zoneIdx = this.getZoneForWave(stageDef, waveIdx);
+    const zoneCenterZ = this.corridorMode ? this.arena.getZoneCenterZ(zoneIdx) : 0;
+    if (this.corridorMode && this.arena.getUnlockedZone() < zoneIdx) {
+      this.arena.setUnlockedZone(zoneIdx);
+    }
+
     let bossEntity: EnemyEntity | null = null;
     for (const spec of wave.enemies) {
       const overrides: EnemyCreateOverrides = {
@@ -815,36 +858,35 @@ export class Game {
         scaleMult: spec.scaleMult,
         affix: spec.affix,
       };
-      const e = this.spawnEnemy(spec.kind, spec.x, spec.z, undefined, overrides);
+      const e = this.spawnEnemy(spec.kind, spec.x, spec.z + zoneCenterZ, undefined, overrides);
       if (spec.kind === 'boss') bossEntity = e;
     }
 
     const isFinalBossWave = waveIdx === stageDef.waves.length - 1 && stageDef.bossCutscene && bossEntity;
     if (isFinalBossWave && bossEntity) {
-      if (this.hero.pos.z < 4.5) {
+      if (!this.corridorMode && this.hero.pos.z < 4.5) {
         this.hero.pos.set(0, 0, 8.2);
         this.hero.rig.root.position.copy(this.hero.pos);
+        this.hero.yaw = Math.PI;
+        this.hero.rig.root.rotation.y = this.hero.yaw;
       }
-      this.hero.yaw = Math.PI;
-      this.hero.rig.root.rotation.y = this.hero.yaw;
 
+      const ringZ = zoneCenterZ - 4.5;
       this.vfx.spawnBaguaArray({
-        pos: new THREE.Vector3(0, 0.08, -4.5),
+        pos: new THREE.Vector3(0, 0.08, ringZ),
         radius: 5.4,
         color: new THREE.Color(1.4, 0.25, 0.45),
         duration: 2.5,
       });
-      this.vfx.spawnShockRing(new THREE.Vector3(0, 0.1, -4.5), new THREE.Color(2.0, 0.35, 0.55), 0.6, 8.5, 0.7);
-      this.vfx.spawnGroundCrater(new THREE.Vector3(0, 0, -4.5), 4.2, new THREE.Color(1.9, 0.28, 0.48), 4.5);
+      this.vfx.spawnShockRing(new THREE.Vector3(0, 0.1, ringZ), new THREE.Color(2.0, 0.35, 0.55), 0.6, 8.5, 0.7);
+      this.vfx.spawnGroundCrater(new THREE.Vector3(0, 0, ringZ), 4.2, new THREE.Color(1.9, 0.28, 0.48), 4.5);
       this.cameraRig.addShake(0.65);
 
       if (allowCutscene) {
-        const chDef = getChapterDef(stageDef.chapter);
         this.mode = 'cutscene';
         this.hud.setMode('cutscene');
         this.audio.setDucked(true);
         this.cameraRig.startCutscene(bossEntity.pos, 2.55);
-        this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 1.3);
       } else {
         bossEntity.aiState = 'orbit';
         bossEntity.stateTime = 0;
@@ -891,6 +933,14 @@ export class Game {
     h.counterTargetId = null;
     h.counterWindowTimer = 0;
     h.shadowStrikeTimer = 0;
+    h.q2ReadyTimer = 0;
+    h.q2TargetId = null;
+    h.dodgeEmpowered = false;
+    h.dodgeEmpowerTimer = 0;
+    h.comboSigils = [];
+    h.comboSigilTimer = 0;
+    h.comboUltReady = false;
+    h.comboUltTimer = 0;
     h.cdQ = 0;
     h.cdE = 0;
     h.cdR = 0;
@@ -904,6 +954,8 @@ export class Game {
     h.totalDamage = 0;
     h.stageJadeEarned = 0;
     this.shadowAttackActive = false;
+    this.q2AttackActive = false;
+    this.q2DashTargetId = null;
     h.rig.root.position.copy(pos);
     h.rig.root.rotation.y = yaw;
     h.rig.applyPose('combatIdle', 0, 0, 0.016, 0);
@@ -1106,9 +1158,14 @@ export class Game {
             ? boss.pos
             : null;
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, focusPos, this.input.mouseNdc);
+      if (this.moonKeyLight) {
+        this.moonKeyLight.position.set(this.hero.pos.x - 15, 24, this.hero.pos.z - 18);
+        this.moonKeyLight.target.position.copy(this.hero.pos);
+        this.moonKeyLight.target.updateMatrixWorld();
+      }
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
       const threat = this.updateTargetRingAndThreat(rawDt);
-      this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer, threat);
+      this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer, threat, this.buildTacticalState());
     } else {
       this.targetRingMesh.visible = false;
       this.updatePeerHero(dt * 0.5);
@@ -1218,6 +1275,29 @@ export class Game {
     h.shadowStrikeTimer = Math.max(0, h.shadowStrikeTimer - dt);
     if (h.counterWindowTimer <= 0) h.counterTargetId = null;
 
+    h.q2ReadyTimer = Math.max(0, h.q2ReadyTimer - dt);
+    if (h.q2ReadyTimer <= 0) h.q2TargetId = null;
+
+    if (h.dodgeEmpowerTimer > 0) {
+      h.dodgeEmpowerTimer = Math.max(0, h.dodgeEmpowerTimer - dt);
+      if (h.dodgeEmpowerTimer <= 0) h.dodgeEmpowered = false;
+    }
+
+    if (h.comboUltReady) {
+      h.comboUltTimer = Math.max(0, h.comboUltTimer - dt);
+      if (h.comboUltTimer <= 0) {
+        h.comboUltReady = false;
+        h.comboUltTimer = 0;
+        h.comboSigils = [];
+        h.comboSigilTimer = 0;
+      }
+    } else if (h.comboSigilTimer > 0) {
+      h.comboSigilTimer = Math.max(0, h.comboSigilTimer - dt);
+      if (h.comboSigilTimer <= 0) {
+        h.comboSigils = [];
+      }
+    }
+
     if (h.comboDecayTimer > 0) {
       h.comboDecayTimer -= dt;
       if (h.comboDecayTimer <= 0) h.comboCount = 0;
@@ -1257,7 +1337,7 @@ export class Game {
       }
     }
 
-    const canDodgeNow = h.state !== 'hit' && h.state !== 'skillR' && h.state !== 'parryCounter' && h.stamina >= 24;
+    const canDodgeNow = h.state !== 'hit' && h.state !== 'skillR' && h.state !== 'comboUlt' && h.state !== 'parryCounter' && h.stamina >= 24;
     if (canDodgeNow && this.input.consumeAction('dodge')) {
       this.rmbMoveTarget = null;
       this.startHeroDodge();
@@ -1319,7 +1399,19 @@ export class Game {
       }
     }
 
+    const isQ2LateCancel = h.state === 'skillQ' && h.stateTime >= 0.2 && h.q2ReadyTimer > 0;
+    if (isQ2LateCancel && this.input.consumeAction('skillQ')) {
+      this.rmbMoveTarget = null;
+      this.startSkillQ2();
+      return;
+    }
+
     if (isFree || isAttackCancelable) {
+      if (h.comboUltReady && this.input.consumeAction('skillR')) {
+        this.rmbMoveTarget = null;
+        this.startComboUlt();
+        return;
+      }
       if (h.ult >= 100 && h.cdR <= 0 && this.input.consumeAction('skillR')) {
         this.rmbMoveTarget = null;
         this.startSkillR();
@@ -1328,6 +1420,11 @@ export class Game {
       if (h.spirit >= 45 && h.cdE <= 0 && this.input.consumeAction('skillE')) {
         this.rmbMoveTarget = null;
         this.startSkillE();
+        return;
+      }
+      if (h.q2ReadyTimer > 0 && this.input.consumeAction('skillQ')) {
+        this.rmbMoveTarget = null;
+        this.startSkillQ2();
         return;
       }
       if (h.spirit >= 20 && h.cdQ <= 0 && this.input.consumeAction('skillQ')) {
@@ -1369,7 +1466,8 @@ export class Game {
 
     if ((isFree || isAttackCancelable) && this.input.consumeAction('attack')) {
       this.rmbMoveTarget = null;
-      const nextStep = h.shadowStrikeTimer > 0 ? 1 : h.comboWindowTimer > 0 && h.comboStep < 4 ? h.comboStep + 1 : 1;
+      const empowered = h.dodgeEmpowered || h.shadowStrikeTimer > 0;
+      const nextStep = empowered ? 1 : h.comboWindowTimer > 0 && h.comboStep < 4 ? h.comboStep + 1 : 1;
       this.startHeroAttack(nextStep);
     }
 
@@ -1397,7 +1495,7 @@ export class Game {
       this.tickHeroDodge(dt, prevPos);
     } else if (h.state === 'parryCounter') {
       this.tickParryCounter(dt, prevPos);
-    } else if (h.state === 'skillQ' || h.state === 'skillE' || h.state === 'skillR') {
+    } else if (h.state === 'skillQ' || h.state === 'skillE' || h.state === 'skillR' || h.state === 'comboUlt') {
       this.tickHeroSkill(dt, prevPos);
     } else if (h.state === 'drink') {
       h.stateTime += dt;
@@ -1472,20 +1570,24 @@ export class Game {
 
   private startHeroAttack(step: number): void {
     const h = this.hero;
-    const isShadowStrike = h.shadowStrikeTimer > 0;
+    const isShadowStrike = h.dodgeEmpowered || h.shadowStrikeTimer > 0;
     this.shadowAttackActive = isShadowStrike;
+    this.q2AttackActive = false;
     if (isShadowStrike) {
+      h.dodgeEmpowered = false;
+      h.dodgeEmpowerTimer = 0;
       h.shadowStrikeTimer = 0;
       this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.55, 2.35, 2.45), h.rig.root);
-      this.spawnWorldCallout('瞬影斩!', h.pos, 'parry');
+      this.spawnWorldCallout('流云拔刀斩!', h.pos, 'parry');
       triggerHaptic('medium');
     }
+    this.recordComboSigil('A');
 
     h.state = 'attack';
     h.comboStep = step;
     h.stateTime = 0;
     h.stateDuration = isShadowStrike
-      ? 0.4
+      ? 0.44
       : step === 4
         ? 0.64
         : step === 3
@@ -1500,20 +1602,20 @@ export class Game {
     h.rig.setSwordGlow(isShadowStrike || step >= 3 ? 2.2 : 1.55);
 
     const aimYaw = this.getAimYaw();
-    const tgt = this.findCombatTarget(isShadowStrike ? 9.5 : 6.4, aimYaw);
+    const tgt = this.findCombatTarget(isShadowStrike ? 10.5 : 6.4, aimYaw);
     if (tgt) {
       h.magnetTargetId = tgt.enemy ? tgt.enemy.id : -999;
       const dx = tgt.x - h.pos.x;
       const dz = tgt.z - h.pos.z;
       h.yaw = Math.atan2(dx, dz);
       const standOff = tgt.radius + h.radius + 1.1;
-      h.magnetSlideRemain = clamp(Math.hypot(dx, dz) - standOff, 0, isShadowStrike ? 4.5 : 2.5);
+      h.magnetSlideRemain = clamp(Math.hypot(dx, dz) - standOff, 0, isShadowStrike ? 5.2 : 2.5);
     } else {
       h.magnetTargetId = null;
-      h.magnetSlideRemain = isShadowStrike ? 2.1 : 0.55;
+      h.magnetSlideRemain = isShadowStrike ? 2.6 : 0.55;
       h.yaw = aimYaw;
     }
-    this.audio.playSwordSwing(step >= 3 ? 3 : step);
+    this.audio.playSwordSwing(step >= 3 || isShadowStrike ? 3 : step);
     this.mp.sendAction('attack', { step, yaw: h.yaw, x: h.pos.x, z: h.pos.z });
   }
 
@@ -1523,7 +1625,7 @@ export class Game {
     const p = clamp(h.stateTime / h.stateDuration, 0, 1);
 
     if (p < 0.56 && h.magnetSlideRemain > 0.01) {
-      let stepDist = Math.min(h.magnetSlideRemain, dt * (this.shadowAttackActive ? 14.5 : 9.2));
+      let stepDist = Math.min(h.magnetSlideRemain, dt * (this.shadowAttackActive || this.q2AttackActive ? 16.5 : 9.2));
       if (h.magnetTargetId === -999 && this.peer && !this.peer.dead) {
         const dist = Math.hypot(this.peer.pos.x - h.pos.x, this.peer.pos.z - h.pos.z);
         const standOff = this.peer.radius + h.radius + 1.1;
@@ -1545,25 +1647,44 @@ export class Game {
     h.rig.root.position.copy(h.pos);
     h.rig.root.rotation.y = h.yaw;
 
-    const poseName: PoseName = h.comboStep === 1 ? 'combo1' : h.comboStep === 2 ? 'combo2' : h.comboStep === 4 ? 'parryCounter' : 'combo3';
+    const poseName: PoseName = this.q2AttackActive
+      ? 'parryCounter'
+      : h.comboStep === 1
+        ? 'combo1'
+        : h.comboStep === 2
+          ? 'combo2'
+          : h.comboStep === 4
+            ? 'parryCounter'
+            : 'combo3';
     h.rig.applyPose(poseName, p, this.elapsed, dt, 2);
 
-    const activeStart = h.comboStep >= 3 ? 0.38 : 0.34;
-    const activeEnd = h.comboStep >= 3 ? 0.7 : 0.64;
+    const activeStart = this.q2AttackActive ? 0.2 : h.comboStep >= 3 ? 0.38 : 0.34;
+    const activeEnd = h.comboStep >= 3 ? 0.72 : 0.66;
     if (!h.attackVfxFired && p >= activeStart) {
       h.attackVfxFired = true;
-      this.spawnSwordComboVfx(h.pos, h.yaw, this.shadowAttackActive ? 4 : h.comboStep);
-      if (h.comboStep === 4) {
-        this.spawnFlyingSwordProjectile(h.pos, h.yaw, true);
+      this.spawnSwordComboVfx(h.pos, h.yaw, this.shadowAttackActive || this.q2AttackActive ? 4 : h.comboStep);
+      if (h.comboStep === 4 && !this.q2AttackActive) {
+        this.spawnFlyingSwordProjectile(h.pos, h.yaw, true, false);
       }
     }
 
     if (p >= activeStart && p <= activeEnd) {
-      const reach = this.shadowAttackActive || h.comboStep >= 3 ? 3.55 : 3.1;
-      const halfCone = h.comboStep === 2 || h.comboStep === 4 ? 1.55 : 1.2;
-      const rawMultiplier = this.shadowAttackActive ? 42 : h.comboStep === 4 ? 44 : h.comboStep === 3 ? 34 : h.comboStep === 2 ? 23 : 19;
+      const reach = this.shadowAttackActive ? 4.6 : this.q2AttackActive ? 3.9 : h.comboStep >= 3 ? 3.55 : 3.1;
+      const halfCone = this.shadowAttackActive || this.q2AttackActive || h.comboStep === 2 || h.comboStep === 4 ? 1.62 : 1.2;
+      const normalMult = h.comboStep === 4 ? 44 : h.comboStep === 3 ? 34 : h.comboStep === 2 ? 23 : 24;
+      const rawMultiplier = this.q2AttackActive
+        ? Math.round(44 * 1.5)
+        : this.shadowAttackActive
+          ? Math.round(normalMult * 1.45)
+          : h.comboStep === 4
+            ? 44
+            : h.comboStep === 3
+              ? 34
+              : h.comboStep === 2
+                ? 23
+                : 19;
       const baseDmg = Math.round(rawMultiplier * this.getHeroDamageScale());
-      const heavy = this.shadowAttackActive || h.comboStep >= 3;
+      const heavy = this.shadowAttackActive || this.q2AttackActive || h.comboStep >= 3;
 
       this.tryDeflectProjectiles(reach, halfCone);
 
@@ -1582,9 +1703,9 @@ export class Game {
           baseDmg,
           heavy,
           h.yaw,
-          this.shadowAttackActive ? 38 : heavy ? 24 : 11,
-          this.shadowAttackActive || h.comboStep === 4,
-          `combo${h.comboStep}`,
+          this.q2AttackActive ? 34 : this.shadowAttackActive ? 38 : heavy ? 24 : 11,
+          this.shadowAttackActive || this.q2AttackActive || h.comboStep === 4,
+          this.q2AttackActive ? 'skillQ' : `combo${h.comboStep}`,
         );
       }
 
@@ -1596,11 +1717,11 @@ export class Game {
         if (dist <= reach + this.peer.radius && (diff <= halfCone || dist <= 1.25)) {
           h.attackHasHit.add(-999);
           this.sendPvpStrike(
-            this.shadowAttackActive ? 38 : h.comboStep === 4 ? 36 : h.comboStep === 3 ? 30 : h.comboStep === 2 ? 20 : 16,
+            this.q2AttackActive ? 48 : this.shadowAttackActive ? 38 : h.comboStep === 4 ? 36 : h.comboStep === 3 ? 30 : h.comboStep === 2 ? 20 : 16,
             heavy ? 24 : 12,
             heavy,
             h.yaw,
-            `combo${h.comboStep}`,
+            this.q2AttackActive ? 'skillQ' : `combo${h.comboStep}`,
           );
         }
       }
@@ -1609,6 +1730,8 @@ export class Game {
     if (p >= 1) {
       h.state = 'idle';
       this.shadowAttackActive = false;
+      this.q2AttackActive = false;
+      this.q2DashTargetId = null;
       h.rig.setSwordGlow(0.85);
     }
   }
@@ -1642,7 +1765,7 @@ export class Game {
         yaw,
         tiltZ: comboStep === 4 ? 0.12 : Math.PI * 0.5,
         wide: true,
-        scale: comboStep === 4 ? 1.28 : 1.12,
+        scale: this.shadowAttackActive || this.q2AttackActive ? 1.44 : comboStep === 4 ? 1.28 : 1.12,
         colorCore: new THREE.Color(2.35, 1.95, 0.78),
         colorEdge: edge,
         duration: 0.44,
@@ -1673,6 +1796,7 @@ export class Game {
       h.dodgeDir.set(Math.sin(h.yaw), 0, Math.cos(h.yaw));
     }
     this.audio.playDodge(false);
+    this.recordComboSigil('D');
     this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.32, 1.65, 1.95), h.rig.root);
     triggerHaptic('light');
     this.mp.sendAction('dodge', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
@@ -1805,6 +1929,55 @@ export class Game {
     if (p >= 1) h.state = 'idle';
   }
 
+  private recordComboSigil(sig: 'A' | 'Q' | 'E' | 'D'): void {
+    if (this.mode !== 'playing') return;
+    const h = this.hero;
+    if (h.comboUltReady) return;
+    if (h.comboSigilTimer <= 0) {
+      h.comboSigils = [];
+    }
+    h.comboSigilTimer = 6.0;
+    if (!h.comboSigils.includes(sig)) {
+      h.comboSigils.push(sig);
+      if (h.comboSigils.length >= 3) {
+        h.comboUltReady = true;
+        h.comboUltTimer = 6.0;
+        this.audio.playDropChime('spirit');
+        this.spawnWorldCallout('三印齐聚 · 万剑归宗!', h.pos, 'parry');
+      }
+    }
+  }
+
+  tryCastComboUlt(): boolean {
+    const h = this.hero;
+    if (this.mode !== 'playing' || h.state === 'dead' || !h.comboUltReady) return false;
+    this.rmbMoveTarget = null;
+    this.startComboUlt();
+    return true;
+  }
+
+  private startComboUlt(): void {
+    const h = this.hero;
+    h.comboUltReady = false;
+    h.comboUltTimer = 0;
+    h.comboSigils = [];
+    h.comboSigilTimer = 0;
+    h.state = 'comboUlt';
+    h.stateTime = 0;
+    h.stateDuration = 0.92;
+    h.dodgeInvuln = 1.15;
+    h.attackVfxFired = false;
+    h.rig.setWeaponDrawn(true);
+    const tgt = this.findCombatTarget(18);
+    if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
+    h.rig.root.rotation.y = h.yaw;
+    this.audio.playSkillR();
+    this.audio.playHeroVoice('comboUlt');
+    this.hud.triggerSkillPulse('R');
+    this.spawnWorldCallout('万剑归宗 · 连携破阵!', h.pos, 'parry');
+    triggerHaptic('ultimate');
+  }
+
   private startSkillQ(): void {
     const h = this.hero;
     const loadout = this.getLoadoutStats();
@@ -1819,11 +1992,93 @@ export class Game {
     const tgt = this.findCombatTarget(16, aimYaw);
     h.yaw = tgt ? Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z) : aimYaw;
     h.rig.root.rotation.y = h.yaw;
+    this.recordComboSigil('Q');
     this.audio.playSkillQ();
     this.audio.playHeroVoice('skillQ');
     this.hud.triggerSkillPulse('Q');
     triggerHaptic('medium');
     this.mp.sendAction('skillQ', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
+  }
+
+  private startSkillQ2(): void {
+    const h = this.hero;
+    const loadout = this.getLoadoutStats();
+    h.q2ReadyTimer = 0;
+    const preferredId = h.q2TargetId;
+    h.q2TargetId = null;
+
+    let dashTgt: { x: number; z: number; radius: number; id: number | null } | null = null;
+    if (preferredId === -999 && this.mp.mode === 'solo' && this.peer && !this.peer.dead) {
+      dashTgt = { x: this.peer.pos.x, z: this.peer.pos.z, radius: this.peer.radius, id: -999 };
+    } else if (preferredId !== null) {
+      const marked = this.enemies.find((e) => e.id === preferredId && e.aiState !== 'dead');
+      if (marked && marked.pos.distanceTo(h.pos) <= 22) {
+        dashTgt = { x: marked.pos.x, z: marked.pos.z, radius: marked.radius, id: marked.id };
+      }
+    }
+    if (!dashTgt) {
+      const fallback = this.findCombatTarget(18);
+      if (fallback) {
+        dashTgt = {
+          x: fallback.x,
+          z: fallback.z,
+          radius: fallback.radius,
+          id: fallback.enemy ? fallback.enemy.id : -999,
+        };
+      }
+    }
+
+    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.55, 2.35, 2.45), h.rig.root);
+
+    if (dashTgt) {
+      const dx = dashTgt.x - h.pos.x;
+      const dz = dashTgt.z - h.pos.z;
+      const dist = Math.hypot(dx, dz);
+      const yaw = dist > 0.05 ? Math.atan2(dx, dz) : h.yaw;
+      h.yaw = yaw;
+      const stand = dashTgt.radius + h.radius + 1.0;
+      const dashDist = Math.max(0, dist - stand);
+      if (dashDist > 0.05 && dist > 0.05) {
+        h.pos.x += (dx / dist) * dashDist;
+        h.pos.z += (dz / dist) * dashDist;
+      }
+      this.arena.constrainPosition(h.pos, h.radius);
+    } else {
+      h.pos.x += Math.sin(h.yaw) * 4.8;
+      h.pos.z += Math.cos(h.yaw) * 4.8;
+      this.arena.constrainPosition(h.pos, h.radius);
+    }
+
+    h.rig.root.position.copy(h.pos);
+    h.rig.root.rotation.y = h.yaw;
+    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.95, 2.25, 2.2), h.rig.root);
+    this.vfx.spawnShockRing(h.pos, new THREE.Color(0.55, 2.2, 2.3), 0.25, 2.6, 0.35);
+
+    h.ult = Math.min(100, h.ult + 20 * this.blessings.ultGainMult * loadout.ultGainMult);
+    h.cdE = Math.max(0, h.cdE - 1.5);
+
+    this.q2AttackActive = true;
+    this.shadowAttackActive = false;
+    this.q2DashTargetId = dashTgt?.id ?? null;
+    h.state = 'attack';
+    h.comboStep = 4;
+    h.stateTime = 0;
+    h.stateDuration = 0.36;
+    h.comboWindowTimer = 0.55;
+    h.dodgeInvuln = Math.max(h.dodgeInvuln, 0.32);
+    h.attackHasHit.clear();
+    h.attackVfxFired = false;
+    h.magnetTargetId = this.q2DashTargetId;
+    h.magnetSlideRemain = 0;
+    h.rig.setWeaponDrawn(true);
+    h.rig.setSwordGlow(2.3);
+
+    this.recordComboSigil('Q');
+    this.audio.playDodge(true);
+    this.audio.playSwordSwing(3);
+    this.hud.triggerSkillPulse('Q');
+    this.spawnWorldCallout('踏剑追影!', h.pos, 'parry');
+    triggerHaptic('medium');
   }
 
   private startSkillE(): void {
@@ -1839,6 +2094,7 @@ export class Game {
     const tgt = this.findCombatTarget(16, this.getAimYaw());
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
+    this.recordComboSigil('E');
     this.audio.playSkillE();
     this.audio.playHeroVoice('skillE');
     this.hud.triggerSkillPulse('E');
@@ -1888,10 +2144,11 @@ export class Game {
     const pose: PoseName = h.state === 'skillQ' ? 'castQ' : h.state === 'skillE' ? 'castE' : 'castR';
     h.rig.applyPose(pose, p, this.elapsed, dt, 0);
 
-    if (!h.attackVfxFired && p >= 0.35) {
+    const fireAt = h.state === 'comboUlt' ? 0.28 : 0.35;
+    if (!h.attackVfxFired && p >= fireAt) {
       h.attackVfxFired = true;
       if (h.state === 'skillQ') {
-        this.spawnFlyingSwordProjectile(h.pos, h.yaw, true);
+        this.spawnFlyingSwordProjectile(h.pos, h.yaw, true, true);
       } else if (h.state === 'skillE') {
         const tgt = this.findCombatTarget(16, h.yaw);
         const center = tgt
@@ -1908,13 +2165,26 @@ export class Game {
         this.arena.constrainPosition(center, 1.2);
         this.mp.sendAction('skillR', { cx: center.x, cz: center.z });
         this.castSkillRAt(center, true);
+      } else if (h.state === 'comboUlt') {
+        const tgt = this.findCombatTarget(18);
+        const center = tgt
+          ? new THREE.Vector3(tgt.x, 0, tgt.z)
+          : h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 5.5, 0, Math.cos(h.yaw) * 5.5));
+        this.arena.constrainPosition(center, 1.2);
+        this.mp.sendAction('skillR', { cx: center.x, cz: center.z });
+        this.castComboUltAt(center, true);
       }
     }
 
     if (p >= 1) h.state = 'idle';
   }
 
-  private spawnFlyingSwordProjectile(origin: THREE.Vector3, yaw: number, friendly: boolean): void {
+  private spawnFlyingSwordProjectile(
+    origin: THREE.Vector3,
+    yaw: number,
+    friendly: boolean,
+    appliesMark = false,
+  ): void {
     const accent = friendly ? new THREE.Color(0.45, 2.05, 2.25) : new THREE.Color(2.2, 0.65, 0.55);
     const mesh = buildFlyingSwordMesh(accent);
     const startPos = origin.clone().add(new THREE.Vector3(Math.sin(yaw) * 1.1, 1.15, Math.cos(yaw) * 1.1));
@@ -1925,6 +2195,7 @@ export class Game {
       id: this.nextEntityId++,
       friendly,
       kind: 'flyingSword',
+      appliesMark,
       pos: startPos,
       vel: new THREE.Vector3(Math.sin(yaw) * 23, 0, Math.cos(yaw) * 23),
       radius: 0.72,
@@ -1939,21 +2210,35 @@ export class Game {
 
   private castSkillEAt(center: THREE.Vector3, isLocalDamage: boolean): void {
     const h = this.hero;
+    this.vfx.spawnSkySwordGate(
+      center.clone().add(new THREE.Vector3(0, 12.0, 0)),
+      5.0,
+      new THREE.Color(0.55, 2.0, 2.2),
+      1.65,
+    );
     this.vfx.spawnBaguaArray({
       pos: new THREE.Vector3(center.x, 0.08, center.z),
-      radius: 4.5,
+      radius: 4.8,
       color: new THREE.Color(0.35, 1.85, 2.0),
       duration: 1.65,
     });
+
+    const markedEnemies = isLocalDamage
+      ? this.enemies.filter((e) => e.aiState !== 'dead' && (e.swordMarkTimer ?? 0) > 0 && e.pos.distanceTo(center) <= 14)
+      : [];
+    const markedIds = new Set<number>(markedEnemies.map((e) => e.id));
+
     let pvpHitSent = false;
     const perSwordDmg = Math.round(22 * this.getHeroDamageScale());
-    for (let i = 0; i < 9; i++) {
-      const ang = (i / 9) * Math.PI * 2 + this.rng() * 0.4;
-      const r = i === 0 ? 0.2 : 1.1 + this.rng() * 2.8;
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2 + this.rng() * 0.35;
+      const r = i === 0 ? 0.2 : 0.9 + (i % 3) * 0.95 + this.rng() * 1.1;
       const spot = new THREE.Vector3(center.x + Math.cos(ang) * r, 0, center.z + Math.sin(ang) * r);
+      const tiltRad = 0.08 + ((i * 5) % 9) * 0.02;
       this.vfx.spawnFallingSword({
         targetPos: spot,
-        delay: i * 0.075,
+        delay: i * 0.055,
+        tiltRad,
         onImpact: (pos) => {
           if (i % 3 === 0) {
             this.audio.playHit(false);
@@ -1963,8 +2248,11 @@ export class Game {
           if (!isLocalDamage) return;
           for (const e of this.enemies) {
             if (e.aiState === 'dead') continue;
-            if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.3 + e.radius) {
-              this.applyHeroAttackToEnemy(e, perSwordDmg, false, h.yaw, 9, false, 'skillE');
+            if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.35 + e.radius) {
+              const resonated = markedIds.has(e.id) || (e.swordMarkTimer ?? 0) > 0;
+              const dmg = resonated ? Math.round(perSwordDmg * 1.25) : perSwordDmg;
+              const poise = resonated ? 18 : 9;
+              this.applyHeroAttackToEnemy(e, dmg, resonated, h.yaw, poise, resonated, 'skillE');
             }
           }
           if (this.mp.mode === 'solo' && this.peer && !this.peer.dead && !pvpHitSent) {
@@ -1976,21 +2264,92 @@ export class Game {
         },
       });
     }
+
+    // Q+E Resonance: +4 extra homing sky swords per Sword-Marked enemy
+    for (const target of markedEnemies) {
+      target.swordMarkTimer = 0;
+      this.spawnWorldCallout('剑印共鸣!', target.pos, 'parry');
+      this.vfx.spawnShockRing(target.pos, new THREE.Color(0.9, 2.25, 2.1), 0.3, 3.2, 0.4);
+      for (let k = 0; k < 4; k++) {
+        const ang = (k / 4) * Math.PI * 2 + this.rng() * 0.3;
+        const spot = new THREE.Vector3(
+          target.pos.x + Math.cos(ang) * 0.75,
+          0,
+          target.pos.z + Math.sin(ang) * 0.75,
+        );
+        this.vfx.spawnFallingSword({
+          targetPos: spot,
+          delay: 0.12 + k * 0.06,
+          tiltRad: 0.1 + k * 0.035,
+          color: new THREE.Color(0.95, 2.25, 2.05),
+          onImpact: (pos) => {
+            this.vfx.spawnGroundCrater(pos, 1.3, new THREE.Color(0.95, 2.2, 2.0), 2.5);
+            for (const e of this.enemies) {
+              if (e.aiState === 'dead') continue;
+              if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.4 + e.radius) {
+                this.applyHeroAttackToEnemy(
+                  e,
+                  Math.round(perSwordDmg * 1.25),
+                  true,
+                  h.yaw,
+                  18,
+                  true,
+                  'skillE',
+                );
+              }
+            }
+          },
+        });
+      }
+    }
   }
 
   private castSkillRAt(center: THREE.Vector3, isLocalDamage: boolean): void {
     const h = this.hero;
+    const goldColor = new THREE.Color(2.2, 1.7, 0.5);
+    this.vfx.spawnSkySwordGate(
+      center.clone().add(new THREE.Vector3(0, 14.0, 0)),
+      7.0,
+      goldColor,
+      1.95,
+    );
     this.vfx.spawnBaguaArray({
       pos: new THREE.Vector3(center.x, 0.1, center.z),
       radius: 6.4,
       color: new THREE.Color(2.2, 1.65, 0.45),
       duration: 2.1,
     });
+
+    // 6 perimeter guard swords plunging sequentially around center
+    const guardDmg = Math.round(28 * this.getHeroDamageScale());
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2;
+      const spot = new THREE.Vector3(center.x + Math.cos(ang) * 3.4, 0, center.z + Math.sin(ang) * 3.4);
+      this.vfx.spawnFallingSword({
+        targetPos: spot,
+        delay: 0.04 + i * 0.055,
+        tiltRad: 0.12 + (i % 3) * 0.03,
+        color: new THREE.Color(2.2, 1.75, 0.55),
+        onImpact: (pos) => {
+          this.vfx.spawnGroundCrater(pos, 1.4, goldColor, 2.8);
+          if (i % 2 === 0) this.audio.playHit(false);
+          if (!isLocalDamage) return;
+          for (const e of this.enemies) {
+            if (e.aiState === 'dead') continue;
+            if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.6 + e.radius) {
+              this.applyHeroAttackToEnemy(e, guardDmg, false, h.yaw, 16, false, 'skillR');
+            }
+          }
+        },
+      });
+    }
+
     const ultDmg = Math.round(145 * this.getHeroDamageScale());
     this.vfx.spawnFallingSword({
       targetPos: center,
       giant: true,
-      delay: 0.05,
+      delay: 0.28,
+      tiltRad: 0.04,
       onImpact: (pos) => {
         this.cameraRig.addShake(0.85);
         this.vfx.spawnShockRing(pos, new THREE.Color(2.4, 1.75, 0.45), 0.6, 8.2, 0.65);
@@ -2013,6 +2372,91 @@ export class Game {
         if (this.mp.mode === 'solo' && this.peer && !this.peer.dead) {
           if (Math.hypot(this.peer.pos.x - pos.x, this.peer.pos.z - pos.z) <= 6.8 + this.peer.radius) {
             this.sendPvpStrike(68, 55, true, h.yaw, 'skillR');
+          }
+        }
+      },
+    });
+  }
+
+  private castComboUltAt(center: THREE.Vector3, isLocalDamage: boolean): void {
+    const h = this.hero;
+    this.vfx.spawnSkySwordGate(
+      center.clone().add(new THREE.Vector3(-1.35, 13.4, 0.45)),
+      6.2,
+      new THREE.Color(2.2, 1.75, 0.55),
+      2.1,
+    );
+    this.vfx.spawnSkySwordGate(
+      center.clone().add(new THREE.Vector3(1.35, 14.2, -0.45)),
+      6.2,
+      new THREE.Color(0.55, 2.15, 2.2),
+      2.1,
+    );
+    this.vfx.spawnBaguaArray({
+      pos: new THREE.Vector3(center.x, 0.1, center.z),
+      radius: 7.2,
+      color: new THREE.Color(1.9, 2.0, 1.05),
+      duration: 2.3,
+    });
+
+    const rainDmg = Math.round(24 * this.getHeroDamageScale());
+    for (let i = 0; i < 16; i++) {
+      const ang = (i / 16) * Math.PI * 2 + this.rng() * 0.25;
+      const r = 1.1 + (i % 4) * 1.15 + this.rng() * 0.55;
+      const spot = new THREE.Vector3(center.x + Math.cos(ang) * r, 0, center.z + Math.sin(ang) * r);
+      this.vfx.spawnFallingSword({
+        targetPos: spot,
+        comboUlt: true,
+        delay: i * 0.04,
+        tiltRad: 0.1 + (i % 5) * 0.035,
+        color: i % 2 === 0 ? new THREE.Color(2.15, 1.75, 0.58) : new THREE.Color(0.65, 2.15, 2.1),
+        onImpact: (pos) => {
+          if (i % 4 === 0) {
+            this.audio.playHit(true);
+            this.cameraRig.addShake(0.18);
+          }
+          this.vfx.spawnGroundCrater(pos, 1.35, new THREE.Color(1.85, 1.9, 0.9), 2.8);
+          if (!isLocalDamage) return;
+          for (const e of this.enemies) {
+            if (e.aiState === 'dead') continue;
+            if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 2.6 + e.radius) {
+              this.applyHeroAttackToEnemy(e, rainDmg, false, h.yaw, 22, true, 'skillR');
+            }
+          }
+        },
+      });
+    }
+
+    const finisherDmg = Math.round(160 * this.getHeroDamageScale());
+    this.vfx.spawnFallingSword({
+      targetPos: center,
+      giant: true,
+      comboUlt: true,
+      delay: 0.34,
+      tiltRad: 0.03,
+      color: new THREE.Color(2.3, 1.85, 0.65),
+      onImpact: (pos) => {
+        this.cameraRig.addShake(0.95);
+        this.vfx.spawnShockRing(pos, new THREE.Color(2.35, 1.9, 0.65), 0.7, 9.0, 0.7);
+        this.vfx.spawnGroundCrater(pos, 4.0, new THREE.Color(2.3, 1.8, 0.55), 4.4);
+        this.vfx.spawnHitSparks(
+          pos.clone().add(new THREE.Vector3(0, 0.6, 0)),
+          new THREE.Vector3(0, 1, 0),
+          new THREE.Color(2.4, 2.0, 0.65),
+          30,
+          this.rng,
+        );
+        if (!isLocalDamage) return;
+        triggerHaptic('ultimate');
+        for (const e of this.enemies) {
+          if (e.aiState === 'dead') continue;
+          if (Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) <= 7.4 + e.radius) {
+            this.applyHeroAttackToEnemy(e, finisherDmg, true, h.yaw, 75, true, 'skillR');
+          }
+        }
+        if (this.mp.mode === 'solo' && this.peer && !this.peer.dead) {
+          if (Math.hypot(this.peer.pos.x - pos.x, this.peer.pos.z - pos.z) <= 7.4 + this.peer.radius) {
+            this.sendPvpStrike(74, 65, true, h.yaw, 'skillR');
           }
         }
       },
@@ -2430,12 +2874,22 @@ export class Game {
       }
 
       e.attackCooldown = Math.max(0, e.attackCooldown - dt * e.speedMult);
+      if (e.swordMarkTimer && e.swordMarkTimer > 0) {
+        e.swordMarkTimer = Math.max(0, e.swordMarkTimer - dt);
+      }
       const prevPos = this.tmpVec2.copy(e.pos);
       const targetPos = this.getEnemyAggroTarget(e.pos);
       const dx = targetPos.x - e.pos.x;
       const dz = targetPos.z - e.pos.z;
       const dist = Math.hypot(dx, dz);
       const toHeroYaw = Math.atan2(dx, dz);
+
+      if (this.corridorMode && (e.aiState === 'orbit' || e.aiState === 'chase') && dist > 20) {
+        e.yaw = dampAngle(e.yaw, toHeroYaw, 5, dt);
+        e.rig.root.rotation.y = e.yaw;
+        e.rig.applyPose('combatIdle', 0, this.elapsed, dt, 0);
+        continue;
+      }
 
       if (e.aiState === 'hit' || e.aiState === 'stagger') {
         e.stateTime += dt;
@@ -2805,6 +3259,9 @@ export class Game {
       if (!h.dodgePerfectTriggered && h.state === 'dodge') {
         h.dodgePerfectTriggered = true;
         h.shadowStrikeTimer = 3.5;
+        h.dodgeEmpowered = true;
+        h.dodgeEmpowerTimer = 3.0;
+        this.recordComboSigil('D');
         h.spirit = Math.min(h.maxSpirit, h.spirit + 22);
         h.ult = Math.min(100, h.ult + 14 * this.blessings.ultGainMult * loadout.ultGainMult);
         this.timeScale = 0.28;
@@ -2812,7 +3269,7 @@ export class Game {
         this.audio.playDodge(true);
         this.audio.playHeroVoice('dodge');
         this.vfx.spawnShockRing(h.pos, new THREE.Color(0.45, 2.1, 2.2), 0.25, 2.6, 0.35);
-        this.spawnWorldCallout('极限闪避 · 瞬影!', h.pos, 'info');
+        this.spawnWorldCallout('极限闪避 · 流云蓄势!', h.pos, 'info');
         triggerHaptic('medium');
       }
       return false;
@@ -2827,6 +3284,9 @@ export class Game {
       if (frontal) {
         if (h.blockElapsed <= 0.26 + loadout.parryWindowBonus) {
           h.parryCount += 1;
+          h.dodgeEmpowered = true;
+          h.dodgeEmpowerTimer = 3.0;
+          this.recordComboSigil('D');
           if (this.mp.mode === 'offline' || this.mp.role === 'host') {
             this.saveStore.incrementStat('totalParries', 1);
           }
@@ -2996,7 +3456,7 @@ export class Game {
         p.mesh.rotation.x += dt * 4;
       }
 
-      let remove = p.age >= p.maxAge || Math.hypot(p.pos.x, p.pos.z) > this.arena.playableRadius + 3;
+      let remove = p.age >= p.maxAge || this.arena.isOutOfBounds(p.pos, 2.5);
 
       if (!remove && p.friendly) {
         for (const e of this.enemies) {
@@ -3005,6 +3465,13 @@ export class Game {
             p.hitIds.add(e.id);
             const yaw = Math.atan2(p.vel.x, p.vel.z);
             this.applyHeroAttackToEnemy(e, p.damage, p.kind === 'flyingSword', yaw, 24, p.kind === 'yinOrb', 'skillQ');
+            if (p.kind === 'flyingSword' && p.appliesMark && e.hp > 0) {
+              e.swordMarkTimer = 5.0;
+              h.q2ReadyTimer = 2.6;
+              h.q2TargetId = e.id;
+              this.vfx.spawnShockRing(e.pos, new THREE.Color(0.55, 2.15, 2.25), 0.25, 1.85, 0.35);
+              this.spawnWorldCallout('剑印!', e.pos.clone().add(new THREE.Vector3(0, 0.4, 0)), 'info');
+            }
             if (p.kind === 'yinOrb') {
               remove = true;
               break;
@@ -3022,6 +3489,10 @@ export class Game {
           p.hitIds.add(-999);
           const yaw = Math.atan2(p.vel.x, p.vel.z);
           this.sendPvpStrike(34, 24, true, yaw, 'skillQ');
+          if (p.kind === 'flyingSword' && p.appliesMark) {
+            h.q2ReadyTimer = 2.6;
+            h.q2TargetId = -999;
+          }
         }
       } else if (!remove && !p.friendly) {
         if (Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) <= h.radius + p.radius) {
@@ -3103,14 +3574,18 @@ export class Game {
       if (anyAlive) return;
 
       if (this.currentWaveIdx + 1 < stageDef.waves.length) {
+        const nextZone = this.getZoneForWave(stageDef, this.currentWaveIdx + 1);
+        if (this.corridorMode && this.arena.getUnlockedZone() < nextZone) {
+          this.arena.setUnlockedZone(nextZone);
+          this.audio.playDropChime('spirit');
+        }
         this.stagePhase = 'waveTransition';
-        this.stageTimer = 1.65;
-        this.hud.showSubtitle(`第 ${this.currentWaveIdx + 1} 波肃清——前方妖气再聚！`, 1.2);
+        this.stageTimer = 1.2;
+        this.spawnWorldCallout('剑桥已启 · 向前破阵!', this.hero.pos, 'info');
       } else {
         this.stagePhase = 'done';
-        this.stageTimer = 1.2;
+        this.stageTimer = 1.1;
         this.audio.setMood('victory');
-        this.hud.showSubtitle(stageDef.victoryLine, 2.2);
       }
     } else if (this.stagePhase === 'waveTransition') {
       this.stageTimer -= dt;
@@ -3208,9 +3683,11 @@ export class Game {
               ? 'dodge'
               : h.state === 'dead'
                 ? 'dead'
-                : h.state === 'attack'
-                  ? `combo${h.comboStep || 1}`
-                  : 'combatIdle';
+                : h.state === 'comboUlt' || h.state === 'skillR'
+                  ? 'castR'
+                  : h.state === 'attack'
+                    ? `combo${h.comboStep || 1}`
+                    : 'combatIdle';
       this.mp.sendPlayerState({
         x: Number(h.pos.x.toFixed(3)),
         z: Number(h.pos.z.toFixed(3)),
@@ -3639,6 +4116,109 @@ export class Game {
         return item;
       },
       getInventoryCount: () => this.saveStore.getInventory().length,
+      getMinimapState: () => {
+        const maxZone = this.arena.getMaxZone();
+        const unlockedZone = this.arena.getUnlockedZone();
+        const curZone = this.arena.getZoneIndexAtZ(this.hero.pos.z);
+        return {
+          corridorMode: this.corridorMode,
+          zoneName: this.arena.getZoneName(curZone),
+          progressPct: this.arena.getProgressPct(this.hero.pos.z),
+          unlockedZone,
+          maxZone,
+          heroZ: this.hero.pos.z,
+        };
+      },
+      getFallingSwordStats: () => this.vfx.getFallingSwordStats(),
+      triggerComboUlt: () => {
+        if (this.mode !== 'playing') return false;
+        this.hero.comboSigils = ['A', 'Q', 'E'];
+        this.hero.comboSigilTimer = 6.0;
+        this.hero.comboUltReady = true;
+        this.hero.comboUltTimer = 6.0;
+        this.startComboUlt();
+        this.hud.update(
+          this.hero,
+          this.getObjectiveLabel(),
+          this.getActiveBoss(),
+          this.peer,
+          'none',
+          this.buildTacticalState(),
+        );
+        return true;
+      },
+      teleportToZone: (zIdx: 0 | 1 | 2) => {
+        const maxZone = this.arena.getMaxZone();
+        const clampedZone = clamp(Math.round(zIdx), 0, maxZone) as 0 | 1 | 2;
+        if (this.arena.getUnlockedZone() < clampedZone) {
+          this.arena.setUnlockedZone(clampedZone);
+        }
+        const zCenter = this.corridorMode ? this.arena.getZoneCenterZ(clampedZone) : 0;
+        this.hero.pos.set(0, 0, zCenter);
+        this.hero.rig.root.position.copy(this.hero.pos);
+        this.rmbMoveTarget = null;
+        this.cameraRig.snapTo(this.hero.pos);
+        this.hud.update(
+          this.hero,
+          this.getObjectiveLabel(),
+          this.getActiveBoss(),
+          this.peer,
+          'none',
+          this.buildTacticalState(),
+        );
+        this.publishDiagnostics();
+        return {
+          zoneIdx: clampedZone,
+          zoneName: this.arena.getZoneName(clampedZone),
+          progressPct: this.arena.getProgressPct(this.hero.pos.z),
+          heroZ: this.hero.pos.z,
+        };
+      },
+    };
+  }
+
+  private buildTacticalState(): HudTacticalState {
+    const h = this.hero;
+    const maxZone = this.arena.getMaxZone();
+    const unlockedZone = this.arena.getUnlockedZone();
+    const curZone = this.arena.getZoneIndexAtZ(h.pos.z);
+    const zMax = this.arena.playableRadius;
+    const zMin = this.corridorMode
+      ? this.arena.getZoneCenterZ(maxZone) - this.arena.playableRadius
+      : -this.arena.playableRadius;
+    const dots: MinimapEntityDot[] = [];
+    for (const e of this.enemies) {
+      if (e.aiState === 'dead') continue;
+      dots.push({
+        x: e.pos.x,
+        z: e.pos.z,
+        kind: e.kind === 'boss' ? 'boss' : e.kind === 'elite' ? 'elite' : 'enemy',
+      });
+    }
+    if (this.peer && !this.peer.dead && !this.peer.isEnemy) {
+      dots.push({ x: this.peer.pos.x, z: this.peer.pos.z, kind: 'ally' });
+    }
+    for (const d of this.vfx.drops) {
+      if (d.kind === 'gear') {
+        dots.push({ x: d.pos.x, z: d.pos.z, kind: 'loot' });
+      }
+    }
+    return {
+      corridorMode: this.corridorMode,
+      heroX: h.pos.x,
+      heroZ: h.pos.z,
+      heroYaw: h.yaw,
+      zMax,
+      zMin,
+      maxZone,
+      unlockedZone,
+      zoneName: this.arena.getZoneName(curZone),
+      progressPct: this.arena.getProgressPct(h.pos.z),
+      dots,
+      q2Ready: h.q2ReadyTimer > 0,
+      comboSigils: [...h.comboSigils],
+      comboUltReady: h.comboUltReady,
+      comboUltTimer: h.comboUltTimer,
     };
   }
 

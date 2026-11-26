@@ -414,6 +414,21 @@ export class GameInput {
     bindTap('slot-r', 'skillR');
     bindTap('slot-f', 'heal');
 
+    // Keep touch timestamps synced when tapping the golden combo ultimate button
+    const comboUltBtn = document.getElementById('btn-combo-ult');
+    if (comboUltBtn) {
+      const onComboDown = (e: PointerEvent) => {
+        if (e.pointerType === 'touch') {
+          this.lastTouchTime = performance.now();
+          this.touchActive = true;
+        }
+        e.stopPropagation();
+        triggerHaptic('ultimate');
+      };
+      comboUltBtn.addEventListener('pointerdown', onComboDown);
+      this.cleanups.push(() => comboUltBtn.removeEventListener('pointerdown', onComboDown));
+    }
+
     const blockBtn = document.getElementById('btn-block');
     if (blockBtn) {
       let blockPointerId: number | null = null;
