@@ -31,7 +31,7 @@
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
             <span class="chop-seal" aria-hidden="true">逍遥</span>
           </div>
-          <p class="title-tagline">写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。</p>
+          <p id="title-tagline" class="title-tagline">写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。</p>
 
           <!-- Campaign Progress & Selected Stage Strip -->
           <div class="campaign-strip">
@@ -73,13 +73,20 @@
             </div>
           </div>
 
-          <div class="title-controls-grid">
+          <div class="title-controls-grid desktop-only">
             <span><b>右键点地 / WASD</b> 联盟式移动</span>
             <span><b>左键 / J</b> 朝鼠标出剑</span>
             <span><b>K / 中键</b> 格挡弹反</span>
             <span><b>Space</b> 踏云闪避</span>
             <span><b>Q/E/R</b> 朝鼠标释放剑诀</span>
             <span><b>F</b> 灵葫回春</span>
+          </div>
+          <div class="title-controls-grid mobile-only">
+            <span><b>左手摇杆</b> 自由走位</span>
+            <span><b>出剑大键</b> 三段连招·破势处决</span>
+            <span><b>弹反 / 闪避</b> 格挡反击·极限闪避</span>
+            <span><b>御剑·万剑·天剑</b> 弧形技能轮盘</span>
+            <span><b>灵葫</b> 回春续战</span>
           </div>
         </div>
       </section>
@@ -177,8 +184,8 @@
         <!-- Top-Right: Utility Actions, Online Room Badge & Combo Counter -->
         <div class="top-right-stack">
           <div class="util-row">
-            <button id="btn-lol-toggle" class="util-btn active-mode" type="button" title="切换英雄联盟式右键移动 / 经典右键弹反">联盟鼠标</button>
-            <button id="btn-wheel-toggle" class="util-btn" type="button" title="切换手游王者轮盘 / 键鼠栏">轮盘</button>
+            <button id="btn-lol-toggle" class="util-btn active-mode desktop-only" type="button" title="切换英雄联盟式右键移动 / 经典右键弹反">联盟鼠标</button>
+            <button id="btn-wheel-toggle" class="util-btn desktop-only" type="button" title="切换手游王者轮盘 / 键鼠栏">轮盘</button>
             <button id="btn-mute" class="util-btn" type="button">音律</button>
             <button id="btn-pause" class="util-btn" type="button">暂停</button>
           </div>
@@ -190,9 +197,9 @@
         </div>
 
         <!-- Center-Bottom Counter-Execution Prompt -->
-        <div id="counter-prompt" class="counter-prompt">
-          <span class="counter-key">出剑 / J</span> 破势处决
-        </div>
+        <button id="counter-prompt" class="counter-prompt" type="button">
+          <span id="counter-key" class="counter-key">出剑 / J</span> 破势处决
+        </button>
 
         <!-- Bottom-Center: High-Simulation Sculpted Bronze-Jade Skill Medallions (Desktop Mode) -->
         <div class="skill-bar" id="desktop-skill-bar">
@@ -267,7 +274,7 @@
           </button>
           <button id="btn-attack" class="t-btn t-atk medal-btn" type="button" aria-label="普攻出剑">
             <span class="medal-frame"><img id="t-img-atk" alt="出剑" /><span class="medal-sheen"></span></span>
-            <span class="t-lbl atk-lbl">出剑</span>
+            <span id="t-atk-lbl" class="t-lbl atk-lbl">出剑</span>
           </button>
         </div>
       </div>
@@ -276,7 +283,7 @@
       <section id="pause-overlay" class="overlay">
         <div class="modal-card">
           <h2 class="modal-title">暂歇剑势</h2>
-          <p class="modal-desc">按 Esc 或点击继续回到锁妖剑台。</p>
+          <p id="pause-desc" class="modal-desc">按 Esc 或点击继续回到锁妖剑台。</p>
           <div class="modal-actions">
             <button id="btn-resume" class="xianxia-btn primary" type="button">继续试剑</button>
             <button id="btn-restart-pause" class="xianxia-btn" type="button">重开本关</button>

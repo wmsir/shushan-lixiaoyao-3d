@@ -7,7 +7,7 @@
  * - Supports full touch virtual joystick + mobile skill buttons while suppressing synthetic mouse events
  */
 
-import { triggerHaptic } from './NativeBridge';
+import { isPureMobileDevice, triggerHaptic } from './NativeBridge';
 
 export type BufferedAction = 'attack' | 'dodge' | 'skillQ' | 'skillE' | 'skillR' | 'heal';
 
@@ -43,6 +43,10 @@ export class GameInput {
   private lastTouchTime = 0;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
+    if (isPureMobileDevice()) {
+      this.lolMouseMode = false;
+      this.touchActive = true;
+    }
     this.bindKeyboardAndMouse();
     this.bindTouchControls();
     this.createDebugPanel();
@@ -398,6 +402,7 @@ export class GameInput {
     };
 
     bindTap('btn-attack', 'attack');
+    bindTap('counter-prompt', 'attack');
     bindTap('btn-dodge', 'dodge');
     bindTap('btn-skill-q', 'skillQ');
     bindTap('btn-skill-e', 'skillE');

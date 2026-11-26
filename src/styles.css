@@ -27,6 +27,9 @@ body,
   background: #0a121d;
   color: var(--text-main);
   font-family: var(--font-sans);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #game-canvas {
@@ -1090,11 +1093,14 @@ body,
   letter-spacing: 0.16em;
   box-shadow: 0 0 24px rgba(247, 225, 162, 0.45);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
 .counter-prompt.visible {
   opacity: 1;
+  pointer-events: auto;
+  cursor: pointer;
   transform: translateX(-50%) scale(1);
 }
 
@@ -1646,6 +1652,10 @@ body,
   }
 }
 
+.mobile-only {
+  display: none !important;
+}
+
 /* Honor-of-Kings Style Touch / Mobile & Toggleable Wheel Controls */
 #touch-controls {
   position: fixed;
@@ -1653,18 +1663,35 @@ body,
   pointer-events: none;
   display: none;
   z-index: 22;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
-#app.force-wheel #touch-controls.visible {
+#app.force-wheel #touch-controls.visible,
+#app.mobile-mode #touch-controls.visible {
   display: block;
 }
 
 #app.force-wheel .skill-bar,
-#app.force-wheel .bottom-hint {
-  display: none;
+#app.force-wheel .bottom-hint,
+#app.mobile-mode .skill-bar,
+#app.mobile-mode .bottom-hint,
+#app.mobile-mode .desktop-only {
+  display: none !important;
+}
+
+#app.mobile-mode .title-controls-grid.mobile-only {
+  display: grid !important;
 }
 
 @media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  .desktop-only {
+    display: none !important;
+  }
+  .title-controls-grid.mobile-only {
+    display: grid !important;
+  }
   #title-overlay {
     justify-content: center;
     padding-right: 0;
@@ -1730,8 +1757,9 @@ body,
     padding: 14px 20px 12px;
     max-width: 520px;
   }
-  .title-controls-grid {
-    display: none;
+  .title-controls-grid,
+  #app.mobile-mode .title-controls-grid.mobile-only {
+    display: none !important;
   }
   #campaign-overlay {
     padding: 6px 10px;
@@ -1936,6 +1964,15 @@ body,
   bottom: 14px;
   padding: 5px;
   background: linear-gradient(145deg, #ffe2a4 0%, #b85d28 38%, #5e1d1b 70%, #e0ae56 100%);
+}
+
+.t-atk.counter-ready {
+  background: linear-gradient(145deg, #fff6cb 0%, #f0b844 38%, #8f4e0c 70%, #ffe384 100%);
+  box-shadow:
+    0 0 28px rgba(255, 224, 118, 0.9),
+    0 0 12px rgba(76, 217, 208, 0.55),
+    0 8px 20px rgba(0, 0, 0, 0.78);
+  animation: ultPulse 0.7s ease-in-out infinite;
 }
 
 .atk-lbl {

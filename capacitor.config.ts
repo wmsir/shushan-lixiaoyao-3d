@@ -4,23 +4,20 @@ const config: CapacitorConfig = {
   appId: 'cn.fwpt.lixiaoyao',
   appName: '仙剑·锁妖剑台',
   webDir: 'dist',
-  bundledWebRuntime: false,
   server: {
     androidScheme: 'https',
-    cleartext: false,
-  },
-  android: {
-    allowMixedContent: false,
-    captureInput: true,
-    webContentsDebuggingEnabled: false,
-    backgroundColor: '#0a121d',
+    cleartext: true,
   },
   plugins: {
     StatusBar: {
       overlaysWebView: true,
       style: 'DARK',
-      backgroundColor: '#0a121d',
     },
+  },
+  ios: {
+    contentInset: 'never',
+    scrollEnabled: false,
+    preferredContentMode: 'mobile',
   },
 };
 

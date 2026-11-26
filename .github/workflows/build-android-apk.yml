@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build & Release Android APK + iOS IPA
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  build-apk:
+  build-android:
     name: Build Capacitor Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -81,22 +81,11 @@ jobs:
           ./gradlew assembleRelease assembleDebug --no-daemon
 
       - name: Collect & rename APK deliverables
-        id: meta
         run: |
           mkdir -p apk-out
           cp android/app/build/outputs/apk/release/app-release.apk apk-out/lixiaoyao-3d-release.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk apk-out/lixiaoyao-3d-debug.apk
           ls -lh apk-out
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "tag=v1.1.0-build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=latest" >> "$GITHUB_OUTPUT"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
@@ -105,20 +94,123 @@ jobs:
           path: apk-out/*.apk
           retention-days: 30
 
-      - name: Publish GitHub Release with APK
-        if: steps.meta.outputs.publish == 'true'
+  build-ios:
+    name: Build Capacitor iOS Unsigned IPA
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build production Three.js WebGL2 bundle
+        run: npm run build
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Install CocoaPods dependencies (if Podfile exists)
+        run: |
+          if [ -f ios/App/Podfile ]; then
+            cd ios/App
+            pod install --repo-update
+          else
+            echo "Using Swift Package Manager (CapApp-SPM)"
+          fi
+
+      - name: Build iOS Release .app (Unsigned)
+        run: |
+          if [ -d ios/App/App.xcworkspace ]; then
+            TARGET_FLAG="-workspace ios/App/App.xcworkspace"
+          else
+            TARGET_FLAG="-project ios/App/App.xcodeproj"
+          fi
+          xcodebuild $TARGET_FLAG \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath ios/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package Unsigned .ipa
+        run: |
+          APP_PATH="ios/DerivedData/Build/Products/Release-iphoneos/App.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: App.app not found at $APP_PATH"
+            exit 1
+          fi
+          mkdir -p ipa-out Payload
+          cp -R "$APP_PATH" Payload/App.app
+          zip -qry ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa Payload
+          rm -rf Payload
+          ls -lh ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lixiaoyao-ios-ipa
+          path: ipa-out/*.ipa
+          retention-days: 30
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-android, build-ios]
+    if: always() && (needs.build-android.result == 'success' || needs.build-ios.result == 'success')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Android APKs
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: lixiaoyao-android-apk
+          path: release-assets
+
+      - name: Download iOS IPA
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: lixiaoyao-ios-ipa
+          path: release-assets
+
+      - name: Prepare release tag & verify assets
+        id: meta
+        run: |
+          ls -lh release-assets
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v1.2.0-build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release with Android APK & iOS IPA
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: "仙剑·锁妖剑台 Android APK (${{ steps.meta.outputs.tag }})"
+          name: "仙剑·锁妖剑台 Android + iOS (${{ steps.meta.outputs.tag }})"
+          make_latest: true
           body: |
-            ### 仙剑 · 锁妖剑台 — 写实 3D 二十关商业战役版（Android 原生 APK）
+            ### 仙剑 · 锁妖剑台 — 写实 3D 二十关商业战役版（双端自动发版）
             - **四章二十关完整战役**：蜀山山门(1-5) → 剑冢幽冥(6-10) → 锁妖深渊(11-15) → 九幽绝巅(16-20)，含多波次援军、4 章专属天幕色温与地脉氛围、章末首领及第 19/20 关双首领/终极镇狱天尊决战
-            - **商业级玩法与养成**：周期场地天劫/地火/九幽雷阵、敌人 4 大词缀（疾风/嗜血/霸体/狂雷）、每关三星评星（共 60 星永久存档）、6 阶剑道境界成长与关间三选一「蜀山剑阁赐福」
-            - **写实 3D 人物**：768px 摄影级皮肤 PBR + 多尺度毛孔法线 + 眼角膜粗糙度 + 实时次表面散射（SSS）+ 无缝连续 `SkinnedMesh` 7.7 头身人体蒙皮
-            - **双端操控与跨端联机**：手机端王者荣耀式悬浮摇杆 + 7 键浮雕技能轮盘 + 原生震动，PC 端英雄联盟式右键走位；支持 20 关全关卡跨端双人组队刷怪与 1v1 Solo 单挑（https://fwpt.cn/lixiaoyao/）
+            - **纯手游端原生体验**：手机/APK 自动启用纯手游模式（彻底隐藏 `J`/`Esc`/`WASD`/鼠标提示），左手悬浮摇杆 + 右手王者荣耀式弧形技能轮盘 + 破势处决呼吸高亮 + 原生震动反馈
+            - **写实 3D 人物与高仿真特效**：768px 摄影级皮肤 PBR + 多尺度毛孔法线 + 眼角膜粗糙度 + 实时次表面散射（SSS）+ 无缝连续 `SkinnedMesh` 7.7 头身人体蒙皮，配合锻钢飞剑、焦土裂纹与青翠灵雾特效
+            - **跨端实时联机**：支持 20 关全关卡跨端双人组队刷怪（Co-op）与 1v1 Solo 单挑切磋（`wss://fwpt.cn/lixiaoyao/ws`）
 
-            手机直接下载下方 `lixiaoyao-3d-release.apk` 安装即可开玩。
+            #### 安装说明
+            - **Android 手机**：直接下载 `lixiaoyao-3d-release.apk` 安装即可。
+            - **iPhone (iOS)**：下载 `li-xiaoyao-shushan-3d-unsigned.ipa`，在电脑端用 **Sideloadly / AltStore / 爱思助手** 登录免费 Apple ID 侧载安装（巨魔 TrollStore 可直接安装）。
           files: |
-            apk-out/lixiaoyao-3d-release.apk
-            apk-out/lixiaoyao-3d-debug.apk
+            release-assets/*

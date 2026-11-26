@@ -17,7 +17,7 @@ import {
   getSwordRealm,
 } from '../game/CampaignData';
 import { clamp } from '../utils/math';
-import { isNativeAndroidApp } from '../core/NativeBridge';
+import { isPureMobileDevice } from '../core/NativeBridge';
 
 export type ScreenMode = 'title' | 'playing' | 'cutscene' | 'paused' | 'victory' | 'defeat' | 'showcase';
 
@@ -113,6 +113,11 @@ export class HudController {
   private readonly tGourdCountEl = this.q('#t-gourd-count');
 
   private readonly counterPrompt = this.q('#counter-prompt');
+  private readonly counterKey = this.q('#counter-key');
+  private readonly touchAtkBtn = this.q('#btn-attack');
+  private readonly touchAtkLbl = this.q('#t-atk-lbl');
+  private readonly titleTagline = this.q('#title-tagline');
+  private readonly pauseDesc = this.q('#pause-desc');
   private readonly comboBox = this.q('#combo-box');
   private readonly comboNum = this.q('#combo-num');
   private readonly subtitleBanner = this.q('#subtitle-banner');
@@ -169,6 +174,7 @@ export class HudController {
   private subtitleTimer = 0;
   private stageBannerTimer = 0;
   private wheelForced = false;
+  private mobileMode = false;
 
   constructor(private readonly callbacks: HudCallbacks) {
     const bindImg = (id: string, src: string) => {
@@ -187,7 +193,9 @@ export class HudController {
     bindImg('#t-img-parry', medalParry);
 
     const params = new URLSearchParams(window.location.search);
-    if (isNativeAndroidApp() || params.has('wheel')) {
+    if (isPureMobileDevice()) {
+      this.applyMobileMode(true);
+    } else if (params.has('wheel')) {
       this.setWheelForced(true);
     }
 
@@ -400,10 +408,26 @@ export class HudController {
     }
   }
 
+  applyMobileMode(enabled: boolean): void {
+    this.mobileMode = enabled;
+    this.appRoot.classList.toggle('mobile-mode', enabled);
+    if (enabled) {
+      this.setWheelForced(true);
+      this.titleTagline.textContent = '写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 手机双摇杆王者轮盘 · 跨端双人联机。';
+      this.pauseDesc.textContent = '轻触「继续试剑」回到锁妖剑台。';
+      this.counterKey.textContent = '点「出剑」';
+    } else {
+      this.titleTagline.textContent = '写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。';
+      this.pauseDesc.textContent = '按 Esc 或点击继续回到锁妖剑台。';
+      this.counterKey.textContent = this.wheelForced ? '点「出剑」' : '左键 / J';
+    }
+  }
+
   setWheelForced(enabled: boolean): void {
     this.wheelForced = enabled;
     this.appRoot.classList.toggle('force-wheel', enabled);
     this.wheelToggleBtn.textContent = enabled ? '键鼠' : '轮盘';
+    this.counterKey.textContent = this.mobileMode || enabled ? '点「出剑」' : '左键 / J';
   }
 
   setHeroName(name: string): void {
@@ -641,7 +665,10 @@ export class HudController {
     this.gourdCountEl.textContent = `${hero.gourds}`;
     this.tGourdCountEl.textContent = `${hero.gourds}`;
 
-    this.counterPrompt.classList.toggle('visible', hero.counterWindowTimer > 0 && hero.counterTargetId !== null);
+    const counterReady = hero.counterWindowTimer > 0 && hero.counterTargetId !== null;
+    this.counterPrompt.classList.toggle('visible', counterReady);
+    this.touchAtkBtn.classList.toggle('counter-ready', counterReady);
+    this.touchAtkLbl.textContent = counterReady ? '处决' : '出剑';
 
     if (hero.comboCount >= 2 && hero.comboDecayTimer > 0) {
       this.comboBox.classList.add('visible');

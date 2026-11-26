@@ -28,6 +28,21 @@ export function isNativeAndroidApp(): boolean {
   return Boolean(cap?.isNativePlatform?.());
 }
 
+/** Detects Android APK, phones, tablets, coarse-pointer touch screens, or ?mobile override. */
+export function isPureMobileDevice(): boolean {
+  if (isNativeAndroidApp()) return true;
+  if (typeof window === 'undefined') return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('mobile')) return true;
+    if (window.matchMedia?.('(hover: none) and (pointer: coarse)').matches) return true;
+  } catch {
+    // ignore
+  }
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  return /(Android|iPhone|iPad|iPod|Mobile|HarmonyOS)/i.test(ua);
+}
+
 export function initNativeShell(): void {
   const cap = getCap();
   if (!cap?.isNativePlatform?.()) return;

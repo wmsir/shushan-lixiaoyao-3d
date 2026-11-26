@@ -9,7 +9,9 @@
     "build:single": "tsc --noEmit && node -e \"process.env.SINGLE_FILE='1'; import('node:child_process').then(m => m.execSync('npx vite build', { stdio: 'inherit', env: process.env }))\"",
     "preview": "vite preview --host 127.0.0.1",
     "share": "node scripts/share-lan.mjs",
+    "mp:server": "node server/mp-server.mjs",
     "cap:sync": "npm run build && npx cap sync android",
+    "cap:sync:ios": "npm run build && npx cap sync ios",
     "deploy:fwpt": "node scripts/deploy-fwpt.mjs",
     "test": "playwright test",
     "verify:visual": "playwright test tests/visual.spec.ts",
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@capacitor/android": "^8.6.2",
     "@capacitor/cli": "^8.6.2",
+    "@capacitor/ios": "^8.6.3",
     "@playwright/test": "^1.60.0",
     "@types/node": "^25.9.0",
     "@types/pngjs": "^6.0.5",

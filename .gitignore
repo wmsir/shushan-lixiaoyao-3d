@@ -4,6 +4,8 @@ dist/
 dist-single/
 artifacts/
 apk-out/
+ipa-out/
+*.ipa
 *.log
 
 # Secrets & Keystores
@@ -12,12 +14,16 @@ apk-out/
 *.keystore
 local.properties
 
-# Android Gradle Build Cache (keep android/ source & wrapper committed for CI!)
+# Android & iOS Build Cache (keep source & config committed for CI!)
 android/.gradle/
 android/build/
 android/app/build/
 android/app/src/main/assets/public/
 android/capacitor-cordova-android-plugins/build/
+ios/DerivedData/
+ios/App/build/
+ios/App/Pods/
+ios/App/App/public/
 
 # IDE & OS
 .vscode/
