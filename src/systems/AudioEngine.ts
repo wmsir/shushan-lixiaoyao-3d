@@ -7,7 +7,45 @@
  * - Automatic mute for automated testing, gesture unlock, and cutscene volume ducking
  */
 
+import voiceQ1 from '../assets/voices/voice-q1.mp3';
+import voiceQ2 from '../assets/voices/voice-q2.mp3';
+import voiceE1 from '../assets/voices/voice-e1.mp3';
+import voiceE2 from '../assets/voices/voice-e2.mp3';
+import voiceR1 from '../assets/voices/voice-r1.mp3';
+import voiceR2 from '../assets/voices/voice-r2.mp3';
+import voiceCounter from '../assets/voices/voice-counter.mp3';
+import voiceDodge from '../assets/voices/voice-dodge.mp3';
+import voiceHeal from '../assets/voices/voice-heal.mp3';
+import voiceVictory from '../assets/voices/voice-victory.mp3';
+
 export type MusicMood = 'title' | 'skirmish' | 'boss1' | 'boss2' | 'victory';
+export type HeroVoiceKind = 'skillQ' | 'skillE' | 'skillR' | 'counter' | 'dodge' | 'heal' | 'victory';
+
+interface VoiceClipDef {
+  url: string;
+  line: string;
+  priority: number;
+  cooldownSec: number;
+}
+
+const VOICE_BANKS: Record<HeroVoiceKind, VoiceClipDef[]> = {
+  skillQ: [
+    { url: voiceQ1, line: '御剑乘风来——去！', priority: 2, cooldownSec: 1.8 },
+    { url: voiceQ2, line: '剑出如星，谁敢接我一招！', priority: 2, cooldownSec: 1.8 },
+  ],
+  skillE: [
+    { url: voiceE1, line: '御剑伏魔，万剑诀，落！', priority: 3, cooldownSec: 2.6 },
+    { url: voiceE2, line: '剑气化星雨，万剑归宗！', priority: 3, cooldownSec: 2.6 },
+  ],
+  skillR: [
+    { url: voiceR1, line: '仗剑红尘已是癫——天剑，降世！', priority: 4, cooldownSec: 3.5 },
+    { url: voiceR2, line: '破晓斩长空，一剑镇乾坤——天剑！', priority: 4, cooldownSec: 3.5 },
+  ],
+  counter: [{ url: voiceCounter, line: '破绽在此，接招！', priority: 2, cooldownSec: 1.6 }],
+  dodge: [{ url: voiceDodge, line: '想打中我？差得远呢！', priority: 1, cooldownSec: 2.2 }],
+  heal: [{ url: voiceHeal, line: '好酒！御剑江湖，岂能无酒！', priority: 2, cooldownSec: 2.2 }],
+  victory: [{ url: voiceVictory, line: '区区妖邪，也敢挡我蜀山剑路！', priority: 4, cooldownSec: 3.0 }],
+};
 
 // D Major Pentatonic (宫商角徵羽): D4, E4, F#4, A4, B4, D5, E5, F#5, A5
 const PENTATONIC = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25, 739.99, 880.0];
@@ -16,8 +54,26 @@ export class AudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private sfxGain: GainNode | null = null;
+  private voiceGain: GainNode | null = null;
   private musicGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
+
+  private readonly voiceBuffers = new Map<string, AudioBuffer>();
+  private readonly voiceLoading = new Set<string>();
+  private readonly voiceNextIdx: Record<HeroVoiceKind, number> = {
+    skillQ: 0,
+    skillE: 0,
+    skillR: 0,
+    counter: 0,
+    dodge: 0,
+    heal: 0,
+    victory: 0,
+  };
+  private activeVoiceSource: AudioBufferSourceNode | null = null;
+  private activeVoiceAudio: HTMLAudioElement | null = null;
+  private activeVoicePriority = 0;
+  private activeVoiceUntil = 0;
+  private lastVoiceKindAt: Partial<Record<HeroVoiceKind, number>> = {};
 
   private muted = false;
   private duckFactor = 1.0;
@@ -43,6 +99,10 @@ export class AudioEngine {
       this.sfxGain.gain.value = 0.88;
       this.sfxGain.connect(this.masterGain);
 
+      this.voiceGain = this.ctx.createGain();
+      this.voiceGain.gain.value = 1.05;
+      this.voiceGain.connect(this.masterGain);
+
       // Per vfx-ui-audio.md: keep music ~1/3 of SFX volume so combat hits pop crisply
       this.musicGain = this.ctx.createGain();
       this.musicGain.gain.value = 0.28;
@@ -53,14 +113,117 @@ export class AudioEngine {
       this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = this.noiseBuffer.getChannelData(0);
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      this.preloadVoices();
     }
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
     }
   }
 
+  private preloadVoices(): void {
+    if (!this.ctx) return;
+    for (const defs of Object.values(VOICE_BANKS)) {
+      for (const def of defs) {
+        void this.ensureVoiceBuffer(def.url);
+      }
+    }
+  }
+
+  private async ensureVoiceBuffer(url: string): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
+    const cached = this.voiceBuffers.get(url);
+    if (cached) return cached;
+    if (this.voiceLoading.has(url)) return null;
+    this.voiceLoading.add(url);
+    try {
+      const resp = await fetch(url);
+      const arr = await resp.arrayBuffer();
+      const decoded = await this.ctx.decodeAudioData(arr);
+      this.voiceBuffers.set(url, decoded);
+      return decoded;
+    } catch {
+      return null;
+    } finally {
+      this.voiceLoading.delete(url);
+    }
+  }
+
+  playHeroVoice(kind: HeroVoiceKind): string {
+    const bank = VOICE_BANKS[kind];
+    if (!bank || bank.length === 0) return '';
+    const idx = this.voiceNextIdx[kind] % bank.length;
+    this.voiceNextIdx[kind] = idx + 1;
+    const clip = bank[idx];
+
+    if (this.muted) return clip.line;
+    this.unlock();
+
+    const nowMs = performance.now();
+    const lastAt = this.lastVoiceKindAt[kind] ?? -99999;
+    if (nowMs - lastAt < clip.cooldownSec * 1000) {
+      return clip.line;
+    }
+    if (nowMs < this.activeVoiceUntil && clip.priority < this.activeVoicePriority) {
+      return clip.line;
+    }
+
+    this.lastVoiceKindAt[kind] = nowMs;
+    this.activeVoicePriority = clip.priority;
+    this.stopActiveVoice();
+
+    const buf = this.voiceBuffers.get(clip.url);
+    if (buf && this.ctx && this.voiceGain) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.voiceGain);
+      src.start();
+      this.activeVoiceSource = src;
+      this.activeVoiceUntil = nowMs + buf.duration * 1000;
+      src.onended = () => {
+        if (this.activeVoiceSource === src) this.activeVoiceSource = null;
+      };
+    } else {
+      const el = new Audio(clip.url);
+      el.volume = 0.92;
+      this.activeVoiceAudio = el;
+      this.activeVoiceUntil = nowMs + 2600;
+      void el.play().catch(() => {});
+      void this.ensureVoiceBuffer(clip.url);
+    }
+
+    if (kind === 'skillR' && this.musicGain && this.ctx) {
+      const t = this.ctx.currentTime;
+      this.musicGain.gain.cancelScheduledValues(t);
+      this.musicGain.gain.setTargetAtTime(0.08, t, 0.08);
+      this.musicGain.gain.setTargetAtTime(0.28 * this.duckFactor, t + 2.1, 0.28);
+    }
+
+    return clip.line;
+  }
+
+  private stopActiveVoice(): void {
+    if (this.activeVoiceSource) {
+      try {
+        this.activeVoiceSource.stop();
+      } catch {
+        // already stopped
+      }
+      this.activeVoiceSource = null;
+    }
+    if (this.activeVoiceAudio) {
+      try {
+        this.activeVoiceAudio.pause();
+        this.activeVoiceAudio.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      this.activeVoiceAudio = null;
+    }
+  }
+
   setMuted(muted: boolean): void {
     this.muted = muted;
+    if (muted) this.stopActiveVoice();
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.72, this.ctx.currentTime, 0.04);
     }

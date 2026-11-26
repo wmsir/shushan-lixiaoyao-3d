@@ -59,8 +59,10 @@ interface SparkItem {
 }
 
 interface GhostVfx {
-  mesh: THREE.Mesh;
-  mat: THREE.MeshBasicMaterial;
+  group: THREE.Group;
+  mat: THREE.ShaderMaterial;
+  ownedGeos: THREE.BufferGeometry[];
+  drift: THREE.Vector3;
   age: number;
   duration: number;
 }
@@ -627,20 +629,129 @@ export class VfxSystem {
     }
   }
 
-  /** Translucent jade-cyan ghost afterimage for dodge & execution flash-step. */
-  spawnAfterimage(pos: THREE.Vector3, yaw: number, color = new THREE.Color(0.35, 1.45, 1.65)): void {
-    const mat = new THREE.MeshBasicMaterial({
-      color,
+  /**
+   * Spawns a true 3D human swordsman silhouette afterimage (Fresnel spirit-aura contour shader)
+   * baked from the live posed character hierarchy (never a capsule/box placeholder).
+   */
+  spawnAfterimage(
+    pos: THREE.Vector3,
+    yaw: number,
+    color = new THREE.Color(0.35, 1.55, 1.85),
+    sourceRoot?: THREE.Object3D,
+  ): void {
+    const mat = new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.45,
-      blending: THREE.AdditiveBlending,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.FrontSide,
+      uniforms: {
+        uColor: { value: color.clone() },
+        uOpacity: { value: 0.68 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vNormalV;
+        varying vec3 vViewPos;
+        void main() {
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          vNormalV = normalize(normalMatrix * normal);
+          vViewPos = -mvPos.xyz;
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying vec3 vNormalV;
+        varying vec3 vViewPos;
+        void main() {
+          vec3 N = normalize(vNormalV);
+          vec3 V = normalize(vViewPos);
+          float rim = 1.0 - abs(dot(N, V));
+          float fresnel = pow(clamp(rim, 0.0, 1.0), 1.9);
+          float alpha = (0.14 + 0.86 * fresnel) * uOpacity;
+          if (alpha < 0.01) discard;
+          gl_FragColor = vec4(uColor * (0.45 + 0.85 * fresnel), alpha);
+        }
+      `,
     });
-    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 1.05, 6, 10), mat);
-    mesh.position.set(pos.x, pos.y + 0.92, pos.z);
-    mesh.rotation.y = yaw;
-    this.group.add(mesh);
-    this.ghosts.push({ mesh, mat, age: 0, duration: 0.28 });
+
+    const ghostGroup = new THREE.Group();
+    const ownedGeos: THREE.BufferGeometry[] = [];
+
+    if (sourceRoot) {
+      sourceRoot.updateMatrixWorld(true);
+      const tmpV = new THREE.Vector3();
+      sourceRoot.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh) || !obj.visible) return;
+        const srcGeo = obj.geometry;
+        if (!srcGeo || srcGeo.type === 'CircleGeometry') return;
+
+        let snapMesh: THREE.Mesh;
+        if (obj instanceof THREE.SkinnedMesh && obj.skeleton) {
+          const srcPos = srcGeo.getAttribute('position');
+          if (!srcPos) return;
+          const baked = new Float32Array(srcPos.count * 3);
+          for (let i = 0; i < srcPos.count; i++) {
+            tmpV.fromBufferAttribute(srcPos, i);
+            obj.applyBoneTransform(i, tmpV);
+            baked[i * 3] = tmpV.x;
+            baked[i * 3 + 1] = tmpV.y;
+            baked[i * 3 + 2] = tmpV.z;
+          }
+          const bakedGeo = new THREE.BufferGeometry();
+          bakedGeo.setAttribute('position', new THREE.BufferAttribute(baked, 3));
+          const idx = srcGeo.getIndex();
+          if (idx) bakedGeo.setIndex(idx.clone());
+          bakedGeo.computeVertexNormals();
+          ownedGeos.push(bakedGeo);
+          snapMesh = new THREE.Mesh(bakedGeo, mat);
+        } else {
+          snapMesh = new THREE.Mesh(srcGeo, mat);
+        }
+
+        snapMesh.matrixAutoUpdate = false;
+        snapMesh.matrix.copy(obj.matrixWorld);
+        ghostGroup.add(snapMesh);
+      });
+    }
+
+    // Fallback multi-part sculpted swordsman figure (only used if no sourceRoot passed)
+    if (ghostGroup.children.length === 0) {
+      const figure = new THREE.Group();
+      figure.position.copy(pos);
+      figure.rotation.y = yaw;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 10, 8), mat);
+      head.position.set(0, 1.56, 0.04);
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.5, 10), mat);
+      torso.position.set(0, 1.18, 0.02);
+      torso.rotation.x = 0.22;
+      const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.28, 0.42, 10), mat);
+      hem.position.set(0, 0.82, -0.02);
+      const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.05, 0.56, 8), mat);
+      legL.position.set(0.12, 0.34, 0.16);
+      legL.rotation.x = -0.35;
+      const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.05, 0.56, 8), mat);
+      legR.position.set(-0.12, 0.32, -0.18);
+      legR.rotation.x = 0.42;
+      const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.48, 8), mat);
+      armL.position.set(0.24, 1.24, 0.06);
+      armL.rotation.set(0.2, 0, -0.35);
+      const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.48, 8), mat);
+      armR.position.set(-0.24, 1.2, -0.08);
+      armR.rotation.set(0.5, 0, 0.3);
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.035, 1.02, 0.015), mat);
+      blade.position.set(-0.32, 1.1, -0.45);
+      blade.rotation.set(-0.85, 0, 0.25);
+      for (const m of [head, torso, hem, legL, legR, armL, armR, blade]) {
+        ownedGeos.push(m.geometry);
+        figure.add(m);
+      }
+      ghostGroup.add(figure);
+    }
+
+    const drift = new THREE.Vector3(-Math.sin(yaw) * 0.42, 0.08, -Math.cos(yaw) * 0.42);
+    this.group.add(ghostGroup);
+    this.ghosts.push({ group: ghostGroup, mat, ownedGeos, drift, age: 0, duration: 0.34 });
   }
 
   /**
@@ -967,18 +1078,20 @@ export class VfxSystem {
       }
     }
 
-    // 6. Afterimages
+    // 6. 3D Human Silhouette Afterimages
     for (let i = this.ghosts.length - 1; i >= 0; i--) {
       const gh = this.ghosts[i];
       gh.age += dt;
       const p = gh.age / gh.duration;
       if (p >= 1) {
-        this.group.remove(gh.mesh);
+        this.group.remove(gh.group);
         gh.mat.dispose();
+        for (const geo of gh.ownedGeos) geo.dispose();
         this.ghosts.splice(i, 1);
       } else {
-        gh.mat.opacity = (1 - p) * 0.42;
-        gh.mesh.scale.setScalar(1 + p * 0.14);
+        gh.group.position.addScaledVector(gh.drift, dt);
+        const fade = 1 - p;
+        gh.mat.uniforms.uOpacity.value = fade * fade * 0.68;
       }
     }
 
@@ -1083,8 +1196,9 @@ export class VfxSystem {
     }
     this.sparks.length = 0;
     for (const gh of this.ghosts) {
-      this.group.remove(gh.mesh);
+      this.group.remove(gh.group);
       gh.mat.dispose();
+      for (const geo of gh.ownedGeos) geo.dispose();
     }
     this.ghosts.length = 0;
     for (const c of this.craters) {
@@ -1099,5 +1213,21 @@ export class VfxSystem {
     this.healVortices.length = 0;
     for (const d of this.drops) this.group.remove(d.mesh, d.pillar);
     this.drops.length = 0;
+  }
+
+  getGhostStats(): { ghostGroups: number; maxChildMeshes: number; hasCapsule: boolean } {
+    let maxChildMeshes = 0;
+    let hasCapsule = false;
+    for (const gh of this.ghosts) {
+      let count = 0;
+      gh.group.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          count += 1;
+          if (o.geometry.type === 'CapsuleGeometry') hasCapsule = true;
+        }
+      });
+      if (count > maxChildMeshes) maxChildMeshes = count;
+    }
+    return { ghostGroups: this.ghosts.length, maxChildMeshes, hasCapsule };
   }
 }

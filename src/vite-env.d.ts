@@ -46,6 +46,12 @@ interface GuizangDebugApi {
   stageNum(): number;
   wave(): number;
   totalStars(): number;
+  jade(): number;
+  buyItem(id: string): boolean;
+  equipItem(id: string): boolean;
+  confirmDialogue(): boolean;
+  vfxGhostStats(): { ghostGroups: number; maxChildMeshes: number; hasCapsule: boolean };
+  version: string;
   openMap(chapterId?: 1 | 2 | 3 | 4): void;
   clearCurrentStage(): void;
   god(on?: boolean): void;

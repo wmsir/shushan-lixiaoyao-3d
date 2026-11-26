@@ -6,7 +6,7 @@ import { ShushanArena } from '../world/ShushanArena';
 import { VfxSystem } from '../vfx/VfxSystem';
 import { AudioEngine } from '../systems/AudioEngine';
 import { CameraRig } from '../systems/CameraRig';
-import { HudController, type ResultDisplayOptions, type ScreenMode } from '../ui/HudController';
+import { HudController, type CombatThreatState, type ResultDisplayOptions, type ScreenMode } from '../ui/HudController';
 import {
   buildFlyingSwordMesh,
   buildYinOrbMesh,
@@ -30,9 +30,16 @@ import {
   evaluateStageStars,
   getChapterDef,
   getStageDef,
+  getStageDialogue,
   getSwordRealm,
   pickBlessingChoices,
 } from './CampaignData';
+import {
+  type HeroLoadoutStats,
+  getEquippedSkinVisual,
+  getEquippedWeaponVisual,
+} from './EquipmentData';
+import { APP_VERSION } from '../version';
 import {
   MultiplayerClient,
   type EnemyNetSnapshot,
@@ -93,6 +100,7 @@ export class Game {
   private readonly vfx = new VfxSystem();
   private readonly mp: MultiplayerClient;
   private readonly saveStore = new CampaignSaveStore();
+  private readonly targetRingMesh: THREE.Mesh;
 
   private rng = createSeededRandom(42);
   private hero: HeroState;
@@ -109,6 +117,8 @@ export class Game {
   private stageTimer = 0;
   private hazardTimer = 0;
   private blessings: RunBlessingState = createEmptyBlessings();
+  private pendingCutsceneAfterDialogue = false;
+  private shadowAttackActive = false;
 
   private frame = 0;
   private elapsed = 0;
@@ -157,10 +167,26 @@ export class Game {
     this.scene.add(this.arena.group);
     this.scene.add(this.vfx.group);
 
+    this.targetRingMesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.72, 0.88, 36),
+      new THREE.MeshBasicMaterial({
+        color: '#4cd9d0',
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false,
+      }),
+    );
+    this.targetRingMesh.rotation.x = -Math.PI / 2;
+    this.targetRingMesh.position.y = 0.06;
+    this.targetRingMesh.visible = false;
+    this.scene.add(this.targetRingMesh);
+
     this.hero = createHero();
     this.hero.rig.root.position.copy(this.hero.pos);
     this.hero.rig.root.rotation.y = this.hero.yaw;
     this.scene.add(this.hero.rig.root);
+    this.applyCurrentLoadoutVisuals();
 
     this.mp = new MultiplayerClient({
       onStatus: (text, connected) => {
@@ -239,7 +265,10 @@ export class Game {
         this.hud.setMpHudBadge('');
         this.hud.setHeroName('李逍遥');
         this.blessings = createEmptyBlessings();
-        this.startNewRun(false, stageId);
+        this.startNewRun(false, stageId, false, false);
+      },
+      onConfirmDialogue: () => {
+        this.confirmStageDialogue();
       },
       onNextStage: (nextStageId, selectedBlessingId) => {
         if (selectedBlessingId) {
@@ -248,7 +277,7 @@ export class Game {
             this.blessings = applyBlessingToRun(this.blessings, b);
           }
         }
-        this.startNewRun(false, nextStageId, true);
+        this.startNewRun(false, nextStageId, true, false);
       },
       onRetry: () => {
         if (this.mp.mode !== 'offline' && this.mp.peerConnected && this.peer) {
@@ -259,7 +288,7 @@ export class Game {
             this.peer.name,
           );
         } else {
-          this.startNewRun(false, this.currentStageId, this.blessings.ids.length > 0);
+          this.startNewRun(false, this.currentStageId, this.blessings.ids.length > 0, false);
         }
       },
       onBackToTitle: () => {
@@ -300,6 +329,39 @@ export class Game {
         this.hud.setMpLobbyStatus('已离开联机房间', false, false);
         this.hud.setMpHudBadge('');
       },
+      onShopBuy: (itemId) => {
+        const res = this.saveStore.buyItem(itemId);
+        if (res.ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playDropChime('spirit');
+          triggerHaptic('medium');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
+      onShopEquip: (itemId) => {
+        const ok = this.saveStore.equipItem(itemId);
+        if (ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playDropChime('spirit');
+          triggerHaptic('light');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return ok;
+      },
+      onShopUpgrade: (itemId) => {
+        const res = this.saveStore.upgradeItem(itemId);
+        if (res.ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playParry();
+          triggerHaptic('heavy');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
     });
 
     this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
@@ -313,9 +375,9 @@ export class Game {
       this.enterShowcaseMode();
     } else if (params.has('boss')) {
       this.hud.selectStage(20);
-      this.startNewRun(true, 20);
+      this.startNewRun(true, 20, false, true);
     } else if (params.has('auto')) {
-      this.startNewRun(false, 1);
+      this.startNewRun(false, 1, false, true);
     } else {
       this.enterTitleMode();
     }
@@ -404,9 +466,46 @@ export class Game {
     }
   }
 
+  private getLoadoutStats(): HeroLoadoutStats {
+    return this.saveStore.getLoadoutStats();
+  }
+
+  private applyCurrentLoadoutVisuals(): void {
+    const equipped = this.saveStore.getEquipped();
+    this.hero.rig.applyHeroAppearance(
+      getEquippedSkinVisual(equipped),
+      getEquippedWeaponVisual(equipped),
+    );
+  }
+
+  private syncLiveHeroCapsFromLoadout(): void {
+    const realm = getSwordRealm(this.saveStore.getTotalStars());
+    const loadout = this.getLoadoutStats();
+    const h = this.hero;
+    const prevMaxHp = h.maxHp;
+    const nextMaxHp = 180 + realm.hpBonus + loadout.maxHpBonus + this.blessings.maxHpBonus;
+    h.maxHp = nextMaxHp;
+    if (nextMaxHp > prevMaxHp) {
+      h.hp = Math.min(h.maxHp, h.hp + (nextMaxHp - prevMaxHp));
+      h.delayedHp = h.hp;
+    } else {
+      h.hp = Math.min(h.maxHp, h.hp);
+      h.delayedHp = Math.min(h.maxHp, h.delayedHp);
+    }
+    const nextMaxGourds = 3 + loadout.gourdBonus + this.blessings.extraGourds;
+    if (nextMaxGourds > h.maxGourds) {
+      h.gourds += nextMaxGourds - h.maxGourds;
+    }
+    h.maxGourds = nextMaxGourds;
+    h.gourds = Math.min(h.maxGourds, h.gourds);
+  }
+
   private enterTitleMode(): void {
     this.clearCombatEntities();
+    this.targetRingMesh.visible = false;
+    this.pendingCutsceneAfterDialogue = false;
     this.resetHero(new THREE.Vector3(0, 0, 2.2), Math.PI);
+    this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(false);
     this.arena.setStageTheme(1);
     this.scene.background = new THREE.Color('#0c1522');
@@ -421,7 +520,9 @@ export class Game {
 
   private enterShowcaseMode(): void {
     this.clearCombatEntities();
+    this.targetRingMesh.visible = false;
     this.resetHero(new THREE.Vector3(-0.95, 0, 0.55), 0.16);
+    this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(true);
     const demoBoss = this.spawnEnemy('boss', 1.15, -0.35);
     demoBoss.yaw = -0.22;
@@ -434,7 +535,7 @@ export class Game {
     this.cameraRig.updateShowcase(new THREE.Vector3(0.1, 0, 0.25), 0);
   }
 
-  private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false): void {
+  private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false, skipDialogue = false): void {
     this.audio.unlock();
     this.clearCombatEntities();
     if (!keepBlessings) {
@@ -443,6 +544,7 @@ export class Game {
     const targetStage = jumpToBoss ? 20 : clamp(Math.floor(stageId), 1, 20);
     this.saveStore.setLastPlayed(targetStage);
     this.resetHero(new THREE.Vector3(0, 0, jumpToBoss ? 7.2 : 8.8), Math.PI);
+    this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(true);
     this.runElapsed = 0;
     this.timeScale = 1;
@@ -450,9 +552,31 @@ export class Game {
     this.coopDowned = false;
     this.pvpResultDecided = false;
 
-    this.enterStage(targetStage, !jumpToBoss, true, jumpToBoss);
+    this.enterStage(targetStage, !jumpToBoss, true, jumpToBoss, !skipDialogue && !jumpToBoss);
     this.cameraRig.snapTo(this.hero.pos);
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer);
+  }
+
+  confirmStageDialogue(): boolean {
+    if (this.mode !== 'dialogue') return false;
+    this.audio.unlock();
+    this.audio.playDropChime('spirit');
+    const stageDef = getStageDef(this.currentStageId);
+    const chDef = getChapterDef(stageDef.chapter);
+    const boss = this.getActiveBoss();
+    if (this.pendingCutsceneAfterDialogue && boss) {
+      this.pendingCutsceneAfterDialogue = false;
+      this.mode = 'cutscene';
+      this.hud.setMode('cutscene');
+      this.audio.setDucked(true);
+      this.cameraRig.startCutscene(boss.pos, 2.55);
+    } else {
+      this.mode = 'playing';
+      this.hud.setMode('playing');
+    }
+    this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.4);
+    this.hud.showSubtitle(stageDef.introLine, 3.0);
+    return true;
   }
 
   private startMultiplayerMatch(mode: 'coop' | 'solo', stageId: number, peerName: string): void {
@@ -524,7 +648,13 @@ export class Game {
     }
   }
 
-  private enterStage(stageId: number, withCutscene: boolean, spawnAuthority = true, jumpLastWave = false): void {
+  private enterStage(
+    stageId: number,
+    withCutscene: boolean,
+    spawnAuthority = true,
+    jumpLastWave = false,
+    showDialogue = false,
+  ): void {
     this.clearCombatEntities();
     this.currentStageId = clamp(Math.floor(stageId), 1, 20);
     const stageDef = getStageDef(this.currentStageId);
@@ -533,6 +663,7 @@ export class Game {
     this.stagePhase = 'combat';
     this.stageTimer = 0;
     this.hazardTimer = stageDef.hazardIntervalSec ? stageDef.hazardIntervalSec * 0.75 : 0;
+    this.pendingCutsceneAfterDialogue = false;
 
     this.arena.setStageTheme(this.currentStageId, chDef);
     this.scene.background = new THREE.Color(chDef.bgHex);
@@ -540,8 +671,6 @@ export class Game {
 
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     this.hud.setRealmAndBlessings(realm.title, this.blessings.ids.length);
-    this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.6);
-    this.hud.showSubtitle(stageDef.introLine, 3.4);
 
     if (stageDef.isBossStage) {
       this.audio.setMood('boss1');
@@ -550,8 +679,21 @@ export class Game {
     }
 
     if (spawnAuthority) {
-      this.spawnWave(stageDef, this.currentWaveIdx, withCutscene);
+      if (showDialogue && this.mp.mode === 'offline') {
+        this.spawnWave(stageDef, this.currentWaveIdx, false);
+        const bossEntity = this.getActiveBoss();
+        const isFinalBossWave = this.currentWaveIdx === stageDef.waves.length - 1 && stageDef.bossCutscene && bossEntity;
+        this.pendingCutsceneAfterDialogue = Boolean(withCutscene && isFinalBossWave);
+        this.mode = 'dialogue';
+        this.hud.showStageDialogue(getStageDialogue(this.currentStageId));
+      } else {
+        this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.6);
+        this.hud.showSubtitle(stageDef.introLine, 3.4);
+        this.spawnWave(stageDef, this.currentWaveIdx, withCutscene);
+      }
     } else {
+      this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.6);
+      this.hud.showSubtitle(stageDef.introLine, 3.4);
       this.mode = 'playing';
       this.hud.setMode('playing');
     }
@@ -622,9 +764,10 @@ export class Game {
 
   private resetHero(pos: THREE.Vector3, yaw: number): void {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
+    const loadout = this.getLoadoutStats();
     const h = this.hero;
-    h.maxHp = 180 + realm.hpBonus + this.blessings.maxHpBonus;
-    h.maxGourds = 3 + this.blessings.extraGourds;
+    h.maxHp = 180 + realm.hpBonus + loadout.maxHpBonus + this.blessings.maxHpBonus;
+    h.maxGourds = 3 + loadout.gourdBonus + this.blessings.extraGourds;
     h.pos.copy(pos);
     h.vel.set(0, 0, 0);
     h.yaw = yaw;
@@ -648,6 +791,7 @@ export class Game {
     h.combatIdleTimer = 0;
     h.counterTargetId = null;
     h.counterWindowTimer = 0;
+    h.shadowStrikeTimer = 0;
     h.cdQ = 0;
     h.cdE = 0;
     h.cdR = 0;
@@ -659,6 +803,8 @@ export class Game {
     h.maxCombo = 0;
     h.parryCount = 0;
     h.totalDamage = 0;
+    h.stageJadeEarned = 0;
+    this.shadowAttackActive = false;
     h.rig.root.position.copy(pos);
     h.rig.root.rotation.y = yaw;
     h.rig.applyPose('combatIdle', 0, 0, 0.016, 0);
@@ -763,6 +909,29 @@ export class Game {
       return;
     }
 
+    if (this.mode === 'dialogue') {
+      const lead = this.enemies.find((e) => e.aiState !== 'dead') ?? null;
+      if (lead) {
+        lead.yaw = Math.atan2(this.hero.pos.x - lead.pos.x, this.hero.pos.z - lead.pos.z);
+        lead.rig.root.rotation.y = lead.yaw;
+        this.hero.yaw = Math.atan2(lead.pos.x - this.hero.pos.x, lead.pos.z - this.hero.pos.z);
+        this.hero.rig.root.rotation.y = this.hero.yaw;
+      }
+      this.hero.rig.applyPose('combatIdle', 0, this.elapsed, animDt, 0);
+      for (const e of this.enemies) {
+        e.rig.applyPose('combatIdle', 0, this.elapsed, animDt, 0);
+        if (e.hpBarGroup.visible) e.hpBarGroup.quaternion.copy(this.camera.quaternion);
+      }
+      this.targetRingMesh.visible = false;
+      this.arena.update(animDt, this.elapsed, this.hero.pos);
+      this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, lead?.pos ?? null, { x: 0, y: 0 });
+      this.audio.updateMusic(rawDt);
+      if (doRender) this.pipeline.render();
+      this.input.endFrame();
+      this.publishDiagnostics();
+      return;
+    }
+
     if (this.mode === 'paused') {
       if (doRender) this.pipeline.render();
       this.input.endFrame();
@@ -837,8 +1006,10 @@ export class Game {
             : null;
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, focusPos, this.input.mouseNdc);
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
-      this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer);
+      const threat = this.updateTargetRingAndThreat(rawDt);
+      this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer, threat);
     } else {
+      this.targetRingMesh.visible = false;
       this.updatePeerHero(dt * 0.5);
       this.vfx.update(dt * 0.5, this.elapsed, this.hero.pos);
       this.arena.update(dt * 0.5, this.elapsed, this.hero.pos);
@@ -927,6 +1098,7 @@ export class Game {
   private updateHero(dt: number): void {
     const h = this.hero;
     const realm = getSwordRealm(this.saveStore.getTotalStars());
+    const loadout = this.getLoadoutStats();
 
     if (h.delayedHp > h.hp) {
       h.delayedHp = Math.max(h.hp, h.delayedHp - dt * 55);
@@ -942,6 +1114,7 @@ export class Game {
     h.hurtInvuln = Math.max(0, h.hurtInvuln - dt);
     h.comboWindowTimer = Math.max(0, h.comboWindowTimer - dt);
     h.counterWindowTimer = Math.max(0, h.counterWindowTimer - dt);
+    h.shadowStrikeTimer = Math.max(0, h.shadowStrikeTimer - dt);
     if (h.counterWindowTimer <= 0) h.counterTargetId = null;
 
     if (h.comboDecayTimer > 0) {
@@ -949,7 +1122,7 @@ export class Game {
       if (h.comboDecayTimer <= 0) h.comboCount = 0;
     }
 
-    h.spirit = Math.min(h.maxSpirit, h.spirit + dt * 6.5 * realm.spiritRegenMult);
+    h.spirit = Math.min(h.maxSpirit, h.spirit + dt * 6.5 * realm.spiritRegenMult * loadout.spiritRegenMult);
     if (h.state !== 'block' && h.state !== 'dodge') {
       h.stamina = Math.min(h.maxStamina, h.stamina + dt * 28);
     }
@@ -1094,12 +1267,12 @@ export class Game {
 
     if ((isFree || isAttackCancelable) && this.input.consumeAction('attack')) {
       this.rmbMoveTarget = null;
-      const nextStep = h.comboWindowTimer > 0 && h.comboStep < 3 ? h.comboStep + 1 : 1;
+      const nextStep = h.shadowStrikeTimer > 0 ? 1 : h.comboWindowTimer > 0 && h.comboStep < 4 ? h.comboStep + 1 : 1;
       this.startHeroAttack(nextStep);
     }
 
     if (h.state === 'idle' || h.state === 'run') {
-      const speed = 7.4 * this.blessings.speedMult;
+      const speed = 7.4 * this.blessings.speedMult * loadout.speedMult;
       const moving = Math.hypot(this.moveVec.x, this.moveVec.z) > 0.05;
       if (moving) {
         h.state = 'run';
@@ -1152,38 +1325,93 @@ export class Game {
     }
   }
 
+  private updateTargetRingAndThreat(dt: number): CombatThreatState {
+    const h = this.hero;
+    const lockEnemy = this.findNearestEnemy(16);
+    if (lockEnemy) {
+      this.targetRingMesh.visible = true;
+      this.targetRingMesh.position.set(lockEnemy.pos.x, 0.06, lockEnemy.pos.z);
+      this.targetRingMesh.rotation.z += dt * (lockEnemy.aiState === 'windup' ? 6.5 : 2.2);
+      const pulse = lockEnemy.aiState === 'windup' ? 1.0 + Math.sin(this.elapsed * 22) * 0.14 : 1.0;
+      const baseScale = lockEnemy.radius / 0.56;
+      this.targetRingMesh.scale.setScalar(baseScale * pulse);
+      const ringMat = this.targetRingMesh.material as THREE.MeshBasicMaterial;
+      if (lockEnemy.aiState === 'windup') {
+        ringMat.color.set(lockEnemy.moveUnblockable ? '#ff3a4f' : '#ffba42');
+        ringMat.opacity = 0.92;
+      } else {
+        ringMat.color.set('#4cd9d0');
+        ringMat.opacity = 0.68;
+      }
+    } else {
+      this.targetRingMesh.visible = false;
+    }
+
+    let threat: CombatThreatState = 'none';
+    for (const e of this.enemies) {
+      if (e.aiState !== 'windup') continue;
+      const dHero = Math.hypot(e.pos.x - h.pos.x, e.pos.z - h.pos.z);
+      const dCircle = Math.hypot(e.telegraphPos.x - h.pos.x, e.telegraphPos.z - h.pos.z);
+      if (e.moveUnblockable && (dHero <= e.moveRange + 2.5 || dCircle <= e.moveRange + 1.4)) {
+        return 'unblockable';
+      }
+      if (!e.moveUnblockable && dHero <= Math.max(6.8, e.moveRange + 2.2)) {
+        threat = 'parryable';
+      }
+    }
+    return threat;
+  }
+
   private getHeroDamageScale(): number {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
-    return realm.dmgMult * this.blessings.dmgMult;
+    const loadout = this.getLoadoutStats();
+    return realm.dmgMult * loadout.dmgMult * this.blessings.dmgMult;
   }
 
   private startHeroAttack(step: number): void {
     const h = this.hero;
+    const isShadowStrike = h.shadowStrikeTimer > 0;
+    this.shadowAttackActive = isShadowStrike;
+    if (isShadowStrike) {
+      h.shadowStrikeTimer = 0;
+      this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.55, 2.35, 2.45), h.rig.root);
+      this.spawnWorldCallout('瞬影斩!', h.pos, 'parry');
+      triggerHaptic('medium');
+    }
+
     h.state = 'attack';
     h.comboStep = step;
     h.stateTime = 0;
-    h.stateDuration = step === 3 ? 0.62 : step === 2 ? 0.46 : 0.42;
-    h.comboWindowTimer = h.stateDuration + 0.35;
+    h.stateDuration = isShadowStrike
+      ? 0.4
+      : step === 4
+        ? 0.64
+        : step === 3
+          ? 0.56
+          : step === 2
+            ? 0.44
+            : 0.4;
+    h.comboWindowTimer = h.stateDuration + 0.42;
     h.attackHasHit.clear();
     h.attackVfxFired = false;
     h.rig.setWeaponDrawn(true);
-    h.rig.setSwordGlow(step === 3 ? 2.1 : 1.55);
+    h.rig.setSwordGlow(isShadowStrike || step >= 3 ? 2.2 : 1.55);
 
     const aimYaw = this.getAimYaw();
-    const tgt = this.findCombatTarget(6.2, aimYaw);
+    const tgt = this.findCombatTarget(isShadowStrike ? 9.5 : 6.4, aimYaw);
     if (tgt) {
       h.magnetTargetId = tgt.enemy ? tgt.enemy.id : -999;
       const dx = tgt.x - h.pos.x;
       const dz = tgt.z - h.pos.z;
       h.yaw = Math.atan2(dx, dz);
-      const standOff = tgt.radius + h.radius + 1.15;
-      h.magnetSlideRemain = clamp(Math.hypot(dx, dz) - standOff, 0, 2.3);
+      const standOff = tgt.radius + h.radius + 1.1;
+      h.magnetSlideRemain = clamp(Math.hypot(dx, dz) - standOff, 0, isShadowStrike ? 4.5 : 2.5);
     } else {
       h.magnetTargetId = null;
-      h.magnetSlideRemain = 0.55;
+      h.magnetSlideRemain = isShadowStrike ? 2.1 : 0.55;
       h.yaw = aimYaw;
     }
-    this.audio.playSwordSwing(step);
+    this.audio.playSwordSwing(step >= 3 ? 3 : step);
     this.mp.sendAction('attack', { step, yaw: h.yaw, x: h.pos.x, z: h.pos.z });
   }
 
@@ -1193,7 +1421,7 @@ export class Game {
     const p = clamp(h.stateTime / h.stateDuration, 0, 1);
 
     if (p < 0.56 && h.magnetSlideRemain > 0.01) {
-      let stepDist = Math.min(h.magnetSlideRemain, dt * 8.5);
+      let stepDist = Math.min(h.magnetSlideRemain, dt * (this.shadowAttackActive ? 14.5 : 9.2));
       if (h.magnetTargetId === -999 && this.peer && !this.peer.dead) {
         const dist = Math.hypot(this.peer.pos.x - h.pos.x, this.peer.pos.z - h.pos.z);
         const standOff = this.peer.radius + h.radius + 1.1;
@@ -1218,18 +1446,22 @@ export class Game {
     const poseName: PoseName = h.comboStep === 1 ? 'combo1' : h.comboStep === 2 ? 'combo2' : 'combo3';
     h.rig.applyPose(poseName, p, this.elapsed, dt, 2);
 
-    const activeStart = h.comboStep === 3 ? 0.42 : 0.36;
-    const activeEnd = h.comboStep === 3 ? 0.68 : 0.62;
+    const activeStart = h.comboStep >= 3 ? 0.38 : 0.34;
+    const activeEnd = h.comboStep >= 3 ? 0.7 : 0.64;
     if (!h.attackVfxFired && p >= activeStart) {
       h.attackVfxFired = true;
-      this.spawnSwordComboVfx(h.pos, h.yaw, h.comboStep);
+      this.spawnSwordComboVfx(h.pos, h.yaw, this.shadowAttackActive ? 4 : h.comboStep);
+      if (h.comboStep === 4) {
+        this.spawnFlyingSwordProjectile(h.pos, h.yaw, true);
+      }
     }
 
     if (p >= activeStart && p <= activeEnd) {
-      const reach = h.comboStep === 3 ? 3.45 : 3.05;
-      const halfCone = h.comboStep === 2 ? 1.55 : 1.18;
-      const baseDmg = Math.round((h.comboStep === 3 ? 36 : h.comboStep === 2 ? 22 : 18) * this.getHeroDamageScale());
-      const heavy = h.comboStep === 3;
+      const reach = this.shadowAttackActive || h.comboStep >= 3 ? 3.55 : 3.1;
+      const halfCone = h.comboStep === 2 || h.comboStep === 4 ? 1.55 : 1.2;
+      const rawMultiplier = this.shadowAttackActive ? 42 : h.comboStep === 4 ? 44 : h.comboStep === 3 ? 34 : h.comboStep === 2 ? 23 : 19;
+      const baseDmg = Math.round(rawMultiplier * this.getHeroDamageScale());
+      const heavy = this.shadowAttackActive || h.comboStep >= 3;
 
       this.tryDeflectProjectiles(reach, halfCone);
 
@@ -1243,7 +1475,15 @@ export class Game {
         if (diff > halfCone && dist > 1.25) continue;
 
         h.attackHasHit.add(e.id);
-        this.applyHeroAttackToEnemy(e, baseDmg, heavy, h.yaw, heavy ? 22 : 10, false, `combo${h.comboStep}`);
+        this.applyHeroAttackToEnemy(
+          e,
+          baseDmg,
+          heavy,
+          h.yaw,
+          this.shadowAttackActive ? 38 : heavy ? 24 : 11,
+          this.shadowAttackActive || h.comboStep === 4,
+          `combo${h.comboStep}`,
+        );
       }
 
       if (this.mp.mode === 'solo' && this.peer && !this.peer.dead && !h.attackHasHit.has(-999)) {
@@ -1253,26 +1493,36 @@ export class Game {
         const diff = Math.abs(angleDiff(h.yaw, Math.atan2(dx, dz)));
         if (dist <= reach + this.peer.radius && (diff <= halfCone || dist <= 1.25)) {
           h.attackHasHit.add(-999);
-          this.sendPvpStrike(h.comboStep === 3 ? 32 : h.comboStep === 2 ? 20 : 16, heavy ? 24 : 12, heavy, h.yaw, `combo${h.comboStep}`);
+          this.sendPvpStrike(
+            this.shadowAttackActive ? 38 : h.comboStep === 4 ? 36 : h.comboStep === 3 ? 30 : h.comboStep === 2 ? 20 : 16,
+            heavy ? 24 : 12,
+            heavy,
+            h.yaw,
+            `combo${h.comboStep}`,
+          );
         }
       }
     }
 
     if (p >= 1) {
       h.state = 'idle';
+      this.shadowAttackActive = false;
       h.rig.setSwordGlow(0.85);
     }
   }
 
   private spawnSwordComboVfx(pos: THREE.Vector3, yaw: number, comboStep: number): void {
+    const wVis = getEquippedWeaponVisual(this.saveStore.getEquipped());
+    const core = new THREE.Color(...wVis.trailCore);
+    const edge = new THREE.Color(...wVis.trailEdge);
     const arcPos = pos.clone().add(new THREE.Vector3(0, 1.05, 0));
     if (comboStep === 1) {
       this.vfx.spawnSwordArc({
         pos: arcPos,
         yaw,
         tiltZ: -0.45,
-        colorCore: new THREE.Color(1.4, 2.25, 2.35),
-        colorEdge: new THREE.Color(0.22, 0.95, 1.35),
+        colorCore: core,
+        colorEdge: edge,
       });
     } else if (comboStep === 2) {
       this.vfx.spawnSwordArc({
@@ -1281,24 +1531,24 @@ export class Game {
         tiltZ: 0.25,
         reverse: true,
         wide: true,
-        colorCore: new THREE.Color(1.5, 2.3, 2.2),
-        colorEdge: new THREE.Color(0.28, 1.05, 1.25),
+        colorCore: core,
+        colorEdge: edge,
       });
     } else {
       this.vfx.spawnSwordArc({
         pos: arcPos.add(new THREE.Vector3(Math.sin(yaw) * 0.5, 0.15, Math.cos(yaw) * 0.5)),
         yaw,
-        tiltZ: Math.PI * 0.5,
+        tiltZ: comboStep === 4 ? 0.12 : Math.PI * 0.5,
         wide: true,
-        scale: 1.12,
-        colorCore: new THREE.Color(2.3, 1.9, 0.78),
-        colorEdge: new THREE.Color(0.35, 1.65, 1.85),
-        duration: 0.42,
+        scale: comboStep === 4 ? 1.28 : 1.12,
+        colorCore: new THREE.Color(2.35, 1.95, 0.78),
+        colorEdge: edge,
+        duration: 0.44,
       });
       const slamPos = pos.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.1, 0.08, Math.cos(yaw) * 2.1));
-      this.vfx.spawnShockRing(slamPos, new THREE.Color(1.8, 2.1, 1.5), 0.35, 3.2, 0.38);
-      this.vfx.spawnGroundCrater(slamPos, 1.65, new THREE.Color(1.8, 1.45, 0.55), 2.4);
-      this.cameraRig.addShake(0.28);
+      this.vfx.spawnShockRing(slamPos, core, 0.35, comboStep === 4 ? 3.8 : 3.2, 0.38);
+      this.vfx.spawnGroundCrater(slamPos, 1.65, edge, 2.4);
+      this.cameraRig.addShake(comboStep === 4 ? 0.34 : 0.26);
     }
   }
 
@@ -1308,7 +1558,7 @@ export class Game {
     h.stateTime = 0;
     h.stateDuration = 0.36;
     h.hitstopTimer = 0;
-    h.dodgeInvuln = 0.34;
+    h.dodgeInvuln = 0.36;
     h.dodgePerfectTriggered = false;
     h.afterimageTimer = 0;
     h.stamina = Math.max(0, h.stamina - 18);
@@ -1321,16 +1571,17 @@ export class Game {
       h.dodgeDir.set(Math.sin(h.yaw), 0, Math.cos(h.yaw));
     }
     this.audio.playDodge(false);
-    this.vfx.spawnAfterimage(h.pos, h.yaw);
+    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.32, 1.65, 1.95), h.rig.root);
     triggerHaptic('light');
     this.mp.sendAction('dodge', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
   }
 
   private tickHeroDodge(dt: number, prevPos: THREE.Vector3): void {
     const h = this.hero;
+    const loadout = this.getLoadoutStats();
     h.stateTime += dt;
     const p = clamp(h.stateTime / h.stateDuration, 0, 1);
-    const speed = 15.8 * this.blessings.speedMult * (1 - p * 0.45);
+    const speed = 15.8 * this.blessings.speedMult * loadout.speedMult * (1 - p * 0.45);
     h.pos.addScaledVector(h.dodgeDir, speed * dt);
     this.arena.constrainPosition(h.pos, h.radius, prevPos);
     h.rig.root.position.copy(h.pos);
@@ -1338,9 +1589,9 @@ export class Game {
     h.rig.applyPose('dodge', p, this.elapsed, dt, speed);
 
     h.afterimageTimer += dt;
-    if (h.afterimageTimer >= 0.065) {
+    if (h.afterimageTimer >= 0.085) {
       h.afterimageTimer = 0;
-      this.vfx.spawnAfterimage(h.pos, h.yaw);
+      this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.32, 1.65, 1.95), h.rig.root);
     }
 
     if (p >= 1) h.state = 'idle';
@@ -1358,7 +1609,8 @@ export class Game {
     h.dodgeInvuln = 0.6;
     h.magnetTargetId = target.id;
 
-    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(2.2, 1.8, 0.55));
+    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(2.2, 1.8, 0.55), h.rig.root);
+    this.audio.playHeroVoice('counter');
     const dx = target.pos.x - h.pos.x;
     const dz = target.pos.z - h.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -1392,7 +1644,8 @@ export class Game {
     h.dodgeInvuln = 0.6;
     h.magnetTargetId = -999;
 
-    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(2.2, 1.8, 0.55));
+    this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(2.2, 1.8, 0.55), h.rig.root);
+    this.audio.playHeroVoice('counter');
     const dx = this.peer.pos.x - h.pos.x;
     const dz = this.peer.pos.z - h.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -1452,8 +1705,9 @@ export class Game {
 
   private startSkillQ(): void {
     const h = this.hero;
+    const loadout = this.getLoadoutStats();
     h.spirit -= 20;
-    h.cdQ = 3.5 * this.blessings.cdMult;
+    h.cdQ = 3.5 * this.blessings.cdMult * loadout.cdMult;
     h.state = 'skillQ';
     h.stateTime = 0;
     h.stateDuration = 0.34;
@@ -1464,6 +1718,8 @@ export class Game {
     h.yaw = tgt ? Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z) : aimYaw;
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillQ();
+    const qLine = this.audio.playHeroVoice('skillQ');
+    if (qLine) this.hud.showSubtitle(`李逍遥：「${qLine}」`, 1.8);
     this.hud.triggerSkillPulse('Q');
     triggerHaptic('medium');
     this.mp.sendAction('skillQ', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
@@ -1471,8 +1727,9 @@ export class Game {
 
   private startSkillE(): void {
     const h = this.hero;
+    const loadout = this.getLoadoutStats();
     h.spirit -= 45;
-    h.cdE = 7.5 * this.blessings.cdMult;
+    h.cdE = 7.5 * this.blessings.cdMult * loadout.cdMult;
     h.state = 'skillE';
     h.stateTime = 0;
     h.stateDuration = 0.52;
@@ -1482,14 +1739,17 @@ export class Game {
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillE();
+    const eLine = this.audio.playHeroVoice('skillE');
+    if (eLine) this.hud.showSubtitle(`李逍遥：「${eLine}」`, 2.2);
     this.hud.triggerSkillPulse('E');
     triggerHaptic('heavy');
   }
 
   private startSkillR(): void {
     const h = this.hero;
+    const loadout = this.getLoadoutStats();
     h.ult = 0;
-    h.cdR = 12.0 * this.blessings.cdMult;
+    h.cdR = 12.0 * this.blessings.cdMult * loadout.cdMult;
     h.state = 'skillR';
     h.stateTime = 0;
     h.stateDuration = 0.85;
@@ -1500,9 +1760,10 @@ export class Game {
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillR();
+    const rLine = this.audio.playHeroVoice('skillR');
     this.hud.triggerSkillPulse('R');
     triggerHaptic('ultimate');
-    this.hud.showSubtitle('「剑意凌霄——天剑降世！」', 2.0);
+    this.hud.showSubtitle(`李逍遥：「${rLine || '仗剑红尘已是癫——天剑，降世！'}」`, 2.6);
   }
 
   private startDrinkGourd(): void {
@@ -1512,6 +1773,7 @@ export class Game {
     h.stateDuration = 0.68;
     h.cdHeal = 1.5;
     h.attackVfxFired = false;
+    this.audio.playHeroVoice('heal');
     this.hud.triggerSkillPulse('F');
     triggerHaptic('light');
   }
@@ -1706,24 +1968,31 @@ export class Game {
   ): void {
     if (e.aiState === 'dead') return;
     const h = this.hero;
+    const loadout = this.getLoadoutStats();
 
     let interrupted = false;
     if (e.aiState === 'windup' && e.stateTime / Math.max(0.1, e.stateDuration) >= 0.42) {
       interrupted = true;
     }
 
-    const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0));
+    const rolledCrit = isCrit || (fromLocalHero && this.rng() < loadout.critRate);
+    const critScale = rolledCrit ? loadout.critMult : 1.0;
+    const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0) * critScale);
+    const scaledPoise = poiseGain * (interrupted ? 1.6 : 1.0) * (fromLocalHero ? loadout.poiseMult : 1.0);
     e.hp = Math.max(0, e.hp - dmg);
-    e.poise = Math.min(e.maxPoise, e.poise + poiseGain * (interrupted ? 1.6 : 1.0));
+    e.poise = Math.min(e.maxPoise, e.poise + scaledPoise);
 
     if (fromLocalHero) {
       h.spirit = Math.min(h.maxSpirit, h.spirit + (heavy ? 12 : 7));
-      h.ult = Math.min(100, h.ult + (heavy ? 12 : 6) * this.blessings.ultGainMult);
+      h.ult = Math.min(100, h.ult + (heavy ? 12 : 6) * this.blessings.ultGainMult * loadout.ultGainMult);
       h.comboCount += 1;
       h.comboDecayTimer = 3.2;
       h.maxCombo = Math.max(h.maxCombo, h.comboCount);
       h.totalDamage += dmg;
-      triggerHaptic(heavy || interrupted ? 'medium' : 'light');
+      if (loadout.lifesteal > 0 && h.hp > 0 && h.hp < h.maxHp) {
+        h.hp = Math.min(h.maxHp, h.hp + Math.max(1, Math.round(dmg * loadout.lifesteal)));
+      }
+      triggerHaptic(heavy || interrupted || rolledCrit ? 'medium' : 'light');
     }
 
     const hitstop = heavy ? 0.1 : 0.062;
@@ -1738,18 +2007,20 @@ export class Game {
     this.vfx.spawnHitSparks(
       contactPos,
       tangent,
-      isCrit || interrupted ? new THREE.Color(2.4, 1.9, 0.5) : new THREE.Color(1.4, 2.2, 2.3),
-      heavy ? 16 : 10,
+      rolledCrit || interrupted ? new THREE.Color(2.4, 1.9, 0.5) : new THREE.Color(1.4, 2.2, 2.3),
+      heavy || rolledCrit ? 16 : 10,
       this.rng,
     );
 
-    this.audio.playHit(heavy || interrupted);
+    this.audio.playHit(heavy || interrupted || rolledCrit);
     this.cameraRig.addShake(heavy ? 0.32 : 0.14);
 
     if (interrupted) {
       this.spawnWorldCallout(`破招 ${dmg}!`, e.pos, 'parry');
+    } else if (rolledCrit) {
+      this.spawnWorldCallout(`暴击 ${dmg}!`, e.pos, 'crit');
     } else {
-      this.spawnWorldCallout(`${dmg}`, e.pos, isCrit || heavy ? 'crit' : 'dmg');
+      this.spawnWorldCallout(`${dmg}`, e.pos, heavy ? 'crit' : 'dmg');
     }
 
     const kb = heavy ? (e.kind === 'boss' ? 1.8 : e.kind === 'elite' ? 2.6 : 4.2) : e.kind === 'boss' ? 0.4 : 1.6;
@@ -1823,6 +2094,21 @@ export class Game {
     } else {
       this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
       this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
+    }
+
+    const loadout = this.getLoadoutStats();
+    if (loadout.killHealPct > 0 && this.hero.hp > 0) {
+      const heal = Math.max(6, Math.round(this.hero.maxHp * loadout.killHealPct));
+      this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + heal);
+      this.spawnWorldCallout(`嗜血 +${heal}`, this.hero.pos, 'heal');
+    }
+
+    if (this.mp.mode === 'offline') {
+      const baseJade = e.kind === 'boss' ? 120 : e.kind === 'elite' ? 45 : e.kind === 'caster' ? 24 : 14;
+      const jadeDrop = baseJade + Math.min(18, Math.floor(this.hero.comboCount * 0.5));
+      this.hero.stageJadeEarned += jadeDrop;
+      this.saveStore.addJade(jadeDrop);
+      this.spawnWorldCallout(`+${jadeDrop} 灵石`, e.pos.clone().add(new THREE.Vector3(0.45, 0.35, 0)), 'info');
     }
   }
 
@@ -2291,18 +2577,21 @@ export class Game {
     attackerWorldPos?: THREE.Vector3,
   ): boolean {
     const h = this.hero;
+    const loadout = this.getLoadoutStats();
     if (h.state === 'dead') return false;
 
     if (h.dodgeInvuln > 0) {
       if (!h.dodgePerfectTriggered && h.state === 'dodge') {
         h.dodgePerfectTriggered = true;
+        h.shadowStrikeTimer = 3.5;
         h.spirit = Math.min(h.maxSpirit, h.spirit + 22);
-        h.ult = Math.min(100, h.ult + 14 * this.blessings.ultGainMult);
+        h.ult = Math.min(100, h.ult + 14 * this.blessings.ultGainMult * loadout.ultGainMult);
         this.timeScale = 0.28;
-        this.slowMoTimer = 0.22;
+        this.slowMoTimer = 0.34;
         this.audio.playDodge(true);
-        this.vfx.spawnShockRing(h.pos, new THREE.Color(0.45, 2.1, 2.2), 0.25, 2.4, 0.35);
-        this.spawnWorldCallout('极限闪避!', h.pos, 'info');
+        this.audio.playHeroVoice('dodge');
+        this.vfx.spawnShockRing(h.pos, new THREE.Color(0.45, 2.1, 2.2), 0.25, 2.6, 0.35);
+        this.spawnWorldCallout('极限闪避 · 瞬影!', h.pos, 'info');
         triggerHaptic('medium');
       }
       return false;
@@ -2315,13 +2604,16 @@ export class Game {
       const fromYaw = refPos ? Math.atan2(refPos.x - h.pos.x, refPos.z - h.pos.z) : h.yaw;
       const frontal = Math.abs(angleDiff(h.yaw, fromYaw)) < 1.65;
       if (frontal) {
-        if (h.blockElapsed <= 0.24) {
+        if (h.blockElapsed <= 0.26 + loadout.parryWindowBonus) {
           h.parryCount += 1;
-          h.spirit = Math.min(h.maxSpirit, h.spirit + 24);
-          h.ult = Math.min(100, h.ult + 22 * this.blessings.ultGainMult);
+          h.spirit = Math.min(h.maxSpirit, h.spirit + 24 + loadout.parrySpiritBonus);
+          h.ult = Math.min(100, h.ult + 22 * this.blessings.ultGainMult * loadout.ultGainMult);
+          if (loadout.parryHeal > 0) {
+            h.hp = Math.min(h.maxHp, h.hp + loadout.parryHeal);
+          }
           h.hitstopTimer = 0.13;
           this.audio.playParry();
-          this.cameraRig.addShake(0.42);
+          this.cameraRig.addShake(0.44);
           triggerHaptic('parry');
           const sparkPos = h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 0.7, 1.25, Math.cos(h.yaw) * 0.7));
           this.vfx.spawnParryBurst(sparkPos);
@@ -2335,12 +2627,16 @@ export class Game {
             attacker.telegraph = null;
             attacker.aiState = 'stagger';
             attacker.stateTime = 0;
-            attacker.stateDuration = 1.8;
+            attacker.stateDuration = 1.85;
             h.counterTargetId = attacker.id;
-            h.counterWindowTimer = 1.45;
+            h.counterWindowTimer = 1.5;
+            if (loadout.parryReflectBonus > 0 && attacker.hp > 0) {
+              const reflectDmg = Math.round(dmg * (1.2 + loadout.parryReflectBonus) * this.getHeroDamageScale());
+              this.damageEnemy(attacker, reflectDmg, true, h.yaw, 28, true, true);
+            }
           } else if (this.mp.mode === 'solo' && this.peer) {
             h.counterTargetId = -999;
-            h.counterWindowTimer = 1.45;
+            h.counterWindowTimer = 1.5;
           }
           return false;
         }
@@ -2371,8 +2667,9 @@ export class Game {
       }
     }
 
+    const finalDmg = Math.max(1, Math.round(dmg * (1 - loadout.dmgReduce)));
     if (!this.godMode) {
-      h.hp = Math.max(0, h.hp - dmg);
+      h.hp = Math.max(0, h.hp - finalDmg);
     }
     h.hurtInvuln = 0.48;
     h.comboCount = 0;
@@ -2380,7 +2677,7 @@ export class Game {
     this.audio.playHit(true);
     this.cameraRig.addShake(0.36);
     triggerHaptic('heavy');
-    this.spawnWorldCallout(`-${dmg}`, h.pos, 'crit');
+    this.spawnWorldCallout(`-${finalDmg}`, h.pos, 'crit');
 
     if (h.hp <= 0) {
       h.state = 'dead';
@@ -2618,7 +2915,10 @@ export class Game {
       this.hero.hp / Math.max(1, this.hero.maxHp),
       this.hero.parryCount,
     );
-    this.saveStore.recordClear(stageDef.id, starResult.stars, this.runElapsed, this.hero.maxCombo);
+    const { firstClear } = this.saveStore.recordClear(stageDef.id, starResult.stars, this.runElapsed, this.hero.maxCombo);
+    const clearBonus = 60 + stageDef.id * 16 + starResult.stars * 30 + (firstClear ? 90 : 0);
+    this.hero.stageJadeEarned += clearBonus;
+    this.saveStore.addJade(clearBonus);
     this.hud.syncCampaignProgress(this.saveStore, stageDef.id < 20 ? stageDef.id + 1 : 20);
 
     const nextStageId = stageDef.id < 20 ? stageDef.id + 1 : null;
@@ -2627,11 +2927,13 @@ export class Game {
     this.mode = 'victory';
     this.hud.clearSubtitle();
     this.hud.setMode('victory');
+    this.audio.playHeroVoice('victory');
     const opts: ResultDisplayOptions = {
       stageDef,
       starResult,
       nextStageId: this.mp.mode === 'offline' ? nextStageId : null,
       blessingChoices,
+      jadeEarned: this.hero.stageJadeEarned,
     };
     this.hud.showResult(true, this.runElapsed, this.hero, opts);
   }
@@ -2759,13 +3061,13 @@ export class Game {
       this.spawnSwordComboVfx(origin, yaw, step);
     } else if (kind === 'dodge') {
       this.audio.playDodge(false);
-      this.vfx.spawnAfterimage(origin, yaw);
+      this.vfx.spawnAfterimage(origin, yaw, new THREE.Color(0.35, 1.55, 1.85), p.rig.root);
     } else if (kind === 'parry') {
       this.audio.playParry();
       this.vfx.spawnParryBurst(origin.clone().setY(1.2));
     } else if (kind === 'parryCounter') {
       this.audio.playSwordSwing(3);
-      this.vfx.spawnAfterimage(origin, yaw, new THREE.Color(2.2, 1.8, 0.55));
+      this.vfx.spawnAfterimage(origin, yaw, new THREE.Color(2.2, 1.8, 0.55), p.rig.root);
     } else if (kind === 'skillQ') {
       this.audio.playSkillQ();
       this.spawnFlyingSwordProjectile(origin, yaw, this.mp.mode !== 'solo');
@@ -2899,14 +3201,14 @@ export class Game {
         if (name === 'title') {
           this.enterTitleMode();
         } else if (name === 'active-play') {
-          this.startNewRun(false, 1);
+          this.startNewRun(false, 1, false, true);
           this.hero.pos.set(0, 0, 2.8);
           this.hero.yaw = Math.PI;
           this.hero.rig.root.position.copy(this.hero.pos);
           this.startHeroAttack(1);
           this.stepFrame(0.18, false);
         } else if (name === 'boss-fight') {
-          this.startNewRun(true, 20);
+          this.startNewRun(true, 20, false, true);
           this.hero.pos.set(0, 0, 3.2);
           this.hero.yaw = Math.PI;
           this.hero.ult = 100;
@@ -2922,7 +3224,7 @@ export class Game {
         } else if (name === 'showcase') {
           this.enterShowcaseMode();
         } else if (name === 'complete') {
-          this.startNewRun(false, 20);
+          this.startNewRun(false, 20, false, true);
           this.clearCombatEntities();
           this.hud.clearSubtitle();
           this.hero.pos.set(0, 0, 1.5);
@@ -2939,7 +3241,7 @@ export class Game {
             stageDef: getStageDef(20),
           });
         } else if (name === 'defeat') {
-          this.startNewRun(false, 1);
+          this.startNewRun(false, 1, false, true);
           this.hud.clearSubtitle();
           this.hero.hp = 0;
           this.hero.state = 'dead';
@@ -3013,11 +3315,33 @@ export class Game {
       spawn: (kind: 'bladesman' | 'caster' | 'elite' | 'boss', x = 0, z = -3) => {
         this.spawnEnemy(kind, x, z);
       },
-      toBoss: () => this.startNewRun(true, 20),
-      toStage: (stage: number) => this.startNewRun(false, clamp(Math.floor(stage), 1, 20)),
+      toBoss: () => this.startNewRun(true, 20, false, true),
+      toStage: (stage: number) => this.startNewRun(false, clamp(Math.floor(stage), 1, 20), false, true),
       stageNum: () => this.currentStageId,
       wave: () => this.currentWaveIdx + 1,
       totalStars: () => this.saveStore.getTotalStars(),
+      jade: () => this.saveStore.getJade(),
+      buyItem: (id: string) => {
+        const res = this.saveStore.buyItem(id);
+        if (res.ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res.ok;
+      },
+      equipItem: (id: string) => {
+        const ok = this.saveStore.equipItem(id);
+        if (ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return ok;
+      },
+      confirmDialogue: () => this.confirmStageDialogue(),
+      vfxGhostStats: () => this.vfx.getGhostStats(),
+      version: APP_VERSION,
       openMap: (chapterId?: 1 | 2 | 3 | 4) => this.hud.openCampaignMap(chapterId),
       clearCurrentStage: () => {
         for (const e of this.enemies) {

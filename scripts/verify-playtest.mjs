@@ -21,13 +21,19 @@ async function main() {
     const titleMode = await page.evaluate(() => window.G.mode());
     if (titleMode !== 'title') throw new Error(`Expected title mode, got ${titleMode}`);
 
-    // Click Start button via real user click
+    // Click Start button via real user click -> must enter 'dialogue' mode first!
     await page.click('#btn-start');
+    await page.evaluate(() => window.G.step(8, 1 / 60));
+    const dlgMode = await page.evaluate(() => window.G.mode());
+    if (dlgMode !== 'dialogue') throw new Error(`Expected dialogue mode, got ${dlgMode}`);
+
+    // Click Dialogue Confirm button -> enters 'playing' mode!
+    await page.click('#btn-dialogue-confirm');
     await page.evaluate(() => window.G.step(12, 1 / 60));
     const playMode = await page.evaluate(() => window.G.mode());
     if (playMode !== 'playing') throw new Error(`Expected playing mode, got ${playMode}`);
 
-    // Move forward & execute 3-hit combo + Q + E + Dodge + Block
+    // Move forward & execute 4-hit combo + Q + E + Dodge + Block
     const beforePos = await page.evaluate(() => window.G.pl());
     await page.keyboard.down('KeyW');
     await page.evaluate(() => window.G.step(40, 1 / 60));
@@ -35,22 +41,24 @@ async function main() {
     const movedPos = await page.evaluate(() => window.G.pl());
     const distMoved = Math.hypot(movedPos.x - beforePos.x, movedPos.z - beforePos.z);
 
-    // Engage Wave 1 enemies with real attack & skills
+    // Engage Wave 1 enemies with 4-hit combo & skills
     const dmgCheck = await page.evaluate(() => {
       window.G.god(true);
       const startHp = window.G.enemies().reduce((s, e) => s + Number(e.hp), 0);
-      // Combo 1 -> 2 -> 3
+      // Combo 1 -> 2 -> 3 -> 4 (sword wave)
       window.G.press('KeyJ'); window.G.step(20, 1 / 60);
       window.G.press('KeyJ'); window.G.step(22, 1 / 60);
       window.G.press('KeyJ'); window.G.step(28, 1 / 60);
+      window.G.press('KeyJ'); window.G.step(30, 1 / 60);
       // Skill Q (御剑术)
       window.G.press('KeyQ'); window.G.step(25, 1 / 60);
       // Skill E (万剑诀)
       window.G.press('KeyE'); window.G.step(45, 1 / 60);
-      // Dodge (Space)
-      window.G.press('Space'); window.G.step(18, 1 / 60);
+      // Dodge (Space) + verify human silhouette afterimage
+      window.G.press('Space'); window.G.step(6, 1 / 60);
+      const ghostStats = window.G.vfxGhostStats();
       const afterHp = window.G.enemies().reduce((s, e) => s + Number(e.hp), 0);
-      return { startHp, afterHp, dealt: startHp - afterHp, pl: window.G.pl() };
+      return { startHp, afterHp, dealt: startHp - afterHp, ghostStats, pl: window.G.pl() };
     });
 
     // Test Boss Fight & Ultimate R (天剑)

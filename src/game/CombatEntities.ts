@@ -51,9 +51,10 @@ export interface HeroState {
   hitstopTimer: number;
   combatIdleTimer: number;
 
-  // Counter-execution window after block/parry
+  // Counter-execution & shadow-strike windows
   counterTargetId: number | null;
   counterWindowTimer: number;
+  shadowStrikeTimer: number;
 
   // Cooldowns
   cdQ: number;
@@ -71,6 +72,7 @@ export interface HeroState {
   maxCombo: number;
   parryCount: number;
   totalDamage: number;
+  stageJadeEarned: number;
 }
 
 export type EnemyAiState =
@@ -181,6 +183,7 @@ export function createHero(): HeroState {
 
     counterTargetId: null,
     counterWindowTimer: 0,
+    shadowStrikeTimer: 0,
 
     cdQ: 0,
     cdE: 0,
@@ -195,6 +198,7 @@ export function createHero(): HeroState {
     maxCombo: 0,
     parryCount: 0,
     totalDamage: 0,
+    stageJadeEarned: 0,
   };
 }
 

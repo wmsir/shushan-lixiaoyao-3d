@@ -1,3 +1,15 @@
+import {
+  type EquippedLoadout,
+  type HeroLoadoutStats,
+  DEFAULT_EQUIPPED,
+  DEFAULT_STARTER_JADE,
+  MAX_FORGE_LEVEL,
+  SHOP_ITEM_MAP,
+  STARTER_OWNED_ITEMS,
+  computeHeroLoadoutStats,
+  getUpgradeCost,
+} from './EquipmentData';
+
 export type EnemyKind = 'bladesman' | 'caster' | 'elite' | 'boss';
 export type EnemyAffix = 'swift' | 'vampiric' | 'ironclad' | 'storm';
 export type StageHazardType = 'none' | 'lightning' | 'ember' | 'abyss';
@@ -86,9 +98,29 @@ export interface StageClearRecord {
 }
 
 export interface CampaignSaveData {
-  version: 1;
+  version: number;
   cleared: Record<number, StageClearRecord>;
   lastPlayedStage: number;
+  jade: number;
+  ownedItems: string[];
+  equipped: EquippedLoadout;
+  upgrades: Record<string, number>;
+}
+
+export interface StageDialogueLine {
+  speaker: string;
+  role: 'elder' | 'enemy' | 'hero';
+  seal: string;
+  text: string;
+}
+
+export interface StageDialogueDef {
+  stageId: number;
+  kicker: string;
+  title: string;
+  chapterName: string;
+  intel: string[];
+  lines: StageDialogueLine[];
 }
 
 export interface SwordRealmInfo {
@@ -1011,6 +1043,83 @@ export function evaluateStageStars(
   };
 }
 
+const CHAPTER_ELDER_BRIEF: Record<1 | 2 | 3 | 4, { elder: string; seal: string; advice: string }> = {
+  1: {
+    elder: '蜀山接引长老',
+    seal: '剑',
+    advice: '妖众攻山势急，切记：见敌蓄力红圈起手可按「弹反」破势，遇「危」字红震必以「闪避」避其锋芒！',
+  },
+  2: {
+    elder: '剑冢守碑灵',
+    seal: '碑',
+    advice: '剑冢残魂善使诡术与嗜血之法，闪避极限触发「瞬影斩」可一瞬破招，斩杀妖邪可得灵石强化神兵！',
+  },
+  3: {
+    elder: '锁妖塔镇守灵官',
+    seal: '镇',
+    advice: '妖狱地火翻涌，重甲魔将多带「霸体」或「狂雷」，善用四段连招剑气与万剑诀远程牵制！',
+  },
+  4: {
+    elder: '酒剑仙残念',
+    seal: '酒',
+    advice: '徒儿，锁妖绝巅已无退路！弹反攒满剑意降「天剑」破其金身，此战之后三界皆传你李逍遥之名！',
+  },
+};
+
+export function getStageDialogue(stageId: number): StageDialogueDef {
+  const stage = getStageDef(stageId);
+  const chapter = getChapterDef(stage.chapter);
+  const elderBrief = CHAPTER_ELDER_BRIEF[stage.chapter];
+  const allEnemies = stage.waves.flatMap((w) => w.enemies);
+  const bossOrLead = [...allEnemies].reverse().find((e) => e.name)?.name ?? (stage.isBossStage ? '镇狱妖王' : '山门妖将');
+  const affixes = Array.from(new Set(allEnemies.map((e) => e.affix).filter(Boolean))) as EnemyAffix[];
+  const affixLabels = affixes.map((a) => AFFIX_META[a].label);
+
+  const enemyLine = stage.introLine;
+  const heroReply = stage.isBossStage
+    ? `「${bossOrLead}，少废话！今日我李逍遥便以七星剑魄斩你于剑台之上！」`
+    : stage.waves.length >= 2
+      ? `「妖气虽盛，不过土鸡瓦狗！待我连破这 ${stage.waves.length} 阵妖兵，再取灵石锻剑！」`
+      : `「既已至此，便让我试一试蜀山真传剑招！」`;
+
+  const intel: string[] = [
+    `共 ${stage.waves.length} 波 · ${allEnemies.length} 名妖邪`,
+    `推荐境界：${stage.recommendedRealm}`,
+    stage.hazardLabel ? `场地异变：${stage.hazardLabel}` : '剑阵稳固 · 无场地天劫',
+  ];
+  if (affixLabels.length > 0) {
+    intel.push(`妖邪词缀：${affixLabels.join(' / ')}`);
+  }
+
+  return {
+    stageId: stage.id,
+    kicker: `${chapter.roman} · 第 ${stage.id} 关 · ${stage.badge}`,
+    title: `${stage.name} — ${stage.subtitle}`,
+    chapterName: `${chapter.roman} ${chapter.name}`,
+    intel,
+    lines: [
+      {
+        speaker: elderBrief.elder,
+        role: 'elder',
+        seal: elderBrief.seal,
+        text: `「${elderBrief.advice}」`,
+      },
+      {
+        speaker: bossOrLead,
+        role: 'enemy',
+        seal: '妖',
+        text: enemyLine,
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: heroReply,
+      },
+    ],
+  };
+}
+
 const SAVE_KEY = 'shushan_lixiaoyao_campaign_v1';
 
 export class CampaignSaveStore {
@@ -1026,17 +1135,51 @@ export class CampaignSaveStore {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<CampaignSaveData>;
         if (parsed && typeof parsed === 'object' && parsed.cleared) {
+          const ownedSet = new Set<string>([
+            ...STARTER_OWNED_ITEMS,
+            ...(Array.isArray(parsed.ownedItems) ? parsed.ownedItems : []),
+          ]);
+          const eq = parsed.equipped;
+          const equipped: EquippedLoadout = {
+            weapon: eq?.weapon && ownedSet.has(eq.weapon) && SHOP_ITEM_MAP[eq.weapon] ? eq.weapon : DEFAULT_EQUIPPED.weapon,
+            armor: eq?.armor && ownedSet.has(eq.armor) && SHOP_ITEM_MAP[eq.armor] ? eq.armor : DEFAULT_EQUIPPED.armor,
+            relic: eq?.relic && ownedSet.has(eq.relic) && SHOP_ITEM_MAP[eq.relic] ? eq.relic : DEFAULT_EQUIPPED.relic,
+            skin: eq?.skin && ownedSet.has(eq.skin) && SHOP_ITEM_MAP[eq.skin] ? eq.skin : DEFAULT_EQUIPPED.skin,
+          };
+          const jade =
+            typeof parsed.jade === 'number' && Number.isFinite(parsed.jade) && parsed.jade >= 0
+              ? Math.floor(parsed.jade)
+              : DEFAULT_STARTER_JADE;
+          const upgrades: Record<string, number> = {};
+          if (parsed.upgrades && typeof parsed.upgrades === 'object') {
+            for (const [k, v] of Object.entries(parsed.upgrades)) {
+              const lv = Math.max(0, Math.min(MAX_FORGE_LEVEL, Math.floor(Number(v) || 0)));
+              if (lv > 0) upgrades[k] = lv;
+            }
+          }
           return {
-            version: 1,
+            version: 2,
             cleared: parsed.cleared,
             lastPlayedStage: Math.max(1, Math.min(20, Number(parsed.lastPlayedStage || 1))),
+            jade,
+            ownedItems: Array.from(ownedSet),
+            equipped,
+            upgrades,
           };
         }
       }
     } catch {
       // ignore storage failure in private mode
     }
-    return { version: 1, cleared: {}, lastPlayedStage: 1 };
+    return {
+      version: 2,
+      cleared: {},
+      lastPlayedStage: 1,
+      jade: DEFAULT_STARTER_JADE,
+      ownedItems: [...STARTER_OWNED_ITEMS],
+      equipped: { ...DEFAULT_EQUIPPED },
+      upgrades: {},
+    };
   }
 
   private persist(): void {
@@ -1047,7 +1190,7 @@ export class CampaignSaveStore {
     }
   }
 
-  recordClear(stageId: number, stars: 1 | 2 | 3, elapsedSec: number, maxCombo: number): void {
+  recordClear(stageId: number, stars: 1 | 2 | 3, elapsedSec: number, maxCombo: number): { firstClear: boolean } {
     const prev = this.data.cleared[stageId];
     this.data.cleared[stageId] = {
       stars: prev ? (Math.max(prev.stars, stars) as 1 | 2 | 3) : stars,
@@ -1056,6 +1199,7 @@ export class CampaignSaveStore {
     };
     this.data.lastPlayedStage = Math.min(20, stageId + 1);
     this.persist();
+    return { firstClear: !prev };
   }
 
   setLastPlayed(stageId: number): void {
@@ -1084,5 +1228,66 @@ export class CampaignSaveStore {
 
   getStageRecord(stageId: number): StageClearRecord | null {
     return this.data.cleared[stageId] ?? null;
+  }
+
+  getJade(): number {
+    return this.data.jade;
+  }
+
+  addJade(amount: number): number {
+    if (!Number.isFinite(amount) || amount <= 0) return this.data.jade;
+    this.data.jade += Math.round(amount);
+    this.persist();
+    return this.data.jade;
+  }
+
+  isOwned(itemId: string): boolean {
+    return this.data.ownedItems.includes(itemId);
+  }
+
+  getEquipped(): EquippedLoadout {
+    return { ...this.data.equipped };
+  }
+
+  getUpgradeLevel(itemId: string): number {
+    return this.data.upgrades[itemId] ?? 0;
+  }
+
+  getLoadoutStats(): HeroLoadoutStats {
+    return computeHeroLoadoutStats(this.data.equipped, this.data.upgrades);
+  }
+
+  buyItem(itemId: string): { ok: boolean; reason: string } {
+    const item = SHOP_ITEM_MAP[itemId];
+    if (!item) return { ok: false, reason: '藏品不存在' };
+    if (this.isOwned(itemId)) return { ok: false, reason: '已拥有此藏品' };
+    if (this.data.jade < item.price) return { ok: false, reason: `灵石不足（需 ${item.price}）` };
+    this.data.jade -= item.price;
+    this.data.ownedItems.push(itemId);
+    this.data.equipped[item.category] = itemId;
+    this.persist();
+    return { ok: true, reason: `已购入并穿戴「${item.name}」` };
+  }
+
+  equipItem(itemId: string): boolean {
+    const item = SHOP_ITEM_MAP[itemId];
+    if (!item || !this.isOwned(itemId)) return false;
+    this.data.equipped[item.category] = itemId;
+    this.persist();
+    return true;
+  }
+
+  upgradeItem(itemId: string): { ok: boolean; level: number; reason: string } {
+    const item = SHOP_ITEM_MAP[itemId];
+    if (!item || item.category === 'skin') return { ok: false, level: 0, reason: '不可淬炼' };
+    if (!this.isOwned(itemId)) return { ok: false, level: 0, reason: '尚未拥有' };
+    const cur = this.getUpgradeLevel(itemId);
+    if (cur >= MAX_FORGE_LEVEL) return { ok: false, level: cur, reason: '已达巅峰 +5' };
+    const cost = getUpgradeCost(item, cur);
+    if (this.data.jade < cost) return { ok: false, level: cur, reason: `灵石不足（需 ${cost}）` };
+    this.data.jade -= cost;
+    this.data.upgrades[itemId] = cur + 1;
+    this.persist();
+    return { ok: true, level: cur + 1, reason: `「${item.name}」淬炼至 +${cur + 1}` };
   }
 }

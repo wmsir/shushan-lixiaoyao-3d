@@ -263,6 +263,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository (read APP_VERSION)
+        uses: actions/checkout@v4
+
       - name: Download Android APKs
         uses: actions/download-artifact@v4
         with:
@@ -282,24 +285,26 @@ jobs:
           test -s release-assets/lixiaoyao-3d-release.apk
           test -s release-assets/lixiaoyao-3d-debug.apk
           test -s release-assets/li-xiaoyao-shushan-3d-unsigned.ipa
+          APP_VER=$(node -e "const s=require('fs').readFileSync('src/version.ts','utf8');const m=s.match(/APP_VERSION\\s*=\\s*'([^']+)'/);console.log(m?m[1]:'1.51');")
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --tags origin "refs/tags/v${APP_VER}" | grep -q "refs/tags/v${APP_VER}"; then
+            echo "tag=v${APP_VER}-b${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=v1.5.0-build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${APP_VER}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish GitHub Release with Android APK & iOS IPA
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: "仙剑·锁妖剑台 Android + iOS (${{ steps.meta.outputs.tag }})"
+          name: "仙剑·锁妖剑台 ${{ steps.meta.outputs.tag }} (Android + iOS)"
           make_latest: true
           body: |
-            ### 仙剑 · 锁妖剑台 — 写实 3D 二十关商业战役版（双端自动发版）
-            - **四章二十关完整战役**：蜀山山门(1-5) → 剑冢幽冥(6-10) → 锁妖深渊(11-15) → 九幽绝巅(16-20)，含多波次援军、4 章专属天幕色温与地脉氛围、章末首领及第 19/20 关双首领/终极镇狱天尊决战
-            - **纯手游端原生体验**：手机/APK 自动启用纯手游模式（彻底隐藏 `J`/`Esc`/`WASD`/鼠标提示），左手悬浮摇杆 + 右手王者荣耀式弧形技能轮盘 + 破势处决呼吸高亮 + 原生震动反馈
-            - **写实 3D 人物与高仿真特效**：768px 摄影级皮肤 PBR + 多尺度毛孔法线 + 眼角膜粗糙度 + 实时次表面散射（SSS）+ 无缝连续 `SkinnedMesh` 7.7 头身人体蒙皮，配合锻钢飞剑、焦土裂纹与青翠灵雾特效
-            - **跨端实时联机**：支持 20 关全关卡跨端双人组队刷怪（Co-op）与 1v1 Solo 单挑切磋（`wss://fwpt.cn/lixiaoyao/ws`）
+            ### 仙剑 · 锁妖剑台 ${{ steps.meta.outputs.tag }} — 写实 3D 二十关商业战役版（双端自动发版）
+            - **藏宝阁装备、剑炉淬炼与侠客皮肤**：灵石经济体系上线，支持购买/强化五大仙剑、四大战甲、四大法宝与五款 3D 实时换装皮肤（即时生效模型材质与战斗属性）
+            - **战前剧情对白与重铸交互对打**：入关先现剧情对白（点击「确定 · 拔剑开战」后开打）、四段剑招+剑气飞波、极限闪避瞬影斩、红字「危」不可格挡预警与移动端自适应通关结算
+            - **四章二十关完整战役与跨端联机**：支持 20 关全关卡跨端双人组队（Co-op）与 1v1 Solo 单挑切磋（`wss://fwpt.cn/lixiaoyao/ws`）
 
             #### 安装说明
             - **Android 手机**：直接下载 `lixiaoyao-3d-release.apk` 安装即可。

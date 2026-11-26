@@ -12,17 +12,39 @@ import {
   type BlessingDef,
   type CampaignSaveStore,
   type StageDef,
+  type StageDialogueDef,
   getChapterDef,
   getStageDef,
   getSwordRealm,
 } from '../game/CampaignData';
+import {
+  CATEGORY_LABELS,
+  type EquipCategory,
+  MAX_FORGE_LEVEL,
+  RARITY_LABELS,
+  SHOP_ITEMS,
+  computeCombatPower,
+  getUpgradeCost,
+} from '../game/EquipmentData';
 import { clamp } from '../utils/math';
 import { isPureMobileDevice } from '../core/NativeBridge';
+import { APP_VERSION } from '../version';
 
-export type ScreenMode = 'title' | 'playing' | 'cutscene' | 'paused' | 'victory' | 'defeat' | 'showcase';
+export type ScreenMode =
+  | 'title'
+  | 'dialogue'
+  | 'playing'
+  | 'cutscene'
+  | 'paused'
+  | 'victory'
+  | 'defeat'
+  | 'showcase';
+
+export type CombatThreatState = 'none' | 'parryable' | 'unblockable';
 
 export interface HudCallbacks {
   onStart: (stageId: number) => void;
+  onConfirmDialogue: () => void;
   onNextStage: (nextStageId: number, selectedBlessingId?: string) => void;
   onRetry: () => void;
   onBackToTitle: () => void;
@@ -33,6 +55,9 @@ export interface HudCallbacks {
   onMpJoin: (code: string) => void;
   onMpQuick: (mode: 'coop' | 'solo', stageId: number) => void;
   onMpLeave: () => void;
+  onShopBuy: (itemId: string) => { ok: boolean; reason: string };
+  onShopEquip: (itemId: string) => boolean;
+  onShopUpgrade: (itemId: string) => { ok: boolean; level: number; reason: string };
 }
 
 export interface ResultDisplayOptions {
@@ -44,6 +69,7 @@ export interface ResultDisplayOptions {
   };
   blessingChoices?: BlessingDef[];
   nextStageId?: number | null;
+  jadeEarned?: number;
   customTitle?: string;
   customSub?: string;
 }
@@ -59,6 +85,8 @@ export class HudController {
   private readonly appRoot = this.q('#app');
   private readonly titleOverlay = this.q('#title-overlay');
   private readonly campaignOverlay = this.q('#campaign-overlay');
+  private readonly shopOverlay = this.q('#shop-overlay');
+  private readonly dialogueOverlay = this.q('#dialogue-overlay');
   private readonly hudRoot = this.q('#game-hud');
   private readonly touchRoot = this.q('#touch-controls');
   private readonly resultOverlay = this.q('#result-overlay');
@@ -112,13 +140,17 @@ export class HudController {
   private readonly tCdREl = this.q('#t-cd-r');
   private readonly tGourdCountEl = this.q('#t-gourd-count');
 
+  private readonly dangerWarning = this.q('#danger-warning');
   private readonly counterPrompt = this.q('#counter-prompt');
   private readonly counterKey = this.q('#counter-key');
   private readonly touchAtkBtn = this.q('#btn-attack');
   private readonly touchAtkLbl = this.q('#t-atk-lbl');
+  private readonly touchDodgeBtn = this.q('#btn-dodge');
+  private readonly touchBlockBtn = this.q('#btn-block');
   private readonly titleTagline = this.q('#title-tagline');
   private readonly pauseDesc = this.q('#pause-desc');
   private readonly comboBox = this.q('#combo-box');
+  private readonly comboRank = this.q('#combo-rank');
   private readonly comboNum = this.q('#combo-num');
   private readonly subtitleBanner = this.q('#subtitle-banner');
   private readonly stageBanner = this.q('#stage-banner');
@@ -127,12 +159,29 @@ export class HudController {
   private readonly calloutContainer = this.q('#callout-layer');
 
   // Title & 20-Stage Campaign Map elements
+  private readonly appVersionBadge = this.q('#app-version-badge');
+  private readonly pauseVersionBadge = this.q('#pause-version-badge');
   private readonly titleRealmBadge = this.q('#title-realm-badge');
   private readonly titleStarsText = this.q('#title-stars-text');
+  private readonly titleJadePill = this.q('#title-jade-pill');
   private readonly titleClearText = this.q('#title-clear-text');
   private readonly titleSelectedStage = this.q('#title-selected-stage');
   private readonly titleSelectedMeta = this.q('#title-selected-meta');
   private readonly startBtn = this.q('#btn-start');
+
+  // Shop Modal elements
+  private readonly shopJadeBalance = this.q('#shop-jade-balance');
+  private readonly shopPowerPill = this.q('#shop-power-pill');
+  private readonly shopTabsEl = this.q('#shop-tabs');
+  private readonly shopGridEl = this.q('#shop-item-grid');
+  private readonly shopPowerSummary = this.q('#shop-power-summary');
+  private readonly shopBattleBtn = this.q('#btn-shop-battle');
+
+  // Dialogue Modal elements
+  private readonly dlgKicker = this.q('#dlg-kicker');
+  private readonly dlgTitle = this.q('#dlg-title');
+  private readonly dlgIntel = this.q('#dlg-intel');
+  private readonly dlgLines = this.q('#dlg-lines');
 
   private readonly mapRealmPill = this.q('#map-realm-pill');
   private readonly mapRealmBuff = this.q('#map-realm-buff');
@@ -147,6 +196,7 @@ export class HudController {
   // Result modal elements
   private readonly resultTitle = this.q('#result-title');
   private readonly resultStarsRow = this.q('#result-stars-row');
+  private readonly resultJadeGain = this.q('#result-jade-gain');
   private readonly resultSub = this.q('#result-sub');
   private readonly resultStarChecks = this.q('#result-star-checks');
   private readonly resultStats = this.q('#result-stats');
@@ -168,15 +218,19 @@ export class HudController {
 
   private selectedStage = 1;
   private activeChapter: 1 | 2 | 3 | 4 = 1;
+  private activeShopCategory: EquipCategory = 'weapon';
   private saveStore: CampaignSaveStore | null = null;
   private selectedBlessingId: string | undefined;
   private pendingNextStageId: number | null = null;
+  private currentScreenMode: ScreenMode = 'title';
   private subtitleTimer = 0;
   private stageBannerTimer = 0;
   private wheelForced = false;
   private mobileMode = false;
 
   constructor(private readonly callbacks: HudCallbacks) {
+    this.appVersionBadge.textContent = `v${APP_VERSION}`;
+    this.pauseVersionBadge.textContent = `v${APP_VERSION}`;
     const bindImg = (id: string, src: string) => {
       (this.q(id) as HTMLImageElement).src = src;
     };
@@ -201,7 +255,20 @@ export class HudController {
 
     this.startBtn.addEventListener('click', () => this.callbacks.onStart(this.selectedStage));
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
+    this.q('#btn-open-shop').addEventListener('click', () => this.openShop());
     this.q('#btn-close-campaign').addEventListener('click', () => this.closeCampaignMap());
+    this.q('#btn-close-shop').addEventListener('click', () => this.closeShop());
+    this.shopBattleBtn.addEventListener('click', () => {
+      this.closeShop();
+      if (this.currentScreenMode === 'paused') {
+        this.callbacks.onTogglePause();
+      } else {
+        this.callbacks.onStart(this.selectedStage);
+      }
+    });
+    this.q('#btn-dialogue-confirm').addEventListener('click', () => this.callbacks.onConfirmDialogue());
+    this.q('#btn-pause-shop').addEventListener('click', () => this.openShop());
+    this.q('#btn-result-shop').addEventListener('click', () => this.openShop());
     this.mapLaunchBtn.addEventListener('click', () => {
       this.closeCampaignMap();
       this.callbacks.onStart(this.selectedStage);
@@ -265,6 +332,7 @@ export class HudController {
     const totalStars = store.getTotalStars();
     const clearedCount = store.getClearedCount();
     const realm = getSwordRealm(totalStars);
+    const jade = store.getJade();
     const targetStage = focusStage ?? this.selectedStage ?? store.getRecommendedStage();
     this.selectedStage = clamp(Math.floor(targetStage), 1, CAMPAIGN_STAGES.length);
     const stDef = getStageDef(this.selectedStage);
@@ -272,6 +340,7 @@ export class HudController {
 
     this.titleRealmBadge.textContent = realm.title;
     this.titleStarsText.textContent = `★ ${totalStars} / 60`;
+    this.titleJadePill.textContent = `◆ ${jade} 灵石`;
     this.titleClearText.textContent = `已破 ${clearedCount} / 20 关`;
     this.hudRealmName.textContent = realm.title;
 
@@ -281,6 +350,7 @@ export class HudController {
 
     this.updateSelectedStageLabels();
     this.renderCampaignModal();
+    this.renderShopModal();
   }
 
   openCampaignMap(chapterId?: 1 | 2 | 3 | 4): void {
@@ -292,6 +362,147 @@ export class HudController {
 
   closeCampaignMap(): void {
     this.campaignOverlay.classList.remove('visible');
+  }
+
+  openShop(cat?: EquipCategory): void {
+    if (cat) this.activeShopCategory = cat;
+    this.renderShopModal();
+    this.shopOverlay.classList.add('visible');
+  }
+
+  closeShop(): void {
+    this.shopOverlay.classList.remove('visible');
+  }
+
+  showStageDialogue(dlg: StageDialogueDef): void {
+    this.dlgKicker.textContent = dlg.kicker;
+    this.dlgTitle.textContent = dlg.title;
+    this.dlgIntel.innerHTML = dlg.intel.map((t) => `<span class="dlg-chip">${t}</span>`).join('');
+    this.dlgLines.innerHTML = dlg.lines
+      .map(
+        (line) => `
+      <div class="dlg-line role-${line.role}">
+        <span class="dlg-seal">${line.seal}</span>
+        <div class="dlg-bubble">
+          <div class="dlg-speaker">${line.speaker}</div>
+          <div class="dlg-text">${line.text}</div>
+        </div>
+      </div>`,
+      )
+      .join('');
+    this.setMode('dialogue');
+  }
+
+  private renderShopModal(): void {
+    const store = this.saveStore;
+    if (!store) return;
+
+    const jade = store.getJade();
+    const equipped = store.getEquipped();
+    const stats = store.getLoadoutStats();
+    const realm = getSwordRealm(store.getTotalStars());
+    const power = computeCombatPower(realm.hpBonus, realm.dmgMult, stats);
+
+    this.shopJadeBalance.textContent = `◆ ${jade} 灵石`;
+    this.shopPowerPill.textContent = `剑道战力 ${power}`;
+
+    const totalHp = realm.hpBonus + stats.maxHpBonus;
+    const totalAtkPct = Math.round((realm.dmgMult * stats.dmgMult - 1) * 100);
+    const critPct = Math.round(stats.critRate * 100);
+    const reducePct = Math.round(stats.dmgReduce * 100);
+    const extras: string[] = [];
+    if (stats.lifesteal > 0) extras.push(`吸血${Math.round(stats.lifesteal * 100)}%`);
+    if (stats.parryReflectBonus > 0) extras.push(`弹反反伤+${Math.round(stats.parryReflectBonus * 100)}%`);
+    if (stats.killHealPct > 0) extras.push(`斩敌回血${Math.round(stats.killHealPct * 100)}%`);
+    this.shopPowerSummary.textContent = `总加护：气血+${totalHp} · 剑伤+${totalAtkPct}% · 暴击${critPct}% · 减伤${reducePct}%${extras.length ? ` · ${extras.join(' · ')}` : ''}`;
+    this.shopBattleBtn.textContent = this.currentScreenMode === 'paused' ? '返回试剑' : `出征 第 ${this.selectedStage} 关`;
+
+    this.shopTabsEl.innerHTML = '';
+    const categories: EquipCategory[] = ['weapon', 'armor', 'relic', 'skin'];
+    for (const cat of categories) {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = `shop-tab${cat === this.activeShopCategory ? ' active' : ''}`;
+      const eqItem = SHOP_ITEMS.find((it) => it.id === equipped[cat]);
+      tab.innerHTML = `<strong>${CATEGORY_LABELS[cat]}</strong><span>${eqItem ? eqItem.name : ''}</span>`;
+      tab.addEventListener('click', () => {
+        this.activeShopCategory = cat;
+        this.renderShopModal();
+      });
+      this.shopTabsEl.appendChild(tab);
+    }
+
+    this.shopGridEl.innerHTML = '';
+    const items = SHOP_ITEMS.filter((it) => it.category === this.activeShopCategory);
+    for (const item of items) {
+      const owned = store.isOwned(item.id);
+      const isEquipped = equipped[item.category] === item.id;
+      const lv = store.getUpgradeLevel(item.id);
+      const canForge = owned && item.category !== 'skin' && lv < MAX_FORGE_LEVEL;
+      const forgeCost = canForge ? getUpgradeCost(item, lv) : 0;
+
+      const card = document.createElement('div');
+      card.className = `shop-card rarity-${item.rarity}${isEquipped ? ' equipped' : ''}`;
+      card.dataset.itemId = item.id;
+
+      let swatchHtml = '';
+      if (item.skinVisual) {
+        swatchHtml = `<div class="swatch-row"><span class="swatch" style="background:${item.skinVisual.primaryHex}"></span><span class="swatch" style="background:${item.skinVisual.secondaryHex}"></span><span class="swatch" style="background:${item.skinVisual.accentHex}"></span></div>`;
+      } else if (item.weaponVisual) {
+        swatchHtml = `<div class="swatch-row"><span class="swatch" style="background:${item.weaponVisual.steelHex}"></span><span class="swatch" style="background:${item.weaponVisual.emissiveHex}"></span></div>`;
+      }
+
+      const lvTag = item.category !== 'skin' && lv > 0 ? `<span class="forge-lv">+${lv}</span>` : '';
+      const eqTag = isEquipped ? '<span class="eq-pill">已穿戴</span>' : '';
+
+      let actionsHtml = '';
+      if (!owned) {
+        const afford = jade >= item.price;
+        actionsHtml = `<button type="button" class="shop-act-btn buy${afford ? '' : ' locked'}" data-act="buy" data-id="${item.id}">购入 ◆${item.price}</button>`;
+      } else {
+        const equipBtn = isEquipped
+          ? '<span class="shop-done-lbl">生效中</span>'
+          : `<button type="button" class="shop-act-btn equip" data-act="equip" data-id="${item.id}">穿戴</button>`;
+        const forgeBtn =
+          item.category === 'skin'
+            ? ''
+            : lv >= MAX_FORGE_LEVEL
+              ? '<span class="shop-done-lbl max">满阶 +5</span>'
+              : `<button type="button" class="shop-act-btn forge${jade >= forgeCost ? '' : ' locked'}" data-act="upgrade" data-id="${item.id}">淬炼 ◆${forgeCost}</button>`;
+        actionsHtml = `${equipBtn}${forgeBtn}`;
+      }
+
+      card.innerHTML = `
+        <div class="shop-card-top">
+          <span class="rarity-pill rarity-${item.rarity}">${RARITY_LABELS[item.rarity]}</span>
+          <span class="shop-badge">${item.badge}</span>
+          ${lvTag}${eqTag}
+        </div>
+        <div class="shop-card-mid">
+          ${swatchHtml}
+          <div class="shop-card-name">${item.name}</div>
+        </div>
+        <div class="shop-card-desc">${item.desc}</div>
+        <div class="shop-card-actions">${actionsHtml}</div>
+      `;
+
+      for (const btn of Array.from(card.querySelectorAll<HTMLButtonElement>('button[data-act]'))) {
+        btn.addEventListener('click', () => {
+          const act = btn.dataset.act;
+          const id = btn.dataset.id ?? '';
+          if (act === 'buy') {
+            this.callbacks.onShopBuy(id);
+          } else if (act === 'equip') {
+            this.callbacks.onShopEquip(id);
+          } else if (act === 'upgrade') {
+            this.callbacks.onShopUpgrade(id);
+          }
+          this.renderShopModal();
+        });
+      }
+
+      this.shopGridEl.appendChild(card);
+    }
   }
 
   selectStage(stageId: number): void {
@@ -473,8 +684,13 @@ export class HudController {
   }
 
   setMode(mode: ScreenMode): void {
+    this.currentScreenMode = mode;
     this.titleOverlay.classList.toggle('visible', mode === 'title');
+    this.dialogueOverlay.classList.toggle('visible', mode === 'dialogue');
     if (mode !== 'title') this.campaignOverlay.classList.remove('visible');
+    if (mode === 'playing' || mode === 'cutscene' || mode === 'dialogue') {
+      this.shopOverlay.classList.remove('visible');
+    }
     this.hudRoot.classList.toggle('visible', mode === 'playing');
     this.touchRoot.classList.toggle('visible', mode === 'playing');
     this.pauseOverlay.classList.toggle('visible', mode === 'paused');
@@ -482,6 +698,10 @@ export class HudController {
 
     if (mode !== 'playing') {
       this.counterPrompt.classList.remove('visible');
+      this.dangerWarning.classList.remove('visible');
+      this.touchDodgeBtn.classList.remove('action-hint-dodge');
+      this.touchBlockBtn.classList.remove('action-hint-parry');
+      this.touchAtkBtn.classList.remove('shadow-ready');
     }
   }
 
@@ -570,6 +790,14 @@ export class HudController {
       <div class="stat-item"><span>总剑伤</span><strong>${Math.round(hero.totalDamage)}</strong></div>
     `;
 
+    const jadeEarned = opts?.jadeEarned ?? hero.stageJadeEarned;
+    if (jadeEarned > 0) {
+      this.resultJadeGain.style.display = 'inline-flex';
+      this.resultJadeGain.textContent = `◆ +${jadeEarned} 灵石`;
+    } else {
+      this.resultJadeGain.style.display = 'none';
+    }
+
     // 3-Pick-1 Xianxia Blessing Cards when advancing to next stage
     this.pendingNextStageId = victory && opts?.nextStageId ? opts.nextStageId : null;
     const choices = victory && this.pendingNextStageId ? opts?.blessingChoices ?? [] : [];
@@ -611,7 +839,13 @@ export class HudController {
     }
   }
 
-  update(hero: HeroState, objective: string, boss: EnemyEntity | null, peer: PeerHeroState | null = null): void {
+  update(
+    hero: HeroState,
+    objective: string,
+    boss: EnemyEntity | null,
+    peer: PeerHeroState | null = null,
+    threat: CombatThreatState = 'none',
+  ): void {
     const hpPct = clamp(hero.hp / hero.maxHp, 0, 1) * 100;
     const delayPct = clamp(hero.delayedHp / hero.maxHp, 0, 1) * 100;
     const spPct = clamp(hero.spirit / hero.maxSpirit, 0, 1) * 100;
@@ -666,13 +900,33 @@ export class HudController {
     this.tGourdCountEl.textContent = `${hero.gourds}`;
 
     const counterReady = hero.counterWindowTimer > 0 && hero.counterTargetId !== null;
+    const shadowReady = hero.shadowStrikeTimer > 0;
+    const waveReady = hero.comboStep === 3 && hero.comboWindowTimer > 0;
     this.counterPrompt.classList.toggle('visible', counterReady);
     this.touchAtkBtn.classList.toggle('counter-ready', counterReady);
-    this.touchAtkLbl.textContent = counterReady ? '处决' : '出剑';
+    this.touchAtkBtn.classList.toggle('shadow-ready', !counterReady && shadowReady);
+    this.touchAtkLbl.textContent = counterReady ? '处决' : shadowReady ? '瞬影' : waveReady ? '剑气' : '出剑';
+
+    this.dangerWarning.classList.toggle('visible', threat === 'unblockable');
+    this.touchDodgeBtn.classList.toggle('action-hint-dodge', threat === 'unblockable');
+    this.touchBlockBtn.classList.toggle('action-hint-parry', threat === 'parryable');
 
     if (hero.comboCount >= 2 && hero.comboDecayTimer > 0) {
       this.comboBox.classList.add('visible');
       this.comboNum.textContent = `${hero.comboCount}`;
+      const rank =
+        hero.comboCount >= 45
+          ? '剑圣'
+          : hero.comboCount >= 30
+            ? '天'
+            : hero.comboCount >= 20
+              ? '地'
+              : hero.comboCount >= 12
+                ? '玄'
+                : hero.comboCount >= 6
+                  ? '灵'
+                  : '凡';
+      this.comboRank.textContent = rank;
     } else {
       this.comboBox.classList.remove('visible');
     }

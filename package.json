@@ -1,6 +1,6 @@
 {
   "name": "li-xiaoyao-shushan-3d",
-  "version": "1.0.0",
+  "version": "1.52.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
     "cap:sync": "npm run build && npx cap sync android",
     "cap:sync:ios": "npm run build && npx cap sync ios",
     "deploy:fwpt": "node scripts/deploy-fwpt.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "test": "playwright test",
     "verify:visual": "playwright test tests/visual.spec.ts",
     "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs"

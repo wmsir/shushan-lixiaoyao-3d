@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, easeOutQuart, lerp, solveTwoBoneIK } from '../utils/math';
+import type { HeroSkinVisual, WeaponVisual } from '../game/EquipmentData';
 import {
   createForgedSteelPbr,
   createLeatherPbr,
@@ -392,6 +393,13 @@ export class CharacterRig {
   private readonly capeMesh?: THREE.Mesh;
   private readonly floatingOrbitals: THREE.Object3D[] = [];
   private readonly weaponGlowMat: THREE.MeshStandardMaterial;
+  private bladeSteelMat?: THREE.MeshStandardMaterial;
+  private readonly skinPrimaryMat?: THREE.MeshPhysicalMaterial;
+  private readonly skinSecondaryMat?: THREE.MeshPhysicalMaterial;
+  private readonly skinRobeInnerMat?: THREE.MeshPhysicalMaterial;
+  private readonly skinAccentMat?: THREE.MeshPhysicalMaterial;
+  private readonly skinTrimMat?: THREE.MeshStandardMaterial;
+  private readonly skinBronzeMat?: THREE.MeshStandardMaterial;
   private readonly flashMats: THREE.MeshStandardMaterial[] = [];
   private readonly gourdMesh?: THREE.Group;
   private readonly gourdHipMount?: THREE.Group;
@@ -463,6 +471,14 @@ export class CharacterRig {
 
     const palette = this.buildPalette(archetype, assets);
     this.weaponGlowMat = palette.weaponGlow;
+    if (archetype === 'xiaoyao') {
+      this.skinPrimaryMat = palette.primary as THREE.MeshPhysicalMaterial;
+      this.skinSecondaryMat = palette.secondary as THREE.MeshPhysicalMaterial;
+      this.skinRobeInnerMat = palette.robeInner as THREE.MeshPhysicalMaterial;
+      this.skinAccentMat = palette.accent as THREE.MeshPhysicalMaterial;
+      this.skinTrimMat = palette.trim as THREE.MeshStandardMaterial;
+      this.skinBronzeMat = palette.bronze;
+    }
     this.flashMats.push(palette.primary, palette.secondary, palette.armor);
 
     // Pelvis Root & Seamless Continuous Torso SkinnedMesh
@@ -961,6 +977,7 @@ export class CharacterRig {
       );
 
     if (archetype === 'xiaoyao') {
+      const heroBronze = bronze.clone();
       return {
         primary: new THREE.MeshPhysicalMaterial({
           map: assets.heroClothLinen.map,
@@ -992,7 +1009,7 @@ export class CharacterRig {
           side: THREE.DoubleSide,
         }),
         trim: new THREE.MeshStandardMaterial({ color: '#1a2a3c', roughness: 0.8, metalness: 0.08 }),
-        bronze,
+        bronze: heroBronze,
         leather,
         skin: makeSkinMat('#855742', '#cc4c28', 0.34),
         faceMat: makeFaceMat(assets.heroFaceTex, assets.heroFaceNrm, assets.heroFaceRough, 0.82, '#cc4c28', 0.36),
@@ -1532,6 +1549,7 @@ export class CharacterRig {
       roughness: 0.22,
       metalness: 0.88,
     });
+    this.bladeSteelMat = steelMat;
 
     if (archetype === 'xiaoyao' || archetype === 'ally') {
       // Authentic Forged Chinese Jian (七星龙渊剑): pure Damascus steel + cast bronze cloud-guard (ZERO plastic neon cylinder!)
@@ -1681,6 +1699,24 @@ export class CharacterRig {
 
   setSwordGlow(intensity: number): void {
     this.weaponGlowMat.emissiveIntensity = Math.min(1.05, intensity * 0.48);
+  }
+
+  applyHeroAppearance(skin: HeroSkinVisual, weapon: WeaponVisual): void {
+    if (this.skinPrimaryMat) this.skinPrimaryMat.color.set(skin.primaryHex);
+    if (this.skinRobeInnerMat) this.skinRobeInnerMat.color.set(skin.robeInnerHex);
+    if (this.skinSecondaryMat) {
+      this.skinSecondaryMat.color.set(skin.secondaryHex);
+      this.skinSecondaryMat.sheenColor.set(skin.sheenHex);
+    }
+    if (this.skinAccentMat) {
+      this.skinAccentMat.color.set(skin.accentHex);
+      this.skinAccentMat.sheenColor.set(skin.sheenHex);
+    }
+    if (this.skinTrimMat) this.skinTrimMat.color.set(skin.trimHex);
+    if (this.skinBronzeMat) this.skinBronzeMat.color.set(skin.bronzeHex);
+    if (this.bladeSteelMat) this.bladeSteelMat.color.set(weapon.steelHex);
+    this.weaponGlowMat.color.set(weapon.glowHex);
+    this.weaponGlowMat.emissive.set(weapon.emissiveHex);
   }
 
   getWeaponTipWorld(out: THREE.Vector3): THREE.Vector3 {
