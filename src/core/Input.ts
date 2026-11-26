@@ -402,7 +402,6 @@ export class GameInput {
     };
 
     bindTap('btn-attack', 'attack');
-    bindTap('counter-prompt', 'attack');
     bindTap('btn-dodge', 'dodge');
     bindTap('btn-skill-q', 'skillQ');
     bindTap('btn-skill-e', 'skillE');
@@ -417,6 +416,7 @@ export class GameInput {
 
     const blockBtn = document.getElementById('btn-block');
     if (blockBtn) {
+      let blockPointerId: number | null = null;
       const onDown = (e: PointerEvent) => {
         if (e.pointerType === 'touch') {
           this.lastTouchTime = performance.now();
@@ -424,23 +424,31 @@ export class GameInput {
         }
         e.preventDefault();
         e.stopPropagation();
+        blockPointerId = e.pointerId;
+        try {
+          blockBtn.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
         this.touchBlockHeld = true;
         this.pressed.add('TOUCH_BLOCK');
         blockBtn.classList.add('pressed');
       };
-      const onRelease = () => {
+      const onRelease = (e: PointerEvent) => {
+        if (blockPointerId !== null && e.pointerId !== blockPointerId) return;
+        blockPointerId = null;
         this.touchBlockHeld = false;
         blockBtn.classList.remove('pressed');
       };
       blockBtn.addEventListener('pointerdown', onDown);
       blockBtn.addEventListener('pointerup', onRelease);
       blockBtn.addEventListener('pointercancel', onRelease);
-      blockBtn.addEventListener('pointerleave', onRelease);
+      blockBtn.addEventListener('lostpointercapture', onRelease);
       this.cleanups.push(() => {
         blockBtn.removeEventListener('pointerdown', onDown);
         blockBtn.removeEventListener('pointerup', onRelease);
         blockBtn.removeEventListener('pointercancel', onRelease);
-        blockBtn.removeEventListener('pointerleave', onRelease);
+        blockBtn.removeEventListener('lostpointercapture', onRelease);
       });
     }
   }

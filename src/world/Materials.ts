@@ -42,36 +42,48 @@ export function createCourtyardStoneMaps(): {
       const x = col * colW + offset;
       const y = row * rowH;
       const h = hash2(col + row * 7, row * 13 + 3);
-      const tone = Math.floor(42 + h * 24);
-      const green = Math.floor(tone * 1.08 + 2);
-      const blue = Math.floor(tone * 1.2 + 6);
+      const tone = Math.floor(36 + h * 22);
+      const green = Math.floor(tone * 1.12 + 4);
+      const blue = Math.floor(tone * 1.24 + 8);
 
       aCtx.fillStyle = `rgb(${tone},${green},${blue})`;
       aCtx.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
 
-      aCtx.strokeStyle = `rgba(155, 178, 200, ${(0.06 + h * 0.06).toFixed(3)})`;
+      // Crisp moonlight bevel highlight (top/left) & recessed shadow edge (bottom/right)
+      aCtx.strokeStyle = `rgba(156, 192, 214, ${(0.09 + h * 0.07).toFixed(3)})`;
       aCtx.lineWidth = 2;
-      aCtx.strokeRect(x + 5, y + 5, colW - 10, rowH - 10);
+      aCtx.beginPath();
+      aCtx.moveTo(x + 5, y + rowH - 6);
+      aCtx.lineTo(x + 5, y + 5);
+      aCtx.lineTo(x + colW - 6, y + 5);
+      aCtx.stroke();
 
-      const bVal = Math.floor(140 + h * 65);
+      aCtx.strokeStyle = 'rgba(8, 13, 20, 0.42)';
+      aCtx.beginPath();
+      aCtx.moveTo(x + colW - 5, y + 6);
+      aCtx.lineTo(x + colW - 5, y + rowH - 5);
+      aCtx.lineTo(x + 6, y + rowH - 5);
+      aCtx.stroke();
+
+      const bVal = Math.floor(146 + h * 68);
       bCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
       bCtx.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
 
-      // Disciplined stone roughness (182..242 -> roughness 0.71..0.95) prevents whiteout glare
-      const rVal = Math.floor(186 + h * 54);
+      // Disciplined stone roughness (184..240 -> roughness 0.72..0.94) prevents whiteout glare
+      const rVal = Math.floor(184 + h * 56);
       rCtx.fillStyle = `rgb(${rVal},${rVal},${rVal})`;
       rCtx.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
 
-      aCtx.strokeStyle = '#161c24';
+      aCtx.strokeStyle = '#111720';
       aCtx.lineWidth = 5;
       aCtx.strokeRect(x, y, colW, rowH);
-      bCtx.strokeStyle = '#202020';
+      bCtx.strokeStyle = '#181818';
       bCtx.lineWidth = 5;
       bCtx.strokeRect(x, y, colW, rowH);
 
-      if (h > 0.7) {
-        aCtx.fillStyle = 'rgba(38, 68, 52, 0.48)';
-        aCtx.fillRect(x + 2, y + rowH - 8, colW * 0.42, 7);
+      if (h > 0.68) {
+        aCtx.fillStyle = 'rgba(30, 66, 54, 0.46)';
+        aCtx.fillRect(x + 2, y + rowH - 8, colW * 0.44, 7);
       }
     }
   }
@@ -110,19 +122,22 @@ export function createCarvedStoneTexture(): THREE.CanvasTexture {
   c.height = h;
   const ctx = c.getContext('2d')!;
 
-  ctx.fillStyle = '#485362';
+  ctx.fillStyle = '#3a4656';
   ctx.fillRect(0, 0, w, h);
 
   for (let y = 0; y < h; y += 64) {
-    const v = Math.floor(64 + hash2(y, 2.7) * 20);
-    ctx.fillStyle = `rgb(${v},${v + 7},${v + 16})`;
+    const v = Math.floor(54 + hash2(y, 2.7) * 20);
+    ctx.fillStyle = `rgb(${v},${v + 8},${v + 18})`;
     ctx.fillRect(0, y + 2, w, 60);
-    ctx.fillStyle = '#202630';
+    ctx.fillStyle = '#181e28';
     ctx.fillRect(0, y, w, 3);
   }
 
   const drawFret = (y0: number) => {
-    ctx.strokeStyle = 'rgba(210, 180, 115, 0.42)';
+    ctx.strokeStyle = 'rgba(14, 18, 24, 0.55)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(8, y0 + 2, w - 16, 42);
+    ctx.strokeStyle = 'rgba(222, 184, 108, 0.54)';
     ctx.lineWidth = 3;
     ctx.strokeRect(8, y0, w - 16, 42);
     for (let x = 18; x < w - 24; x += 28) {
@@ -348,10 +363,10 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
 
       void main() {
         vec3 d = normalize(vDir);
-        vec3 zenith = vec3(0.035, 0.06, 0.13);
-        vec3 midSky = vec3(0.08, 0.145, 0.24);
-        vec3 horizon = vec3(0.15, 0.24, 0.32);
-        vec3 below = vec3(0.06, 0.10, 0.16);
+        vec3 zenith = vec3(0.025, 0.048, 0.112);
+        vec3 midSky = vec3(0.072, 0.135, 0.228);
+        vec3 horizon = vec3(0.135, 0.225, 0.31);
+        vec3 below = vec3(0.05, 0.088, 0.145);
         vec3 col = d.y >= 0.0
           ? mix(horizon, mix(midSky, zenith, smoothstep(0.08, 0.72, d.y)), smoothstep(0.0, 0.38, d.y))
           : mix(horizon, below, smoothstep(0.0, -0.35, d.y));
@@ -360,19 +375,19 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
           vec2 cuv = d.xz / (max(d.y, 0.08) + 0.22) * 1.4 + vec2(uTime * 0.008, 0.0);
           float cl = fbm(cuv * 1.7);
           float clMask = smoothstep(0.46, 0.78, cl) * smoothstep(-0.02, 0.25, d.y) * smoothstep(0.95, 0.22, d.y);
-          col = mix(col, vec3(0.32, 0.46, 0.56), clMask * 0.42);
+          col = mix(col, vec3(0.30, 0.45, 0.56), clMask * 0.40);
         }
 
         float mDot = max(dot(d, normalize(uMoonDir)), 0.0);
-        float moonHalo = pow(mDot, 16.0) * 0.42 + pow(mDot, 90.0) * 0.58;
+        float moonHalo = pow(mDot, 16.0) * 0.40 + pow(mDot, 90.0) * 0.56;
         float moonDisc = smoothstep(0.9968, 0.9984, mDot);
-        col += vec3(0.55, 0.76, 0.88) * moonHalo;
-        col = mix(col, vec3(1.1, 1.08, 0.95), moonDisc);
+        col += vec3(0.52, 0.75, 0.88) * moonHalo;
+        col = mix(col, vec3(1.06, 1.05, 0.94), moonDisc);
 
         if (uHasPanorama > 0.5) {
           vec3 pano = texture2D(uPanorama, vUv).rgb;
-          col = mix(col, pano * 1.05, 0.76);
-          col += vec3(0.42, 0.65, 0.78) * moonHalo * 0.28;
+          col = mix(col, pano * 0.98, 0.76);
+          col += vec3(0.40, 0.63, 0.78) * moonHalo * 0.26;
         }
 
         gl_FragColor = vec4(col * uSkyTint, 1.0);

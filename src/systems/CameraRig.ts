@@ -19,9 +19,9 @@ interface CutsceneState {
  * - Clamps camera Y above terrain height
  */
 export class CameraRig {
-  // Cinematic 3D Donghua action camera angle (~22.6 deg pitch): crisp floor combat clarity + Shushan sky/peaks/sword-array framing!
-  private readonly baseOffset = new THREE.Vector3(0, 7.6, 13.8);
-  private readonly currentPos = new THREE.Vector3(0, 7.6, 13.8);
+  // Cinematic 3D Donghua action camera angle (~25 deg pitch): crisp floor combat clarity + Shushan sky/peaks/sword-array framing!
+  private readonly baseOffset = new THREE.Vector3(0, 8.5, 13.8);
+  private readonly currentPos = new THREE.Vector3(0, 8.5, 13.8);
   private readonly currentLook = new THREE.Vector3(0, 1.85, 0);
   private readonly targetLook = new THREE.Vector3();
   private readonly targetPos = new THREE.Vector3();

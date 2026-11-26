@@ -21,6 +21,7 @@ import {
 } from './CombatEntities';
 import {
   CampaignSaveStore,
+  type DungeonDef,
   type StageDef,
   type StageHazardType,
   type RunBlessingState,
@@ -29,15 +30,21 @@ import {
   createEmptyBlessings,
   evaluateStageStars,
   getChapterDef,
+  getDungeonDef,
   getStageDef,
   getStageDialogue,
+  getStageDialogueForStage,
   getSwordRealm,
   pickBlessingChoices,
 } from './CampaignData';
 import {
+  type EquipRarity,
   type HeroLoadoutStats,
+  type RolledGearItem,
+  RARITY_LABELS,
   getEquippedSkinVisual,
   getEquippedWeaponVisual,
+  rollEquipmentDrop,
 } from './EquipmentData';
 import { APP_VERSION } from '../version';
 import {
@@ -112,6 +119,8 @@ export class Game {
 
   private mode: ScreenMode = 'title';
   private currentStageId = 1;
+  private activeDungeon: DungeonDef | null = null;
+  private stageDroppedGear: RolledGearItem[] = [];
   private currentWaveIdx = 0;
   private stagePhase: StagePhase = 'combat';
   private stageTimer = 0;
@@ -142,6 +151,7 @@ export class Game {
   private rafId = 0;
   private lastNow = 0;
   private disposed = false;
+  private lastSkillEFeedbackAt = -999;
 
   // Reusable math scratch vectors
   private readonly raycaster = new THREE.Raycaster();
@@ -153,12 +163,12 @@ export class Game {
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const params = new URLSearchParams(window.location.search);
-    const startMuted = params.has('mute') || params.has('auto');
+    const urlForcedMute = params.has('mute') || params.has('auto');
     this.godMode = params.has('god');
 
     this.pipeline = new RenderPipeline(canvas, this.scene, this.camera);
     this.input = new GameInput(canvas);
-    this.audio = new AudioEngine(startMuted);
+    this.audio = new AudioEngine(urlForcedMute, !urlForcedMute);
     this.cameraRig = new CameraRig(this.camera);
 
     this.setupLighting();
@@ -287,8 +297,10 @@ export class Game {
             this.mp.mode === 'solo' ? 20 : this.currentStageId,
             this.peer.name,
           );
+        } else if (this.activeDungeon) {
+          this.startDungeon(this.activeDungeon.id, true);
         } else {
-          this.startNewRun(false, this.currentStageId, this.blessings.ids.length > 0, false);
+          this.startNewRun(false, this.currentStageId, this.blessings.ids.length > 0, true);
         }
       },
       onBackToTitle: () => {
@@ -358,6 +370,59 @@ export class Game {
           this.syncLiveHeroCapsFromLoadout();
           this.audio.playParry();
           triggerHaptic('heavy');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
+      onStartDungeon: (dungeonId) => {
+        this.startDungeon(dungeonId);
+      },
+      onEquipRolled: (uid) => {
+        const ok = this.saveStore.equipRolledItem(uid);
+        if (ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playDropChime('spirit');
+          triggerHaptic('light');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return ok;
+      },
+      onUpgradeRolled: (uid) => {
+        const res = this.saveStore.upgradeRolledItem(uid);
+        if (res.ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playParry();
+          triggerHaptic('heavy');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
+      onSalvageRolled: (uid) => {
+        const res = this.saveStore.salvageRolledItem(uid);
+        if (res.ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playDropChime('heal');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
+      onSalvageLow: (maxRarity) => {
+        const res = this.saveStore.salvageLowRarity(maxRarity);
+        if (res.count > 0) {
+          this.audio.playDropChime('heal');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
+      onClaimBounty: (bountyId) => {
+        const res = this.saveStore.claimBounty(bountyId);
+        if (res.ok) {
+          if (res.droppedItem) this.audio.playGearDropChime(res.droppedItem.rarity);
+          else this.audio.playDropChime('spirit');
+          triggerHaptic('medium');
           this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
         }
         return res;
@@ -466,6 +531,10 @@ export class Game {
     }
   }
 
+  private getActiveStageDef(): StageDef {
+    return this.activeDungeon ? this.activeDungeon.stageDef : getStageDef(this.currentStageId);
+  }
+
   private getLoadoutStats(): HeroLoadoutStats {
     return this.saveStore.getLoadoutStats();
   }
@@ -474,7 +543,7 @@ export class Game {
     const equipped = this.saveStore.getEquipped();
     this.hero.rig.applyHeroAppearance(
       getEquippedSkinVisual(equipped),
-      getEquippedWeaponVisual(equipped),
+      getEquippedWeaponVisual(equipped, this.saveStore.getInventory()),
     );
   }
 
@@ -502,6 +571,8 @@ export class Game {
 
   private enterTitleMode(): void {
     this.clearCombatEntities();
+    this.activeDungeon = null;
+    this.stageDroppedGear = [];
     this.targetRingMesh.visible = false;
     this.pendingCutsceneAfterDialogue = false;
     this.resetHero(new THREE.Vector3(0, 0, 2.2), Math.PI);
@@ -538,6 +609,8 @@ export class Game {
   private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false, skipDialogue = false): void {
     this.audio.unlock();
     this.clearCombatEntities();
+    this.activeDungeon = null;
+    this.stageDroppedGear = [];
     if (!keepBlessings) {
       this.blessings = createEmptyBlessings();
     }
@@ -557,12 +630,35 @@ export class Game {
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer);
   }
 
+  startDungeon(dungeonId: string, skipDialogue = false): void {
+    this.mp.leave();
+    this.clearPeerHero();
+    this.hud.setMpHudBadge('');
+    this.hud.setHeroName('李逍遥');
+    const dungeon = getDungeonDef(dungeonId);
+    this.audio.unlock();
+    this.clearCombatEntities();
+    this.activeDungeon = dungeon;
+    this.stageDroppedGear = [];
+    this.blessings = createEmptyBlessings();
+    this.resetHero(new THREE.Vector3(0, 0, 8.8), Math.PI);
+    this.applyCurrentLoadoutVisuals();
+    this.hero.rig.setWeaponDrawn(true);
+    this.runElapsed = 0;
+    this.timeScale = 1;
+    this.slowMoTimer = 0;
+    this.coopDowned = false;
+    this.pvpResultDecided = false;
+
+    this.enterStage(dungeon.stageDef.id, true, true, false, !skipDialogue);
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer);
+  }
+
   confirmStageDialogue(): boolean {
     if (this.mode !== 'dialogue') return false;
     this.audio.unlock();
     this.audio.playDropChime('spirit');
-    const stageDef = getStageDef(this.currentStageId);
-    const chDef = getChapterDef(stageDef.chapter);
     const boss = this.getActiveBoss();
     if (this.pendingCutsceneAfterDialogue && boss) {
       this.pendingCutsceneAfterDialogue = false;
@@ -570,12 +666,14 @@ export class Game {
       this.hud.setMode('cutscene');
       this.audio.setDucked(true);
       this.cameraRig.startCutscene(boss.pos, 2.55);
+      const stageDef = this.getActiveStageDef();
+      const chDef = getChapterDef(stageDef.chapter);
+      const kicker = this.activeDungeon ? `秘境打宝 · ${this.activeDungeon.name}` : `${chDef.roman} · 第 ${stageDef.id} 关`;
+      this.hud.showStageBanner(kicker, `${stageDef.name} · ${stageDef.subtitle}`, 1.3);
     } else {
       this.mode = 'playing';
       this.hud.setMode('playing');
     }
-    this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.4);
-    this.hud.showSubtitle(stageDef.introLine, 3.0);
     return true;
   }
 
@@ -583,6 +681,8 @@ export class Game {
     this.audio.unlock();
     this.clearCombatEntities();
     this.clearPeerHero();
+    this.activeDungeon = null;
+    this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
     this.runElapsed = 0;
     this.timeScale = 1;
@@ -625,8 +725,8 @@ export class Game {
       this.mode = 'playing';
       this.hud.setMode('playing');
       this.audio.setMood('boss1');
-      this.hud.showStageBanner('锁妖剑台 · 1v1 切磋', `${this.localHeroName} 对阵 ${peerName}`, 2.6);
-      this.hud.showSubtitle('以剑会友，善用三段连招、0.24秒完美弹反与三大剑诀！', 3.4);
+      this.hud.showStageBanner('锁妖剑台 · 1v1 切磋', `${this.localHeroName} 对阵 ${peerName}`, 1.4);
+      this.hud.showSubtitle('以剑会友，善用四段连招、0.26秒完美弹反与三大剑诀！', 2.4);
       this.vfx.spawnBaguaArray({
         pos: new THREE.Vector3(0, 0.08, 0),
         radius: 6.2,
@@ -656,8 +756,8 @@ export class Game {
     showDialogue = false,
   ): void {
     this.clearCombatEntities();
-    this.currentStageId = clamp(Math.floor(stageId), 1, 20);
-    const stageDef = getStageDef(this.currentStageId);
+    this.currentStageId = this.activeDungeon ? this.activeDungeon.stageDef.id : clamp(Math.floor(stageId), 1, 20);
+    const stageDef = this.getActiveStageDef();
     const chDef = getChapterDef(stageDef.chapter);
     this.currentWaveIdx = jumpLastWave ? stageDef.waves.length - 1 : 0;
     this.stagePhase = 'combat';
@@ -665,7 +765,7 @@ export class Game {
     this.hazardTimer = stageDef.hazardIntervalSec ? stageDef.hazardIntervalSec * 0.75 : 0;
     this.pendingCutsceneAfterDialogue = false;
 
-    this.arena.setStageTheme(this.currentStageId, chDef);
+    this.arena.setStageTheme(this.activeDungeon ? stageDef.chapter * 5 : this.currentStageId, chDef);
     this.scene.background = new THREE.Color(chDef.bgHex);
     this.scene.fog = new THREE.FogExp2(chDef.fogHex, 0.0138);
 
@@ -685,15 +785,14 @@ export class Game {
         const isFinalBossWave = this.currentWaveIdx === stageDef.waves.length - 1 && stageDef.bossCutscene && bossEntity;
         this.pendingCutsceneAfterDialogue = Boolean(withCutscene && isFinalBossWave);
         this.mode = 'dialogue';
-        this.hud.showStageDialogue(getStageDialogue(this.currentStageId));
+        const dlg = this.activeDungeon
+          ? getStageDialogueForStage(stageDef, false)
+          : getStageDialogue(this.currentStageId);
+        this.hud.showStageDialogue(dlg);
       } else {
-        this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.6);
-        this.hud.showSubtitle(stageDef.introLine, 3.4);
         this.spawnWave(stageDef, this.currentWaveIdx, withCutscene);
       }
     } else {
-      this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 2.6);
-      this.hud.showSubtitle(stageDef.introLine, 3.4);
       this.mode = 'playing';
       this.hud.setMode('playing');
     }
@@ -703,9 +802,7 @@ export class Game {
     const wave = stageDef.waves[waveIdx];
     if (!wave) return;
 
-    if (wave.subtitle) {
-      this.hud.showSubtitle(wave.subtitle, 3.2);
-    }
+    this.hud.clearSubtitle();
 
     let bossEntity: EnemyEntity | null = null;
     for (const spec of wave.enemies) {
@@ -742,10 +839,12 @@ export class Game {
       this.cameraRig.addShake(0.65);
 
       if (allowCutscene) {
+        const chDef = getChapterDef(stageDef.chapter);
         this.mode = 'cutscene';
         this.hud.setMode('cutscene');
         this.audio.setDucked(true);
         this.cameraRig.startCutscene(bossEntity.pos, 2.55);
+        this.hud.showStageBanner(`${chDef.roman} · 第 ${stageDef.id} 关`, `${stageDef.name} · ${stageDef.subtitle}`, 1.3);
       } else {
         bossEntity.aiState = 'orbit';
         bossEntity.stateTime = 0;
@@ -860,17 +959,17 @@ export class Game {
 
   private getObjectiveLabel(): string {
     if (this.mp.mode === 'solo' && this.peer) {
-      return `1v1 剑台切磋 · 对阵 ${this.peer.name}`;
+      return `1v1 · ${this.peer.name}`;
     }
-    const stageDef = getStageDef(this.currentStageId);
+    const stageDef = this.getActiveStageDef();
     if (this.stagePhase === 'waveTransition' || this.stagePhase === 'bossTransition') {
-      return `第 ${stageDef.id} 关 · 阵势再变`;
+      return `波次 ${Math.min(stageDef.waves.length, this.currentWaveIdx + 2)}/${stageDef.waves.length} · 备战`;
     }
     if (this.stagePhase === 'done') {
-      return `第 ${stageDef.id} 关 · 剑台已定`;
+      return `波次 ${stageDef.waves.length}/${stageDef.waves.length} · 已清`;
     }
     const alive = this.enemies.filter((e) => e.aiState !== 'dead').length;
-    return `第 ${stageDef.id} 关 · ${stageDef.name}（波次 ${this.currentWaveIdx + 1}/${stageDef.waves.length} · 剩 ${alive} 敌）`;
+    return `波次 ${this.currentWaveIdx + 1}/${stageDef.waves.length} · 剩 ${alive}`;
   }
 
   stepFrame(rawDt: number, doRender = true): void {
@@ -972,7 +1071,7 @@ export class Game {
       }
     } else if (this.mode === 'playing') {
       this.runElapsed += dt;
-      this.updateHero(dt);
+      this.updateHero(dt, rawDt);
       this.updatePeerHero(dt);
 
       if (this.mp.mode !== 'solo') {
@@ -993,15 +1092,17 @@ export class Game {
         dt,
         this.elapsed,
         this.hero.pos,
-        (kind) => this.onCollectDrop(kind),
-        (kind) => this.audio.playDropChime(kind),
+        (kind, gearItem) => this.onCollectDrop(kind, gearItem),
+        (kind) => {
+          if (kind !== 'gear') this.audio.playDropChime(kind);
+        },
       );
       this.arena.update(dt, this.elapsed, this.hero.pos);
       const boss = this.getActiveBoss();
       const focusPos =
         this.mp.mode === 'solo' && this.peer && !this.peer.dead
           ? this.peer.pos
-          : boss && boss.aiState !== 'dead'
+          : boss && boss.kind === 'boss' && boss.aiState !== 'dead'
             ? boss.pos
             : null;
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, focusPos, this.input.mouseNdc);
@@ -1095,7 +1196,7 @@ export class Game {
     return { x: e.pos.x, z: e.pos.z, radius: e.radius, enemy: e, isPvpPeer: false };
   }
 
-  private updateHero(dt: number): void {
+  private updateHero(dt: number, rawDt = dt): void {
     const h = this.hero;
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
@@ -1156,7 +1257,7 @@ export class Game {
       }
     }
 
-    const canDodgeNow = h.state !== 'hit' && h.state !== 'skillR' && h.state !== 'parryCounter' && h.stamina >= 18;
+    const canDodgeNow = h.state !== 'hit' && h.state !== 'skillR' && h.state !== 'parryCounter' && h.stamina >= 24;
     if (canDodgeNow && this.input.consumeAction('dodge')) {
       this.rmbMoveTarget = null;
       this.startHeroDodge();
@@ -1164,7 +1265,7 @@ export class Game {
     }
 
     if (h.hitstopTimer > 0) {
-      h.hitstopTimer -= dt;
+      h.hitstopTimer = Math.max(0, h.hitstopTimer - rawDt);
       return;
     }
 
@@ -1198,7 +1299,8 @@ export class Game {
 
     const prevPos = this.tmpVec.copy(h.pos);
     const isFree = h.state === 'idle' || h.state === 'run' || h.state === 'block';
-    const isAttackCancelable = h.state === 'attack' && h.stateTime / h.stateDuration >= 0.58;
+    const cancelThreshold = h.comboStep >= 3 ? 0.72 : 0.58;
+    const isAttackCancelable = h.state === 'attack' && h.stateTime / h.stateDuration >= cancelThreshold;
 
     if ((isFree || isAttackCancelable) && h.counterTargetId !== null && h.counterWindowTimer > 0 && this.input.hasBuffered('attack')) {
       if (h.counterTargetId === -999 && this.mp.mode === 'solo' && this.peer && !this.peer.dead) {
@@ -1443,7 +1545,7 @@ export class Game {
     h.rig.root.position.copy(h.pos);
     h.rig.root.rotation.y = h.yaw;
 
-    const poseName: PoseName = h.comboStep === 1 ? 'combo1' : h.comboStep === 2 ? 'combo2' : 'combo3';
+    const poseName: PoseName = h.comboStep === 1 ? 'combo1' : h.comboStep === 2 ? 'combo2' : h.comboStep === 4 ? 'parryCounter' : 'combo3';
     h.rig.applyPose(poseName, p, this.elapsed, dt, 2);
 
     const activeStart = h.comboStep >= 3 ? 0.38 : 0.34;
@@ -1558,10 +1660,10 @@ export class Game {
     h.stateTime = 0;
     h.stateDuration = 0.36;
     h.hitstopTimer = 0;
-    h.dodgeInvuln = 0.36;
+    h.dodgeInvuln = 0.26;
     h.dodgePerfectTriggered = false;
     h.afterimageTimer = 0;
-    h.stamina = Math.max(0, h.stamina - 18);
+    h.stamina = Math.max(0, h.stamina - 24);
 
     this.input.getMoveVector(this.moveVec);
     if (Math.hypot(this.moveVec.x, this.moveVec.z) > 0.1) {
@@ -1718,8 +1820,7 @@ export class Game {
     h.yaw = tgt ? Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z) : aimYaw;
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillQ();
-    const qLine = this.audio.playHeroVoice('skillQ');
-    if (qLine) this.hud.showSubtitle(`李逍遥：「${qLine}」`, 1.8);
+    this.audio.playHeroVoice('skillQ');
     this.hud.triggerSkillPulse('Q');
     triggerHaptic('medium');
     this.mp.sendAction('skillQ', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
@@ -1739,8 +1840,7 @@ export class Game {
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillE();
-    const eLine = this.audio.playHeroVoice('skillE');
-    if (eLine) this.hud.showSubtitle(`李逍遥：「${eLine}」`, 2.2);
+    this.audio.playHeroVoice('skillE');
     this.hud.triggerSkillPulse('E');
     triggerHaptic('heavy');
   }
@@ -1760,10 +1860,9 @@ export class Game {
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillR();
-    const rLine = this.audio.playHeroVoice('skillR');
+    this.audio.playHeroVoice('skillR');
     this.hud.triggerSkillPulse('R');
     triggerHaptic('ultimate');
-    this.hud.showSubtitle(`李逍遥：「${rLine || '仗剑红尘已是癫——天剑，降世！'}」`, 2.6);
   }
 
   private startDrinkGourd(): void {
@@ -1856,8 +1955,10 @@ export class Game {
         targetPos: spot,
         delay: i * 0.075,
         onImpact: (pos) => {
-          this.audio.playHit(false);
-          this.cameraRig.addShake(0.14);
+          if (i % 3 === 0) {
+            this.audio.playHit(false);
+            this.cameraRig.addShake(0.14);
+          }
           this.vfx.spawnGroundCrater(pos, 1.15, new THREE.Color(0.35, 1.75, 2.0), 2.6);
           if (!isLocalDamage) return;
           for (const e of this.enemies) {
@@ -1946,15 +2047,20 @@ export class Game {
         heavy ? 16 : 10,
         this.rng,
       );
-      this.audio.playHit(heavy);
-      this.cameraRig.addShake(heavy ? 0.28 : 0.12);
+      const isSkillE = skill === 'skillE';
+      const allowFeedback = !isSkillE || this.elapsed - this.lastSkillEFeedbackAt >= 0.22;
+      if (isSkillE && allowFeedback) this.lastSkillEFeedbackAt = this.elapsed;
+      if (allowFeedback) {
+        this.audio.playHit(heavy);
+        this.cameraRig.addShake(heavy ? 0.28 : 0.12);
+        triggerHaptic(heavy ? 'medium' : 'light');
+      }
       this.spawnWorldCallout(`${rawDmg}`, e.pos, heavy || isCrit ? 'crit' : 'dmg');
-      triggerHaptic(heavy ? 'medium' : 'light');
       this.mp.sendEnemyHit(e.id, rawDmg, poiseGain, heavy, skill);
       return;
     }
 
-    this.damageEnemy(e, rawDmg, heavy, attackYaw, poiseGain, isCrit, true);
+    this.damageEnemy(e, rawDmg, heavy, attackYaw, poiseGain, isCrit, true, skill);
   }
 
   private damageEnemy(
@@ -1965,15 +2071,22 @@ export class Game {
     poiseGain: number,
     isCrit: boolean,
     fromLocalHero = true,
+    skill?: string,
   ): void {
     if (e.aiState === 'dead') return;
     const h = this.hero;
     const loadout = this.getLoadoutStats();
 
-    let interrupted = false;
-    if (e.aiState === 'windup' && e.stateTime / Math.max(0.1, e.stateDuration) >= 0.42) {
-      interrupted = true;
-    }
+    const isLightM1 =
+      !heavy &&
+      skill !== 'skillQ' &&
+      skill !== 'skillE' &&
+      skill !== 'skillR' &&
+      skill !== 'parryCounter' &&
+      skill !== 'parry';
+    const windupProg = e.aiState === 'windup' ? e.stateTime / Math.max(0.1, e.stateDuration) : 0;
+    const hasWindupArmor = e.aiState === 'windup' && windupProg >= 0.45 && isLightM1;
+    const interrupted = e.aiState === 'windup' && windupProg >= 0.45 && !isLightM1;
 
     const rolledCrit = isCrit || (fromLocalHero && this.rng() < loadout.critRate);
     const critScale = rolledCrit ? loadout.critMult : 1.0;
@@ -1981,6 +2094,10 @@ export class Game {
     const scaledPoise = poiseGain * (interrupted ? 1.6 : 1.0) * (fromLocalHero ? loadout.poiseMult : 1.0);
     e.hp = Math.max(0, e.hp - dmg);
     e.poise = Math.min(e.maxPoise, e.poise + scaledPoise);
+
+    const isSkillE = skill === 'skillE';
+    const allowFeedback = !isSkillE || this.elapsed - this.lastSkillEFeedbackAt >= 0.22;
+    if (isSkillE && allowFeedback) this.lastSkillEFeedbackAt = this.elapsed;
 
     if (fromLocalHero) {
       h.spirit = Math.min(h.maxSpirit, h.spirit + (heavy ? 12 : 7));
@@ -1992,12 +2109,20 @@ export class Game {
       if (loadout.lifesteal > 0 && h.hp > 0 && h.hp < h.maxHp) {
         h.hp = Math.min(h.maxHp, h.hp + Math.max(1, Math.round(dmg * loadout.lifesteal)));
       }
-      triggerHaptic(heavy || interrupted || rolledCrit ? 'medium' : 'light');
+      if (allowFeedback) {
+        triggerHaptic(heavy || interrupted || rolledCrit ? 'medium' : 'light');
+      }
     }
 
     const hitstop = heavy ? 0.1 : 0.062;
-    if (fromLocalHero) h.hitstopTimer = Math.max(h.hitstopTimer, hitstop * 0.85);
-    e.hitstopTimer = Math.max(e.hitstopTimer, hitstop);
+    if (fromLocalHero && !isSkillE) {
+      h.hitstopTimer = Math.max(h.hitstopTimer, hitstop * 0.85);
+    }
+    if (allowFeedback) {
+      e.hitstopTimer = Math.max(e.hitstopTimer, hitstop);
+      this.audio.playHit(heavy || interrupted || rolledCrit);
+      this.cameraRig.addShake(heavy ? 0.32 : 0.14);
+    }
     e.shakeTimer = 0.16;
     e.rig.triggerHitFlash(1.0);
 
@@ -2012,9 +2137,6 @@ export class Game {
       this.rng,
     );
 
-    this.audio.playHit(heavy || interrupted || rolledCrit);
-    this.cameraRig.addShake(heavy ? 0.32 : 0.14);
-
     if (interrupted) {
       this.spawnWorldCallout(`破招 ${dmg}!`, e.pos, 'parry');
     } else if (rolledCrit) {
@@ -2023,7 +2145,17 @@ export class Game {
       this.spawnWorldCallout(`${dmg}`, e.pos, heavy ? 'crit' : 'dmg');
     }
 
-    const kb = heavy ? (e.kind === 'boss' ? 1.8 : e.kind === 'elite' ? 2.6 : 4.2) : e.kind === 'boss' ? 0.4 : 1.6;
+    const kb = hasWindupArmor
+      ? 0.25
+      : heavy
+        ? e.kind === 'boss'
+          ? 1.8
+          : e.kind === 'elite'
+            ? 2.6
+            : 4.2
+        : e.kind === 'boss'
+          ? 0.4
+          : 1.6;
     e.vel.set(Math.sin(attackYaw) * kb, 0, Math.cos(attackYaw) * kb);
 
     if (e.kind === 'boss' && e.phase === 1 && e.hp > 0 && e.hp <= e.maxHp * 0.5) {
@@ -2033,7 +2165,7 @@ export class Game {
       this.vfx.spawnShockRing(e.pos, new THREE.Color(2.3, 0.25, 0.5), 0.6, 7.5, 0.65);
       this.vfx.spawnGroundCrater(e.pos, 3.2, new THREE.Color(2.3, 0.25, 0.45), 3.6);
       this.cameraRig.addShake(0.6);
-      this.hud.showSubtitle(`${e.name}：「锁妖之阵既裂，便以尔之血重铸魔剑！」`, 3.2);
+      this.hud.showSubtitle(`${e.name}：「魔剑狂化！」`, 1.5);
     }
 
     if (e.hp <= 0) {
@@ -2054,7 +2186,7 @@ export class Game {
       }
       this.vfx.spawnShockRing(e.pos, new THREE.Color(2.4, 1.9, 0.5), 0.4, 2.8, 0.4);
       this.spawnWorldCallout('破势!', e.pos, 'parry');
-    } else if (e.kind !== 'boss' && e.affix !== 'ironclad' && (heavy || e.aiState !== 'attack')) {
+    } else if (e.kind !== 'boss' && e.affix !== 'ironclad' && !hasWindupArmor && (heavy || e.aiState !== 'attack')) {
       e.telegraph?.dispose();
       e.telegraph = null;
       e.aiState = 'hit';
@@ -2086,12 +2218,15 @@ export class Game {
     );
 
     if (e.kind !== 'boss') {
-      this.vfx.spawnLootDrop(e.pos, 'heal', this.rng);
-      this.vfx.spawnLootDrop(e.pos, 'spirit', this.rng);
+      if (this.rng() < 0.35) {
+        this.vfx.spawnLootDrop(e.pos, 'heal', this.rng);
+      }
       if (e.kind === 'caster' || e.kind === 'elite') {
+        this.vfx.spawnLootDrop(e.pos, 'spirit', this.rng);
         this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
       }
     } else {
+      this.vfx.spawnLootDrop(e.pos, 'spirit', this.rng);
       this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
       this.vfx.spawnLootDrop(e.pos, 'gourd', this.rng);
     }
@@ -2110,10 +2245,69 @@ export class Game {
       this.saveStore.addJade(jadeDrop);
       this.spawnWorldCallout(`+${jadeDrop} 灵石`, e.pos.clone().add(new THREE.Vector3(0.45, 0.35, 0)), 'info');
     }
+
+    if (this.mp.mode === 'offline' || this.mp.role === 'host') {
+      this.saveStore.incrementStat('totalKills', 1);
+      const stageDef = this.getActiveStageDef();
+      const tier: 1 | 2 | 3 = this.activeDungeon
+        ? this.activeDungeon.tier
+        : stageDef.chapter >= 3
+          ? 3
+          : stageDef.chapter >= 2
+            ? 2
+            : 1;
+      const sourceLabel = this.activeDungeon ? `秘境·${this.activeDungeon.name}` : `第${stageDef.id}关·${stageDef.name}`;
+      if (e.kind === 'elite') {
+        const dropChance = this.activeDungeon ? 0.65 : 0.35;
+        if (this.rng() < dropChance) {
+          const item = rollEquipmentDrop({
+            tier,
+            guaranteedMinRarity: this.activeDungeon ? 'rare' : undefined,
+            source: sourceLabel,
+            rng: this.rng,
+          });
+          this.vfx.spawnGearDrop(e.pos, item, this.rng);
+          this.audio.playGearDropChime(item.rarity);
+        }
+      } else if (e.kind === 'boss') {
+        const isFirstClear = !this.activeDungeon && !this.saveStore.getStageRecord(stageDef.id);
+        const dropCount = this.activeDungeon
+          ? this.activeDungeon.tier === 3
+            ? 3
+            : 2
+          : isFirstClear || this.rng() < 0.7
+            ? 1
+            : 0;
+        for (let k = 0; k < dropCount; k++) {
+          const pityTriggered = k === 0 ? this.saveStore.advancePityAndCheck() : false;
+          const item = rollEquipmentDrop({
+            tier,
+            guaranteedMinRarity: this.activeDungeon?.guaranteedMinRarity ?? (isFirstClear ? 'rare' : undefined),
+            pityTriggered,
+            source: sourceLabel,
+            rng: this.rng,
+          });
+          this.vfx.spawnGearDrop(e.pos, item, this.rng);
+          if (k === 0) this.audio.playGearDropChime(item.rarity);
+        }
+      }
+    }
   }
 
-  private onCollectDrop(kind: 'heal' | 'spirit' | 'gourd'): void {
+  private onCollectDrop(kind: 'heal' | 'spirit' | 'gourd' | 'gear', gearItem?: RolledGearItem): void {
     const h = this.hero;
+    if (kind === 'gear' && gearItem) {
+      const addRes = this.saveStore.addRolledItem(gearItem);
+      this.stageDroppedGear.push(gearItem);
+      this.audio.playGearDropChime(gearItem.rarity);
+      this.spawnWorldCallout(
+        addRes.added ? `【${RARITY_LABELS[gearItem.rarity]}】${gearItem.name}` : `背囊已满分解 +◆${addRes.overflowSalvagedJade ?? 0}`,
+        h.pos,
+        gearItem.rarity === 'legendary' || gearItem.rarity === 'epic' ? 'parry' : 'info',
+      );
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      return;
+    }
     this.audio.playHeal();
     if (kind === 'heal') {
       h.hp = Math.min(h.maxHp, h.hp + 36);
@@ -2140,7 +2334,7 @@ export class Game {
   }
 
   private updateStageHazards(dt: number): void {
-    const stageDef = getStageDef(this.currentStageId);
+    const stageDef = this.getActiveStageDef();
     if (stageDef.hazard !== 'none' && this.stagePhase === 'combat' && this.enemies.some((e) => e.aiState !== 'dead')) {
       this.hazardTimer -= dt;
       if (this.hazardTimer <= 0) {
@@ -2197,14 +2391,17 @@ export class Game {
 
   private updateEnemies(dt: number): void {
     const h = this.hero;
-
-    const meleeAttackerBusy = this.enemies.some(
-      (e) =>
+    const maxMeleeAttackers = this.getActiveStageDef().chapter === 1 ? 2 : 3;
+    let activeMeleeAttackers = 0;
+    for (const e of this.enemies) {
+      if (
         e.aiState !== 'dead' &&
         e.kind !== 'caster' &&
-        (e.aiState === 'windup' || e.aiState === 'attack' || e.aiState === 'chase'),
-    );
-    let meleeTokenGiven = meleeAttackerBusy;
+        (e.aiState === 'windup' || e.aiState === 'attack')
+      ) {
+        activeMeleeAttackers += 1;
+      }
+    }
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
@@ -2275,9 +2472,9 @@ export class Game {
         if (e.attackCooldown <= 0) {
           if (e.kind === 'caster') {
             this.beginEnemyWindup(e, this.rng() < 0.55 ? 'orb' : 'yinCircle', undefined, targetPos);
-          } else if (!meleeTokenGiven) {
-            meleeTokenGiven = true;
+          } else if (activeMeleeAttackers < maxMeleeAttackers) {
             if ((e.kind === 'boss' || e.kind === 'elite') && dist > 6.5) {
+              activeMeleeAttackers += 1;
               this.beginEnemyWindup(
                 e,
                 e.kind === 'boss' && e.phase === 2 && this.rng() < 0.45 ? 'barrage' : 'lunge',
@@ -2304,12 +2501,19 @@ export class Game {
 
         const engageDist = e.kind === 'boss' ? 4.1 : e.kind === 'elite' ? 3.2 : 2.55;
         if (dist <= engageDist) {
-          if (e.kind === 'boss' || e.kind === 'elite') {
-            const roll = this.rng();
-            const mv = roll < 0.45 ? 'cleave' : roll < 0.75 ? 'slam' : 'lunge';
-            this.beginEnemyWindup(e, mv, undefined, targetPos);
+          if (activeMeleeAttackers < maxMeleeAttackers) {
+            activeMeleeAttackers += 1;
+            if (e.kind === 'boss' || e.kind === 'elite') {
+              const roll = this.rng();
+              const mv = roll < 0.45 ? 'cleave' : roll < 0.75 ? 'slam' : 'lunge';
+              this.beginEnemyWindup(e, mv, undefined, targetPos);
+            } else {
+              this.beginEnemyWindup(e, 'cleave', undefined, targetPos);
+            }
           } else {
-            this.beginEnemyWindup(e, 'cleave', undefined, targetPos);
+            e.aiState = 'orbit';
+            e.stateTime = 0;
+            e.attackCooldown = 0.25;
           }
         }
       } else if (e.aiState === 'windup') {
@@ -2332,6 +2536,9 @@ export class Game {
         e.rig.applyPose('enemyWindup', p, this.elapsed, dt, 0);
 
         if (p >= 1) {
+          if (e.moveKind === 'lunge') {
+            e.telegraphPos.copy(e.pos);
+          }
           e.telegraph?.dispose();
           e.telegraph = null;
           e.aiState = 'attack';
@@ -2367,7 +2574,7 @@ export class Game {
           } else {
             e.aiState = 'recover';
             e.stateTime = 0;
-            e.stateDuration = e.kind === 'boss' ? (e.phase === 2 ? 0.55 : 0.8) : e.kind === 'elite' ? 0.65 : 0.7;
+            e.stateDuration = e.kind === 'boss' ? (e.phase === 2 ? 0.4 : 0.52) : e.kind === 'elite' ? 0.48 : 0.45;
           }
         }
       } else if (e.aiState === 'recover') {
@@ -2377,7 +2584,7 @@ export class Game {
           e.aiState = 'orbit';
           e.stateTime = 0;
           e.attackCooldown =
-            (e.kind === 'boss' ? (e.phase === 2 ? 0.85 : 1.25) : e.kind === 'elite' ? 1.05 : 1.35 + this.rng() * 0.9) /
+            (e.kind === 'boss' ? (e.phase === 2 ? 0.65 : 0.9) : e.kind === 'elite' ? 0.85 : 0.85 + this.rng() * 0.6) /
             e.speedMult;
           e.orbitDir = this.rng() > 0.5 ? 1 : -1;
         }
@@ -2456,6 +2663,7 @@ export class Game {
       e.moveRange = 2.6;
       e.moveDamage = Math.round((e.kind === 'boss' ? 28 : 22) * e.damageMult);
       e.moveUnblockable = false;
+      e.telegraphPos.copy(e.pos);
       e.telegraph = this.vfx.createTelegraph('line', e.pos, e.yaw, 2.3, 8.8);
     } else if (move === 'slam') {
       e.stateDuration = 0.92 * fast;
@@ -2556,11 +2764,24 @@ export class Game {
       this.vfx.spawnShockRing(e.pos, new THREE.Color(2.2, 1.5, 0.4), 0.3, e.moveRange + 0.8, 0.32);
     }
 
-    const dx = h.pos.x - e.pos.x;
-    const dz = h.pos.z - e.pos.z;
-    const dist = Math.hypot(dx, dz);
-    const diff = Math.abs(angleDiff(e.yaw, Math.atan2(dx, dz)));
-    if (dist <= e.moveRange + h.radius && (diff < 1.15 || dist < 1.5)) {
+    let hitInBounds = false;
+    if (e.moveKind === 'lunge') {
+      const fx = Math.sin(e.yaw);
+      const fz = Math.cos(e.yaw);
+      const rx = h.pos.x - e.telegraphPos.x;
+      const rz = h.pos.z - e.telegraphPos.z;
+      const fwd = rx * fx + rz * fz;
+      const perpDist = Math.abs(rx * fz - rz * fx);
+      hitInBounds = fwd >= -0.4 && fwd <= 7.8 + h.radius && perpDist <= 1.15;
+    } else {
+      const dx = h.pos.x - e.pos.x;
+      const dz = h.pos.z - e.pos.z;
+      const dist = Math.hypot(dx, dz);
+      const diff = Math.abs(angleDiff(e.yaw, Math.atan2(dx, dz)));
+      hitInBounds = dist <= e.moveRange + h.radius && (diff <= 0.82 || dist < 1.1);
+    }
+
+    if (hitInBounds) {
       const hitLanded = this.tryHitHero(e, e.moveDamage, e.moveUnblockable);
       if (hitLanded && e.affix === 'vampiric') {
         const leech = Math.round(e.moveDamage * 0.8);
@@ -2606,6 +2827,9 @@ export class Game {
       if (frontal) {
         if (h.blockElapsed <= 0.26 + loadout.parryWindowBonus) {
           h.parryCount += 1;
+          if (this.mp.mode === 'offline' || this.mp.role === 'host') {
+            this.saveStore.incrementStat('totalParries', 1);
+          }
           h.spirit = Math.min(h.maxSpirit, h.spirit + 24 + loadout.parrySpiritBonus);
           h.ult = Math.min(100, h.ult + 22 * this.blessings.ultGainMult * loadout.ultGainMult);
           if (loadout.parryHeal > 0) {
@@ -2622,17 +2846,21 @@ export class Game {
 
           if (attacker) {
             attacker.hitstopTimer = 0.14;
-            attacker.poise = Math.min(attacker.maxPoise, attacker.poise + 55);
+            attacker.poise = Math.min(attacker.maxPoise, attacker.poise + 60);
             attacker.telegraph?.dispose();
             attacker.telegraph = null;
-            attacker.aiState = 'stagger';
-            attacker.stateTime = 0;
-            attacker.stateDuration = 1.85;
-            h.counterTargetId = attacker.id;
-            h.counterWindowTimer = 1.5;
+            attacker.comboFollowup = false;
+            if (attacker.kind !== 'boss' || attacker.poise >= attacker.maxPoise) {
+              attacker.poise = 0;
+              attacker.aiState = 'stagger';
+              attacker.stateTime = 0;
+              attacker.stateDuration = attacker.kind === 'boss' ? 2.1 : 1.85;
+              h.counterTargetId = attacker.id;
+              h.counterWindowTimer = 1.5;
+            }
             if (loadout.parryReflectBonus > 0 && attacker.hp > 0) {
               const reflectDmg = Math.round(dmg * (1.2 + loadout.parryReflectBonus) * this.getHeroDamageScale());
-              this.damageEnemy(attacker, reflectDmg, true, h.yaw, 28, true, true);
+              this.damageEnemy(attacker, reflectDmg, true, h.yaw, 28, true, true, 'parry');
             }
           } else if (this.mp.mode === 'solo' && this.peer) {
             h.counterTargetId = -999;
@@ -2653,13 +2881,6 @@ export class Game {
         );
         triggerHaptic('light');
         if (h.stamina > 0) {
-          if (attacker) {
-            h.counterTargetId = attacker.id;
-            h.counterWindowTimer = 0.85;
-          } else if (this.mp.mode === 'solo' && this.peer) {
-            h.counterTargetId = -999;
-            h.counterWindowTimer = 0.85;
-          }
           this.spawnWorldCallout('格挡', h.pos, 'info');
           return false;
         }
@@ -2697,7 +2918,8 @@ export class Game {
         this.mode = 'defeat';
         this.hud.setMode('defeat');
         this.hud.showResult(false, this.runElapsed, h, {
-          stageDef: getStageDef(this.currentStageId),
+          stageDef: this.getActiveStageDef(),
+          dungeonDef: this.activeDungeon ?? undefined,
         });
       }
     } else if (h.state !== 'skillR') {
@@ -2874,7 +3096,7 @@ export class Game {
     if (this.mp.mode === 'solo') return;
     if (this.mp.mode === 'coop' && this.mp.role === 'guest') return;
 
-    const stageDef = getStageDef(this.currentStageId);
+    const stageDef = this.getActiveStageDef();
 
     if (this.stagePhase === 'combat') {
       const anyAlive = this.enemies.some((e) => e.aiState !== 'dead');
@@ -2883,19 +3105,19 @@ export class Game {
       if (this.currentWaveIdx + 1 < stageDef.waves.length) {
         this.stagePhase = 'waveTransition';
         this.stageTimer = 1.65;
-        this.hud.showSubtitle(`第 ${this.currentWaveIdx + 1} 波肃清——前方妖气再聚！`, 2.0);
+        this.hud.showSubtitle(`第 ${this.currentWaveIdx + 1} 波肃清——前方妖气再聚！`, 1.2);
       } else {
         this.stagePhase = 'done';
         this.stageTimer = 1.2;
         this.audio.setMood('victory');
-        this.hud.showSubtitle(stageDef.victoryLine, 3.0);
+        this.hud.showSubtitle(stageDef.victoryLine, 2.2);
       }
     } else if (this.stagePhase === 'waveTransition') {
       this.stageTimer -= dt;
       if (this.stageTimer <= 0) {
         this.currentWaveIdx += 1;
         this.stagePhase = 'combat';
-        this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + 24);
+        this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + 12);
         this.hero.spirit = Math.min(this.hero.maxSpirit, this.hero.spirit + 25);
         this.spawnWave(stageDef, this.currentWaveIdx, this.mp.mode !== 'coop');
       }
@@ -2908,6 +3130,35 @@ export class Game {
   }
 
   private completeCurrentStage(): void {
+    for (const gear of this.vfx.collectAllGearDrops()) {
+      this.saveStore.addRolledItem(gear);
+      this.stageDroppedGear.push(gear);
+    }
+
+    if (this.activeDungeon) {
+      const dungeon = this.activeDungeon;
+      this.saveStore.recordDungeonClear(dungeon.id);
+      this.saveStore.incrementStat('totalDungeons', 1);
+      const clearBonus = dungeon.jadeReward;
+      this.hero.stageJadeEarned += clearBonus;
+      this.saveStore.addJade(clearBonus);
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+
+      this.mode = 'victory';
+      this.hud.clearSubtitle();
+      this.hud.setMode('victory');
+      this.audio.playHeroVoice('victory');
+      const opts: ResultDisplayOptions = {
+        stageDef: dungeon.stageDef,
+        dungeonDef: dungeon,
+        droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
+        nextStageId: null,
+        jadeEarned: this.hero.stageJadeEarned,
+      };
+      this.hud.showResult(true, this.runElapsed, this.hero, opts);
+      return;
+    }
+
     const stageDef = getStageDef(this.currentStageId);
     const starResult = evaluateStageStars(
       stageDef,
@@ -2933,6 +3184,7 @@ export class Game {
       starResult,
       nextStageId: this.mp.mode === 'offline' ? nextStageId : null,
       blessingChoices,
+      droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
       jadeEarned: this.hero.stageJadeEarned,
     };
     this.hud.showResult(true, this.runElapsed, this.hero, opts);
@@ -3139,7 +3391,7 @@ export class Game {
     const e = this.enemies.find((x) => x.id === pkt.enemyId && x.aiState !== 'dead');
     if (!e) return;
     const yaw = this.peer ? Math.atan2(e.pos.x - this.peer.pos.x, e.pos.z - this.peer.pos.z) : 0;
-    this.damageEnemy(e, pkt.damage, pkt.heavy, yaw, pkt.poise, pkt.skill === 'skillR', false);
+    this.damageEnemy(e, pkt.damage, pkt.heavy, yaw, pkt.poise, pkt.skill === 'skillR', false, pkt.skill);
   }
 
   private sendPvpStrike(damage: number, poise: number, heavy: boolean, yaw: number, skill?: string): void {
@@ -3368,6 +3620,25 @@ export class Game {
       mpCreate: (mode: 'coop' | 'solo', stage = 1) => this.mp.createRoom(mode, stage, '测试侠客'),
       mpJoin: (code: string) => this.mp.joinRoom(code, '测试同门'),
       mpRoom: () => this.mp.roomCode,
+    };
+
+    (window as unknown as Record<string, unknown>).__gameDebug = {
+      startDungeon: (dungeonId: string, skipDialogue = true) => this.startDungeon(dungeonId, skipDialogue),
+      spawnTestGearDrop: (rarity: EquipRarity = 'legendary', tier: 1 | 2 | 3 = 3) => {
+        const item = rollEquipmentDrop({
+          tier,
+          guaranteedMinRarity: rarity,
+          source: '调试掉宝',
+          rng: this.rng,
+        });
+        const dropPos = this.hero.pos
+          .clone()
+          .add(new THREE.Vector3(Math.sin(this.hero.yaw) * 3.2, 0, Math.cos(this.hero.yaw) * 3.2));
+        this.vfx.spawnGearDrop(dropPos, item, this.rng);
+        this.audio.playGearDropChime(item.rarity);
+        return item;
+      },
+      getInventoryCount: () => this.saveStore.getInventory().length,
     };
   }
 

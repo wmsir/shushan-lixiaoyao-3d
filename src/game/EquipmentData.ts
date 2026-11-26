@@ -93,8 +93,31 @@ export const STARTER_OWNED_ITEMS: string[] = [
   'skin_xiaoyao',
 ];
 
-export const DEFAULT_STARTER_JADE = 280;
+export const DEFAULT_STARTER_JADE = 90;
 export const MAX_FORGE_LEVEL = 5;
+export const MAX_INVENTORY_SIZE = 40;
+
+export interface GearAffix {
+  id: string;
+  label: string;
+  stat: keyof ShopItemStats;
+  value: number;
+  tier: 'normal' | 'prime';
+}
+
+export interface RolledGearItem {
+  uid: string;
+  templateId: string;
+  category: 'weapon' | 'armor' | 'relic';
+  name: string;
+  rarity: EquipRarity;
+  qualityPct: number;
+  affixes: GearAffix[];
+  forgeLevel: number;
+  powerScore: number;
+  source: string;
+  droppedAt: number;
+}
 
 export const CATEGORY_LABELS: Record<EquipCategory, string> = {
   weapon: '仙剑神兵',
@@ -389,9 +412,249 @@ export function getUpgradeCost(item: ShopItemDef, currentLevel: number): number 
   return Math.round((base * 0.42 + 60) * (1 + currentLevel * 0.65));
 }
 
+const RARITY_RANK: Record<EquipRarity, number> = {
+  common: 0,
+  rare: 1,
+  epic: 2,
+  legendary: 3,
+};
+
+const RARITY_FALLBACK_ORDER: EquipRarity[] = ['common', 'rare', 'epic', 'legendary'];
+
+interface AffixPoolEntry {
+  id: string;
+  stat: keyof ShopItemStats;
+  min: number;
+  max: number;
+  isInt?: boolean;
+  prefix: string;
+  format: (val: number) => string;
+}
+
+const AFFIX_POOL: AffixPoolEntry[] = [
+  { id: 'af_atk', stat: 'atkPct', min: 0.04, max: 0.16, prefix: '破军', format: (v) => `剑伤 +${Math.round(v * 100)}%` },
+  { id: 'af_hp', stat: 'hpBonus', min: 18, max: 68, isInt: true, prefix: '无双', format: (v) => `气血 +${Math.round(v)}` },
+  { id: 'af_crit', stat: 'critRate', min: 0.03, max: 0.12, prefix: '无双', format: (v) => `暴击 +${Math.round(v * 100)}%` },
+  { id: 'af_cdmg', stat: 'critDmg', min: 0.08, max: 0.28, prefix: '无双', format: (v) => `暴伤 +${Math.round(v * 100)}%` },
+  { id: 'af_def', stat: 'dmgReduce', min: 0.03, max: 0.1, prefix: '太初', format: (v) => `减伤 +${Math.round(v * 100)}%` },
+  { id: 'af_spd', stat: 'speedPct', min: 0.03, max: 0.09, prefix: '极品', format: (v) => `移速 +${Math.round(v * 100)}%` },
+  { id: 'af_cdr', stat: 'cdReduce', min: 0.03, max: 0.1, prefix: '太初', format: (v) => `冷却 -${Math.round(v * 100)}%` },
+  { id: 'af_leech', stat: 'lifestealPct', min: 0.02, max: 0.06, prefix: '饮血', format: (v) => `吸血 +${Math.round(v * 100)}%` },
+  { id: 'af_poise', stat: 'poisePct', min: 0.08, max: 0.24, prefix: '破军', format: (v) => `破势 +${Math.round(v * 100)}%` },
+  { id: 'af_kheal', stat: 'killHealPct', min: 0.04, max: 0.12, prefix: '饮血', format: (v) => `斩回 +${Math.round(v * 100)}%` },
+  { id: 'af_pheal', stat: 'parryHeal', min: 8, max: 24, isInt: true, prefix: '太初', format: (v) => `弹回 +${Math.round(v)}` },
+  { id: 'af_ult', stat: 'ultGainPct', min: 0.08, max: 0.24, prefix: '极品', format: (v) => `剑意 +${Math.round(v * 100)}%` },
+];
+
+function computeStatsPowerScore(s: ShopItemStats): number {
+  return (
+    (s.atkPct ?? 0) * 900 +
+    (s.hpBonus ?? 0) * 1.8 +
+    (s.critRate ?? 0) * 650 +
+    (s.critDmg ?? 0) * 280 +
+    (s.dmgReduce ?? 0) * 850 +
+    (s.speedPct ?? 0) * 320 +
+    (s.cdReduce ?? 0) * 450 +
+    (s.spiritRegenPct ?? 0) * 180 +
+    (s.ultGainPct ?? 0) * 220 +
+    (s.poisePct ?? 0) * 260 +
+    (s.lifestealPct ?? 0) * 1200 +
+    (s.killHealPct ?? 0) * 500 +
+    (s.gourdBonus ?? 0) * 45 +
+    (s.parryWindow ?? 0) * 900 +
+    (s.parryHeal ?? 0) * 3.5 +
+    (s.parryReflectPct ?? 0) * 260 +
+    (s.parrySpirit ?? 0) * 2.5
+  );
+}
+
+export function getRolledItemStats(item: RolledGearItem): ShopItemStats {
+  const tpl = SHOP_ITEM_MAP[item.templateId]?.stats ?? {};
+  const q = item.qualityPct / 100;
+  const f = 1 + item.forgeLevel * 0.1;
+  const combined: ShopItemStats = {};
+
+  const addScaled = (key: keyof ShopItemStats, val: number | undefined, scaleQuality: boolean, scaleForge: boolean) => {
+    if (!val) return;
+    const scaled = val * (scaleQuality ? q : 1) * (scaleForge ? f : 1);
+    combined[key] = (combined[key] ?? 0) + scaled;
+  };
+
+  addScaled('atkPct', tpl.atkPct, true, true);
+  addScaled('hpBonus', tpl.hpBonus, true, true);
+  addScaled('critRate', tpl.critRate, true, true);
+  addScaled('critDmg', tpl.critDmg, true, true);
+  addScaled('dmgReduce', tpl.dmgReduce, true, true);
+  addScaled('speedPct', tpl.speedPct, true, true);
+  addScaled('cdReduce', tpl.cdReduce, true, true);
+  addScaled('spiritRegenPct', tpl.spiritRegenPct, true, true);
+  addScaled('ultGainPct', tpl.ultGainPct, true, true);
+  addScaled('poisePct', tpl.poisePct, true, true);
+  addScaled('lifestealPct', tpl.lifestealPct, true, true);
+  addScaled('killHealPct', tpl.killHealPct, true, true);
+  addScaled('gourdBonus', tpl.gourdBonus, false, false);
+  addScaled('parryWindow', tpl.parryWindow, false, false);
+  addScaled('parryHeal', tpl.parryHeal, true, true);
+  addScaled('parryReflectPct', tpl.parryReflectPct, true, true);
+  addScaled('parrySpirit', tpl.parrySpirit, true, true);
+
+  for (const af of item.affixes) {
+    addScaled(af.stat, af.value, false, true);
+  }
+  if (combined.hpBonus) combined.hpBonus = Math.round(combined.hpBonus);
+  if (combined.parryHeal) combined.parryHeal = Math.round(combined.parryHeal);
+  if (combined.parrySpirit) combined.parrySpirit = Math.round(combined.parrySpirit);
+  return combined;
+}
+
+export function computeShopItemScore(item: ShopItemDef, forgeLevel = 0): number {
+  const f = 1 + Math.min(MAX_FORGE_LEVEL, Math.max(0, forgeLevel)) * 0.1;
+  const s = item.stats;
+  const scaled: ShopItemStats = {
+    atkPct: s.atkPct ? s.atkPct * f : undefined,
+    hpBonus: s.hpBonus ? Math.round(s.hpBonus * f) : undefined,
+    critRate: s.critRate ? s.critRate * f : undefined,
+    critDmg: s.critDmg ? s.critDmg * f : undefined,
+    dmgReduce: s.dmgReduce ? s.dmgReduce * f : undefined,
+    speedPct: s.speedPct ? s.speedPct * f : undefined,
+    cdReduce: s.cdReduce ? s.cdReduce * f : undefined,
+    spiritRegenPct: s.spiritRegenPct ? s.spiritRegenPct * f : undefined,
+    ultGainPct: s.ultGainPct ? s.ultGainPct * f : undefined,
+    poisePct: s.poisePct ? s.poisePct * f : undefined,
+    lifestealPct: s.lifestealPct ? s.lifestealPct * f : undefined,
+    killHealPct: s.killHealPct ? s.killHealPct * f : undefined,
+    gourdBonus: s.gourdBonus,
+    parryWindow: s.parryWindow,
+    parryHeal: s.parryHeal ? Math.round(s.parryHeal * f) : undefined,
+    parryReflectPct: s.parryReflectPct ? s.parryReflectPct * f : undefined,
+    parrySpirit: s.parrySpirit ? Math.round(s.parrySpirit * f) : undefined,
+  };
+  return Math.round(computeStatsPowerScore(scaled));
+}
+
+export function computeRolledGearScore(item: RolledGearItem): number {
+  return Math.round(computeStatsPowerScore(getRolledItemStats(item)));
+}
+
+export function getSalvageJade(item: RolledGearItem): number {
+  const base =
+    item.rarity === 'legendary' ? 260 : item.rarity === 'epic' ? 120 : item.rarity === 'rare' ? 55 : 25;
+  return base + 25 * item.forgeLevel;
+}
+
+export function getRolledUpgradeCost(item: RolledGearItem): number {
+  const tpl = SHOP_ITEM_MAP[item.templateId];
+  const fallbackPrice =
+    item.rarity === 'legendary' ? 1200 : item.rarity === 'epic' ? 520 : item.rarity === 'rare' ? 220 : 120;
+  const base = Math.max(120, tpl?.price || fallbackPrice);
+  return Math.round((base * 0.38 + 55) * (1 + item.forgeLevel * 0.6));
+}
+
+export function rollEquipmentDrop(opts: {
+  tier: 1 | 2 | 3;
+  guaranteedMinRarity?: EquipRarity;
+  pityTriggered?: boolean;
+  source: string;
+  rng?: () => number;
+}): RolledGearItem {
+  const rng = opts.rng ?? Math.random;
+  const roll = rng();
+  let rarity: EquipRarity;
+  if (opts.tier === 1) {
+    rarity = roll < 0.32 ? 'common' : roll < 0.8 ? 'rare' : roll < 0.97 ? 'epic' : 'legendary';
+  } else if (opts.tier === 2) {
+    rarity = roll < 0.48 ? 'rare' : roll < 0.88 ? 'epic' : 'legendary';
+  } else {
+    rarity = roll < 0.22 ? 'rare' : roll < 0.76 ? 'epic' : 'legendary';
+  }
+
+  let minRank = opts.guaranteedMinRarity ? RARITY_RANK[opts.guaranteedMinRarity] : 0;
+  if (opts.pityTriggered) {
+    const pityRarity: EquipRarity = opts.tier === 3 || rng() < 0.35 ? 'legendary' : 'epic';
+    minRank = Math.max(minRank, RARITY_RANK[pityRarity]);
+  }
+  if (RARITY_RANK[rarity] < minRank) {
+    rarity = RARITY_FALLBACK_ORDER[minRank];
+  }
+
+  const categories: Array<'weapon' | 'armor' | 'relic'> = ['weapon', 'armor', 'relic'];
+  const category = categories[Math.floor(rng() * categories.length) % categories.length];
+
+  let candidates: ShopItemDef[] = [];
+  for (let r = RARITY_RANK[rarity]; r >= 0; r--) {
+    const targetRarity = RARITY_FALLBACK_ORDER[r];
+    candidates = SHOP_ITEMS.filter((it) => it.category === category && it.rarity === targetRarity);
+    if (candidates.length > 0) break;
+  }
+  const tpl = candidates[Math.floor(rng() * candidates.length) % candidates.length];
+
+  let qualityPct =
+    rarity === 'legendary'
+      ? 102 + Math.floor(rng() * 24)
+      : rarity === 'epic'
+        ? 95 + Math.floor(rng() * 26)
+        : rarity === 'rare'
+          ? 88 + Math.floor(rng() * 28)
+          : 80 + Math.floor(rng() * 26);
+  if (opts.pityTriggered) {
+    qualityPct = Math.max(qualityPct, 102 + Math.floor(rng() * 24));
+  }
+  qualityPct = Math.min(125, Math.max(80, qualityPct));
+
+  const affixCount =
+    rarity === 'legendary' ? 3 : rarity === 'epic' ? 2 : rarity === 'rare' ? (rng() < 0.5 ? 2 : 1) : 1;
+  const pool = [...AFFIX_POOL];
+  const affixes: GearAffix[] = [];
+  for (let i = 0; i < affixCount && pool.length > 0; i++) {
+    const idx = Math.floor(rng() * pool.length) % pool.length;
+    const entry = pool.splice(idx, 1)[0];
+    const rawT = rng();
+    const boost = rarity === 'legendary' ? 0.22 : rarity === 'epic' ? 0.12 : rarity === 'rare' ? 0.05 : 0;
+    const t = Math.min(1, boost + rawT * (1 - boost));
+    const rawVal = entry.min + (entry.max - entry.min) * t;
+    const value = entry.isInt ? Math.round(rawVal) : Number(rawVal.toFixed(3));
+    affixes.push({
+      id: `${entry.id}_${i}`,
+      label: entry.format(value),
+      stat: entry.stat,
+      value,
+      tier: t >= 0.75 ? 'prime' : 'normal',
+    });
+  }
+
+  const primeAffix = affixes.find((a) => a.tier === 'prime');
+  let prefix = '';
+  if (primeAffix) {
+    const entry = AFFIX_POOL.find((p) => p.stat === primeAffix.stat);
+    prefix = `${entry?.prefix ?? '极品'}·`;
+  } else if (rarity === 'legendary') {
+    prefix = '太初·';
+  } else if (rarity === 'epic') {
+    prefix = '破军·';
+  }
+
+  const uid = `gear_${Date.now().toString(36)}_${Math.floor(rng() * 1e6).toString(36)}`;
+  const item: RolledGearItem = {
+    uid,
+    templateId: tpl.id,
+    category,
+    name: `${prefix}${tpl.name}`,
+    rarity,
+    qualityPct,
+    affixes,
+    forgeLevel: 0,
+    powerScore: 0,
+    source: opts.source,
+    droppedAt: Date.now(),
+  };
+  item.powerScore = computeRolledGearScore(item);
+  return item;
+}
+
 export function computeHeroLoadoutStats(
   equipped: EquippedLoadout,
   upgrades: Record<string, number>,
+  inventory?: RolledGearItem[],
 ): HeroLoadoutStats {
   let atkPct = 0;
   let maxHpBonus = 0;
@@ -411,13 +674,7 @@ export function computeHeroLoadoutStats(
   let parryReflectBonus = 0;
   let parrySpiritBonus = 0;
 
-  const ids = [equipped.weapon, equipped.armor, equipped.relic, equipped.skin];
-  for (const id of ids) {
-    const item = SHOP_ITEM_MAP[id];
-    if (!item) continue;
-    const lv = item.category === 'skin' ? 0 : Math.min(MAX_FORGE_LEVEL, Math.max(0, upgrades[id] ?? 0));
-    const scale = 1 + lv * 0.1;
-    const s = item.stats;
+  const accumulate = (s: ShopItemStats, scale: number) => {
     if (s.atkPct) atkPct += s.atkPct * scale;
     if (s.hpBonus) maxHpBonus += Math.round(s.hpBonus * scale);
     if (s.critRate) critRate += s.critRate * scale;
@@ -435,6 +692,22 @@ export function computeHeroLoadoutStats(
     if (s.parryHeal) parryHeal += Math.round(s.parryHeal * scale);
     if (s.parryReflectPct) parryReflectBonus += s.parryReflectPct * scale;
     if (s.parrySpirit) parrySpiritBonus += Math.round(s.parrySpirit * scale);
+  };
+
+  const slots: Array<'weapon' | 'armor' | 'relic' | 'skin'> = ['weapon', 'armor', 'relic', 'skin'];
+  for (const slot of slots) {
+    const id = equipped[slot];
+    if (slot !== 'skin' && inventory) {
+      const rolled = inventory.find((x) => x.uid === id);
+      if (rolled) {
+        accumulate(getRolledItemStats(rolled), 1);
+        continue;
+      }
+    }
+    const item = SHOP_ITEM_MAP[id];
+    if (!item) continue;
+    const lv = item.category === 'skin' ? 0 : Math.min(MAX_FORGE_LEVEL, Math.max(0, upgrades[id] ?? 0));
+    accumulate(item.stats, 1 + lv * 0.1);
   }
 
   return {
@@ -463,8 +736,10 @@ export function getEquippedSkinVisual(equipped: EquippedLoadout): HeroSkinVisual
   return skin;
 }
 
-export function getEquippedWeaponVisual(equipped: EquippedLoadout): WeaponVisual {
-  const wpn = SHOP_ITEM_MAP[equipped.weapon]?.weaponVisual ?? SHOP_ITEM_MAP[DEFAULT_EQUIPPED.weapon].weaponVisual!;
+export function getEquippedWeaponVisual(equipped: EquippedLoadout, inventory?: RolledGearItem[]): WeaponVisual {
+  const rolled = inventory?.find((x) => x.uid === equipped.weapon);
+  const wpnId = rolled ? rolled.templateId : equipped.weapon;
+  const wpn = SHOP_ITEM_MAP[wpnId]?.weaponVisual ?? SHOP_ITEM_MAP[DEFAULT_EQUIPPED.weapon].weaponVisual!;
   return wpn;
 }
 

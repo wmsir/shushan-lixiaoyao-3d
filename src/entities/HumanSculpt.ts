@@ -30,6 +30,48 @@ export function applyHumanSkinSss(
   return mat;
 }
 
+export interface SilhouetteRimHandle {
+  uRimColor: { value: THREE.Color };
+  uRimStrength: { value: number };
+  uRimPower: { value: number };
+}
+
+/**
+ * Attaches view-dependent Fresnel silhouette rim lighting to any MeshStandardMaterial /
+ * MeshPhysicalMaterial without washing out surface albedo or breaking shared shader caching.
+ */
+export function applySilhouetteRim<T extends THREE.MeshStandardMaterial>(
+  mat: T,
+  rimHex: string,
+  strength: number,
+  power = 2.8,
+  outHandles?: SilhouetteRimHandle[],
+): T {
+  const handle: SilhouetteRimHandle = {
+    uRimColor: { value: new THREE.Color(rimHex) },
+    uRimStrength: { value: strength },
+    uRimPower: { value: power },
+  };
+  if (outHandles) outHandles.push(handle);
+  mat.customProgramCacheKey = () => 'silhouette-rim-v1';
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = handle.uRimColor;
+    shader.uniforms.uRimStrength = handle.uRimStrength;
+    shader.uniforms.uRimPower = handle.uRimPower;
+    shader.fragmentShader =
+      `uniform vec3 uRimColor;\nuniform float uRimStrength;\nuniform float uRimPower;\n` +
+      shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+         vec3 _rimV = normalize( vViewPosition );
+         float _rimNdV = saturate( abs( dot( normal, _rimV ) ) );
+         float _rimTerm = pow( 1.0 - _rimNdV, uRimPower );
+         totalEmissiveRadiance += uRimColor * ( _rimTerm * uRimStrength );`,
+      );
+  };
+  return mat;
+}
+
 /**
  * High-resolution (60x44) sculpted anatomical human head mesh with live-action facial relief:
  * sculpted supraorbital brow arch, recessed orbital sockets, realistic nasal bridge + tip + alae,

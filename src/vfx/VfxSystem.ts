@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { clamp, easeOutQuart, lerp } from '../utils/math';
+import type { EquipRarity, RolledGearItem } from '../game/EquipmentData';
 
 export interface LootDrop {
-  kind: 'heal' | 'spirit' | 'gourd';
+  kind: 'heal' | 'spirit' | 'gourd' | 'gear';
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   age: number;
@@ -10,6 +11,8 @@ export interface LootDrop {
   collected: boolean;
   mesh: THREE.Group;
   pillar: THREE.Group;
+  gearItem?: RolledGearItem;
+  rarity?: EquipRarity;
 }
 
 interface SlashVfx {
@@ -952,11 +955,176 @@ export class VfxSystem {
     this.drops.push(drop);
   }
 
+  /**
+   * Legend-style ("传奇光柱") 3D gear loot drop with towering rarity light beam + rotating floor rune ring.
+   */
+  spawnGearDrop(pos: THREE.Vector3, item: RolledGearItem, rng: () => number): void {
+    const r = item.rarity;
+    const colHex =
+      r === 'legendary' ? '#ffaa1d' : r === 'epic' ? '#c56bff' : r === 'rare' ? '#38b6ff' : '#5de8b5';
+    const colHdr =
+      r === 'legendary'
+        ? new THREE.Color(2.5, 1.45, 0.28)
+        : r === 'epic'
+          ? new THREE.Color(1.65, 0.62, 2.45)
+          : r === 'rare'
+            ? new THREE.Color(0.38, 1.55, 2.45)
+            : new THREE.Color(0.45, 1.95, 1.35);
+
+    const mesh = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: colHex,
+      emissive: new THREE.Color(colHex),
+      emissiveIntensity: r === 'legendary' ? 1.45 : r === 'epic' ? 1.15 : 0.9,
+      roughness: 0.18,
+      metalness: 0.72,
+    });
+    const coreCrystal = new THREE.Mesh(
+      new THREE.OctahedronGeometry(r === 'legendary' ? 0.28 : r === 'epic' ? 0.24 : 0.2, 0),
+      bodyMat,
+    );
+    coreCrystal.scale.set(0.75, 1.55, 0.75);
+    mesh.add(coreCrystal);
+    if (r === 'legendary' || r === 'epic') {
+      const haloRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.34, 0.032, 8, 24),
+        new THREE.MeshBasicMaterial({
+          color: colHdr,
+          transparent: true,
+          opacity: 0.9,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      haloRing.rotation.x = Math.PI * 0.35;
+      mesh.add(haloRing);
+    }
+    mesh.position.set(pos.x, pos.y + 0.6, pos.z);
+
+    const pillar = new THREE.Group();
+    const pillarH = r === 'legendary' ? 9.4 : r === 'epic' ? 7.2 : r === 'rare' ? 5.5 : 3.2;
+    const layers: Array<[number, number]> =
+      r === 'legendary'
+        ? [
+            [0.09, 0.98],
+            [0.24, 0.56],
+            [0.48, 0.24],
+          ]
+        : r === 'epic'
+          ? [
+              [0.08, 0.94],
+              [0.2, 0.48],
+              [0.4, 0.2],
+            ]
+          : [
+              [0.06, 0.9],
+              [0.16, 0.42],
+              [0.34, 0.16],
+            ];
+    for (const [rad, op] of layers) {
+      const pMat = new THREE.MeshBasicMaterial({
+        color: colHdr,
+        transparent: true,
+        opacity: op,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(rad * 0.42, rad, pillarH, 12, 1, true), pMat);
+      cyl.position.y = pillarH * 0.5;
+      pillar.add(cyl);
+    }
+
+    if (r === 'legendary') {
+      const crimsonHdr = new THREE.Color(2.4, 0.35, 0.25);
+      const outerSpiral = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.36, pillarH * 0.85, 6, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: crimsonHdr,
+          transparent: true,
+          opacity: 0.36,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          wireframe: true,
+        }),
+      );
+      outerSpiral.position.y = pillarH * 0.425;
+      outerSpiral.name = 'counterSpin';
+      pillar.add(outerSpiral);
+    }
+
+    const baseRing = new THREE.Mesh(
+      new THREE.RingGeometry(r === 'legendary' ? 0.52 : 0.36, r === 'legendary' ? 0.78 : 0.58, 24),
+      new THREE.MeshBasicMaterial({
+        color: colHdr,
+        transparent: true,
+        opacity: r === 'epic' || r === 'legendary' ? 0.88 : 0.72,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    baseRing.rotation.x = -Math.PI / 2;
+    baseRing.position.y = 0.05;
+    pillar.add(baseRing);
+
+    if (r === 'epic' || r === 'legendary') {
+      const runeRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.9, 1.04, 8),
+        new THREE.MeshBasicMaterial({
+          color: colHdr,
+          transparent: true,
+          opacity: 0.7,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      runeRing.rotation.x = -Math.PI / 2;
+      runeRing.position.y = 0.055;
+      runeRing.name = 'runeRing';
+      pillar.add(runeRing);
+    }
+
+    pillar.visible = false;
+    const a = rng() * Math.PI * 2;
+    const spd = 2.2 + rng() * 1.8;
+    const drop: LootDrop = {
+      kind: 'gear',
+      pos: mesh.position.clone(),
+      vel: new THREE.Vector3(Math.cos(a) * spd, 5.2 + rng() * 1.4, Math.sin(a) * spd),
+      age: 0,
+      bounced: false,
+      collected: false,
+      mesh,
+      pillar,
+      gearItem: item,
+      rarity: r,
+    };
+
+    this.group.add(mesh, pillar);
+    this.drops.push(drop);
+  }
+
+  collectAllGearDrops(): RolledGearItem[] {
+    const collected: RolledGearItem[] = [];
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      if (d.kind === 'gear' && d.gearItem) {
+        collected.push(d.gearItem);
+        this.group.remove(d.mesh, d.pillar);
+        this.drops.splice(i, 1);
+      }
+    }
+    return collected;
+  }
+
   update(
     dt: number,
     elapsed: number,
     heroPos: THREE.Vector3,
-    onCollectDrop?: (kind: LootDrop['kind']) => void,
+    onCollectDrop?: (kind: LootDrop['kind'], gearItem?: RolledGearItem) => void,
     onDropBounce?: (kind: LootDrop['kind']) => void,
   ): void {
     // 1. Slash arcs
@@ -1159,11 +1327,16 @@ export class VfxSystem {
         } else {
           d.pos.y = 0.38 + Math.sin(elapsed * 3.4 + i) * 0.1;
           d.pillar.scale.set(1 + Math.sin(elapsed * 4.2) * 0.08, 1, 1 + Math.sin(elapsed * 4.2) * 0.08);
+          if (d.kind === 'gear') {
+            d.pillar.rotation.y += dt * 0.9;
+            const cs = d.pillar.getObjectByName('counterSpin');
+            if (cs) cs.rotation.y -= dt * 2.4;
+          }
         }
         if (dist < 0.85 && d.age > 0.35) {
           this.group.remove(d.mesh, d.pillar);
           this.drops.splice(i, 1);
-          onCollectDrop?.(d.kind);
+          onCollectDrop?.(d.kind, d.gearItem);
           continue;
         }
       }

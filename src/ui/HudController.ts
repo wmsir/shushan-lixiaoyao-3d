@@ -9,8 +9,10 @@ import type { HeroState, EnemyEntity, PeerHeroState } from '../game/CombatEntiti
 import {
   CAMPAIGN_STAGES,
   CHAPTERS,
+  DUNGEON_LIST,
   type BlessingDef,
   type CampaignSaveStore,
+  type DungeonDef,
   type StageDef,
   type StageDialogueDef,
   getChapterDef,
@@ -21,9 +23,14 @@ import {
   CATEGORY_LABELS,
   type EquipCategory,
   MAX_FORGE_LEVEL,
+  MAX_INVENTORY_SIZE,
   RARITY_LABELS,
+  type RolledGearItem,
   SHOP_ITEMS,
   computeCombatPower,
+  computeHeroLoadoutStats,
+  getRolledUpgradeCost,
+  getSalvageJade,
   getUpgradeCost,
 } from '../game/EquipmentData';
 import { clamp } from '../utils/math';
@@ -58,10 +65,18 @@ export interface HudCallbacks {
   onShopBuy: (itemId: string) => { ok: boolean; reason: string };
   onShopEquip: (itemId: string) => boolean;
   onShopUpgrade: (itemId: string) => { ok: boolean; level: number; reason: string };
+  onStartDungeon: (dungeonId: string) => void;
+  onEquipRolled: (uid: string) => boolean;
+  onUpgradeRolled: (uid: string) => { ok: boolean; level: number; reason: string };
+  onSalvageRolled: (uid: string) => { ok: boolean; jade: number; reason: string };
+  onSalvageLow: (maxRarity: 'common' | 'rare') => { count: number; jade: number };
+  onClaimBounty: (bountyId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
 }
 
 export interface ResultDisplayOptions {
   stageDef?: StageDef;
+  dungeonDef?: DungeonDef;
+  droppedGear?: RolledGearItem[];
   starResult?: {
     stars: 1 | 2 | 3;
     checks: [boolean, boolean, boolean];
@@ -86,6 +101,7 @@ export class HudController {
   private readonly titleOverlay = this.q('#title-overlay');
   private readonly campaignOverlay = this.q('#campaign-overlay');
   private readonly shopOverlay = this.q('#shop-overlay');
+  private readonly dungeonOverlay = this.q('#dungeon-overlay');
   private readonly dialogueOverlay = this.q('#dialogue-overlay');
   private readonly hudRoot = this.q('#game-hud');
   private readonly touchRoot = this.q('#touch-controls');
@@ -141,8 +157,6 @@ export class HudController {
   private readonly tGourdCountEl = this.q('#t-gourd-count');
 
   private readonly dangerWarning = this.q('#danger-warning');
-  private readonly counterPrompt = this.q('#counter-prompt');
-  private readonly counterKey = this.q('#counter-key');
   private readonly touchAtkBtn = this.q('#btn-attack');
   private readonly touchAtkLbl = this.q('#t-atk-lbl');
   private readonly touchDodgeBtn = this.q('#btn-dodge');
@@ -172,10 +186,20 @@ export class HudController {
   // Shop Modal elements
   private readonly shopJadeBalance = this.q('#shop-jade-balance');
   private readonly shopPowerPill = this.q('#shop-power-pill');
+  private readonly shopToastEl = this.q('#shop-toast');
   private readonly shopTabsEl = this.q('#shop-tabs');
+  private readonly shopBagBar = this.q('#shop-bag-bar');
   private readonly shopGridEl = this.q('#shop-item-grid');
   private readonly shopPowerSummary = this.q('#shop-power-summary');
   private readonly shopBattleBtn = this.q('#btn-shop-battle');
+
+  // Dungeon & Bounty Modal elements
+  private readonly dungeonPowerPill = this.q('#dungeon-power-pill');
+  private readonly dungeonPityPill = this.q('#dungeon-pity-pill');
+  private readonly dungeonToastEl = this.q('#dungeon-toast');
+  private readonly dungeonCardGrid = this.q('#dungeon-card-grid');
+  private readonly bountyGrid = this.q('#bounty-grid');
+  private readonly dungeonBountyDot = this.q('#dungeon-bounty-dot');
 
   // Dialogue Modal elements
   private readonly dlgKicker = this.q('#dlg-kicker');
@@ -194,12 +218,13 @@ export class HudController {
   private readonly mapCoopBtn = this.q('#btn-map-coop');
 
   // Result modal elements
+  private readonly resultModalCard = this.q('#result-modal-card');
+  private readonly resultStageTag = this.q('#result-stage-tag');
   private readonly resultTitle = this.q('#result-title');
   private readonly resultStarsRow = this.q('#result-stars-row');
   private readonly resultJadeGain = this.q('#result-jade-gain');
-  private readonly resultSub = this.q('#result-sub');
-  private readonly resultStarChecks = this.q('#result-star-checks');
   private readonly resultStats = this.q('#result-stats');
+  private readonly resultLootRow = this.q('#result-loot-row');
   private readonly resultBlessingWrap = this.q('#result-blessing-wrap');
   private readonly resultBlessingGrid = this.q('#result-blessing-grid');
   private readonly nextStageBtn = this.q('#btn-next-stage');
@@ -218,15 +243,17 @@ export class HudController {
 
   private selectedStage = 1;
   private activeChapter: 1 | 2 | 3 | 4 = 1;
-  private activeShopCategory: EquipCategory = 'weapon';
+  private activeShopCategory: EquipCategory | 'bag' = 'weapon';
   private saveStore: CampaignSaveStore | null = null;
   private selectedBlessingId: string | undefined;
   private pendingNextStageId: number | null = null;
+  private pendingDungeonId: string | null = null;
   private currentScreenMode: ScreenMode = 'title';
   private subtitleTimer = 0;
   private stageBannerTimer = 0;
   private wheelForced = false;
-  private mobileMode = false;
+  private shopToastTimer: number | null = null;
+  private dungeonToastTimer: number | null = null;
 
   constructor(private readonly callbacks: HudCallbacks) {
     this.appVersionBadge.textContent = `v${APP_VERSION}`;
@@ -254,8 +281,10 @@ export class HudController {
     }
 
     this.startBtn.addEventListener('click', () => this.callbacks.onStart(this.selectedStage));
+    this.q('#btn-open-dungeon').addEventListener('click', () => this.openDungeon());
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
     this.q('#btn-open-shop').addEventListener('click', () => this.openShop());
+    this.q('#btn-close-dungeon').addEventListener('click', () => this.closeDungeon());
     this.q('#btn-close-campaign').addEventListener('click', () => this.closeCampaignMap());
     this.q('#btn-close-shop').addEventListener('click', () => this.closeShop());
     this.shopBattleBtn.addEventListener('click', () => {
@@ -279,7 +308,9 @@ export class HudController {
     });
 
     this.nextStageBtn.addEventListener('click', () => {
-      if (this.pendingNextStageId) {
+      if (this.pendingDungeonId) {
+        this.callbacks.onStartDungeon(this.pendingDungeonId);
+      } else if (this.pendingNextStageId) {
         this.callbacks.onNextStage(this.pendingNextStageId, this.selectedBlessingId);
       }
     });
@@ -311,6 +342,25 @@ export class HudController {
     this.muteBtn.addEventListener('click', () => {
       const muted = this.callbacks.onToggleMute();
       this.muteBtn.textContent = muted ? '静音' : '音律';
+      this.muteBtn.classList.toggle('active-mode', muted);
+    });
+
+    for (const btn of Array.from(document.querySelectorAll<HTMLButtonElement>('.util-btn'))) {
+      btn.addEventListener('click', () => btn.blur());
+    }
+
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.isComposing || e.repeat) return;
+      if (
+        this.currentScreenMode === 'dialogue' &&
+        !this.campaignOverlay.classList.contains('visible') &&
+        !this.shopOverlay.classList.contains('visible') &&
+        !this.dungeonOverlay.classList.contains('visible') &&
+        (e.code === 'Enter' || e.code === 'Space')
+      ) {
+        e.preventDefault();
+        this.callbacks.onConfirmDialogue();
+      }
     });
 
     this.q('#btn-mp-coop').addEventListener('click', () => this.callbacks.onMpCreate('coop', this.selectedStage));
@@ -351,6 +401,109 @@ export class HudController {
     this.updateSelectedStageLabels();
     this.renderCampaignModal();
     this.renderShopModal();
+    this.renderDungeonModal();
+    const hasClaimableBounty = store.getBountyStates().some((b) => b.done && !b.claimed);
+    this.dungeonBountyDot.classList.toggle('visible', hasClaimableBounty);
+  }
+
+  openDungeon(): void {
+    this.renderDungeonModal();
+    this.dungeonOverlay.classList.add('visible');
+  }
+
+  closeDungeon(): void {
+    this.dungeonOverlay.classList.remove('visible');
+  }
+
+  private showDungeonToast(text: string, ok: boolean): void {
+    this.dungeonToastEl.textContent = text;
+    this.dungeonToastEl.classList.toggle('err', !ok);
+    this.dungeonToastEl.classList.add('visible');
+    if (this.dungeonToastTimer !== null) {
+      window.clearTimeout(this.dungeonToastTimer);
+    }
+    this.dungeonToastTimer = window.setTimeout(() => {
+      this.dungeonToastEl.classList.remove('visible');
+      this.dungeonToastTimer = null;
+    }, 2400);
+  }
+
+  private renderDungeonModal(): void {
+    const store = this.saveStore;
+    if (!store) return;
+
+    const equipped = store.getEquipped();
+    const stats = computeHeroLoadoutStats(equipped, store.data.upgrades, store.getInventory());
+    const realm = getSwordRealm(store.getTotalStars());
+    const power = computeCombatPower(realm.hpBonus, realm.dmgMult, stats);
+    const pity = store.getPityCount();
+
+    this.dungeonPowerPill.textContent = `剑道战力 ${power}`;
+    this.dungeonPityPill.textContent = `极品保底 ${pity}/5`;
+    this.dungeonPityPill.classList.toggle('ready', pity >= 4);
+
+    this.dungeonCardGrid.innerHTML = '';
+    for (const d of DUNGEON_LIST) {
+      const clears = store.getDungeonClears(d.id);
+      const metPower = power >= d.recommendedPower;
+      const card = document.createElement('div');
+      card.className = `dungeon-card tier-${d.tier}`;
+      card.innerHTML = `
+        <div class="dg-top">
+          <span class="dg-tier">第 ${d.tier} 阶秘境</span>
+          <span class="dg-clears">已刷 ${clears} 次</span>
+        </div>
+        <div class="dg-name">${d.name}</div>
+        <div class="dg-sub">${d.subtitle}</div>
+        <div class="dg-meta">
+          <div class="dg-boss">镇守：<strong>${d.bossTitle}</strong></div>
+          <div class="dg-drop">${d.dropRateText}</div>
+          <div class="dg-power ${metPower ? 'met' : 'warn'}">推荐战力 ${d.recommendedPower}（${metPower ? '已达标' : '战力偏低'}）</div>
+        </div>
+        <button type="button" class="xianxia-btn primary dg-enter-btn">挑战爆装 · ◆+${d.jadeReward}</button>
+      `;
+      card.querySelector('.dg-enter-btn')?.addEventListener('click', () => {
+        this.closeDungeon();
+        this.callbacks.onStartDungeon(d.id);
+      });
+      this.dungeonCardGrid.appendChild(card);
+    }
+
+    const bounties = store.getBountyStates();
+    this.bountyGrid.innerHTML = '';
+    for (const b of bounties) {
+      const rewardLabel = `◆+${b.def.rewardJade}${b.def.rewardRarity ? ` + ${RARITY_LABELS[b.def.rewardRarity]}装` : ''}`;
+      const progressText = `${Math.min(b.progress, b.def.target)} / ${b.def.target}`;
+      const card = document.createElement('div');
+      card.className = `bounty-card${b.done && !b.claimed ? ' ready' : ''}${b.claimed ? ' claimed' : ''}`;
+      const actionHtml = b.claimed
+        ? '<span class="bounty-status claimed">已领</span>'
+        : b.done
+          ? `<button type="button" class="bounty-claim-btn" data-bounty-id="${b.def.id}">领取</button>`
+          : '<span class="bounty-status">进行中</span>';
+      card.innerHTML = `
+        <div class="bn-top">
+          <strong class="bn-title">${b.def.title}</strong>
+          <span class="bn-reward">${rewardLabel}</span>
+        </div>
+        <div class="bn-desc">${b.def.desc}</div>
+        <div class="bn-foot">
+          <span class="bn-prog">${progressText}</span>
+          ${actionHtml}
+        </div>
+      `;
+      card.querySelector<HTMLButtonElement>('button[data-bounty-id]')?.addEventListener('click', () => {
+        const res = this.callbacks.onClaimBounty(b.def.id);
+        if (res.ok) {
+          const dropTxt = res.droppedItem ? ` · 获【${res.droppedItem.name}】` : '';
+          this.showDungeonToast(`赏格已领：+◆${res.jade}${dropTxt}`, true);
+        } else {
+          this.showDungeonToast(res.reason, false);
+        }
+        this.syncCampaignProgress(store, this.selectedStage);
+      });
+      this.bountyGrid.appendChild(card);
+    }
   }
 
   openCampaignMap(chapterId?: 1 | 2 | 3 | 4): void {
@@ -364,7 +517,7 @@ export class HudController {
     this.campaignOverlay.classList.remove('visible');
   }
 
-  openShop(cat?: EquipCategory): void {
+  openShop(cat?: EquipCategory | 'bag'): void {
     if (cat) this.activeShopCategory = cat;
     this.renderShopModal();
     this.shopOverlay.classList.add('visible');
@@ -399,7 +552,8 @@ export class HudController {
 
     const jade = store.getJade();
     const equipped = store.getEquipped();
-    const stats = store.getLoadoutStats();
+    const inventory = store.getInventory();
+    const stats = computeHeroLoadoutStats(equipped, store.data.upgrades, inventory);
     const realm = getSwordRealm(store.getTotalStars());
     const power = computeCombatPower(realm.hpBonus, realm.dmgMult, stats);
 
@@ -417,22 +571,139 @@ export class HudController {
     this.shopPowerSummary.textContent = `总加护：气血+${totalHp} · 剑伤+${totalAtkPct}% · 暴击${critPct}% · 减伤${reducePct}%${extras.length ? ` · ${extras.join(' · ')}` : ''}`;
     this.shopBattleBtn.textContent = this.currentScreenMode === 'paused' ? '返回试剑' : `出征 第 ${this.selectedStage} 关`;
 
+    const prevScrollTop = this.shopGridEl.scrollTop;
+
     this.shopTabsEl.innerHTML = '';
     const categories: EquipCategory[] = ['weapon', 'armor', 'relic', 'skin'];
     for (const cat of categories) {
       const tab = document.createElement('button');
       tab.type = 'button';
       tab.className = `shop-tab${cat === this.activeShopCategory ? ' active' : ''}`;
-      const eqItem = SHOP_ITEMS.find((it) => it.id === equipped[cat]);
-      tab.innerHTML = `<strong>${CATEGORY_LABELS[cat]}</strong><span>${eqItem ? eqItem.name : ''}</span>`;
+      tab.innerHTML = `<strong>${CATEGORY_LABELS[cat]}</strong><span>${store.getEquippedItemName(cat)}</span>`;
       tab.addEventListener('click', () => {
         this.activeShopCategory = cat;
+        this.shopGridEl.scrollTop = 0;
         this.renderShopModal();
       });
       this.shopTabsEl.appendChild(tab);
     }
 
+    const bagTab = document.createElement('button');
+    bagTab.type = 'button';
+    bagTab.className = `shop-tab bag-tab${this.activeShopCategory === 'bag' ? ' active' : ''}`;
+    bagTab.innerHTML = `<strong>打宝背包</strong><span>${inventory.length}/${MAX_INVENTORY_SIZE}</span>`;
+    bagTab.addEventListener('click', () => {
+      this.activeShopCategory = 'bag';
+      this.shopGridEl.scrollTop = 0;
+      this.renderShopModal();
+    });
+    this.shopTabsEl.appendChild(bagTab);
+
     this.shopGridEl.innerHTML = '';
+
+    if (this.activeShopCategory === 'bag') {
+      const equippedSet = new Set(Object.values(equipped));
+      const hasSalvageableLow = inventory.some(
+        (g) => !equippedSet.has(g.uid) && (g.rarity === 'common' || g.rarity === 'rare'),
+      );
+      this.shopBagBar.classList.add('visible');
+      this.shopBagBar.innerHTML = `
+        <span class="bag-cap-txt">秘境背囊 ${inventory.length} / ${MAX_INVENTORY_SIZE}（已穿戴装备不会分解）</span>
+        <button id="btn-salvage-low" type="button" class="shop-salvage-low-btn"${hasSalvageableLow ? '' : ' disabled'}>一键分解 凡/灵品</button>
+      `;
+      this.shopBagBar.querySelector<HTMLButtonElement>('#btn-salvage-low')?.addEventListener('click', () => {
+        const res = this.callbacks.onSalvageLow('rare');
+        this.showShopToast(
+          res.count > 0 ? `分解 ${res.count} 件凡/灵品 · 获得 ◆${res.jade}` : '暂无可分解的未穿戴凡/灵品',
+          res.count > 0,
+        );
+        this.renderShopModal();
+      });
+
+      const sorted = [...inventory].sort((a, b) => b.powerScore - a.powerScore);
+      if (sorted.length === 0) {
+        this.shopGridEl.innerHTML =
+          '<div class="bag-empty-state">背囊空空如也。前往「秘境打宝」斩妖除魔，即可掉落随机品质与极品词条神兵！</div>';
+      } else {
+        for (const item of sorted) {
+          const isEquipped = equipped[item.category] === item.uid;
+          const eqScore = store.getEquippedScore(item.category);
+          const scoreDelta = item.powerScore - eqScore;
+          const canForge = item.forgeLevel < MAX_FORGE_LEVEL;
+          const forgeCost = canForge ? getRolledUpgradeCost(item) : 0;
+          const canAffordForge = jade >= forgeCost;
+          const salvageJade = getSalvageJade(item);
+
+          const card = document.createElement('div');
+          card.className = `shop-card bag-card rarity-${item.rarity}${isEquipped ? ' equipped' : ''}`;
+          card.dataset.uid = item.uid;
+
+          const lvTag = item.forgeLevel > 0 ? `<span class="forge-lv">+${item.forgeLevel}</span>` : '';
+          const eqTag = isEquipped ? '<span class="eq-pill">已穿戴</span>' : '';
+          const deltaHtml =
+            !isEquipped && scoreDelta > 0
+              ? `<span class="power-delta-up">↑ +${scoreDelta} 战力</span>`
+              : '';
+          const affixHtml = item.affixes
+            .map(
+              (af) =>
+                `<span class="bag-affix${af.tier === 'prime' ? ' prime' : ''}">${af.tier === 'prime' ? '【极品】' : ''}${af.label}</span>`,
+            )
+            .join('');
+
+          const equipBtn = isEquipped
+            ? '<span class="shop-done-lbl">生效中</span>'
+            : `<button type="button" class="shop-act-btn equip" data-bag-act="equip">穿戴</button>`;
+          const forgeBtn = canForge
+            ? `<button type="button" class="shop-act-btn forge${canAffordForge ? '' : ' locked'}" data-bag-act="upgrade"${canAffordForge ? '' : ' disabled'}>淬炼 ◆${forgeCost}</button>`
+            : '<span class="shop-done-lbl max">满阶</span>';
+          const salvageBtn = `<button type="button" class="shop-act-btn salvage" data-bag-act="salvage">分解 +◆${salvageJade}</button>`;
+
+          card.innerHTML = `
+            <div class="shop-card-top">
+              <span class="rarity-pill rarity-${item.rarity}">${RARITY_LABELS[item.rarity]}</span>
+              <span class="shop-badge">${CATEGORY_LABELS[item.category]}</span>
+              <span class="quality-pill">品质 ${item.qualityPct}%</span>
+              ${lvTag}${eqTag}
+            </div>
+            <div class="shop-card-mid">
+              <div class="shop-card-name">${item.name}</div>
+            </div>
+            <div class="bag-power-row">
+              <span class="bag-power-score">战力 ${item.powerScore}</span>
+              ${deltaHtml}
+            </div>
+            <div class="bag-affix-list">${affixHtml}</div>
+            <div class="shop-card-actions">${equipBtn}${forgeBtn}${salvageBtn}</div>
+          `;
+
+          card.querySelector('[data-bag-act="equip"]')?.addEventListener('click', () => {
+            const ok = this.callbacks.onEquipRolled(item.uid);
+            if (ok) this.showShopToast(`已穿戴「${item.name}」`, true);
+            this.renderShopModal();
+          });
+          card.querySelector('[data-bag-act="upgrade"]')?.addEventListener('click', () => {
+            const res = this.callbacks.onUpgradeRolled(item.uid);
+            this.showShopToast(res.ok ? `「${item.name}」淬炼至 +${res.level}` : res.reason, res.ok);
+            this.renderShopModal();
+          });
+          card.querySelector('[data-bag-act="salvage"]')?.addEventListener('click', () => {
+            const res = this.callbacks.onSalvageRolled(item.uid);
+            this.showShopToast(res.ok ? `分解「${item.name}」· +◆${res.jade}` : res.reason, res.ok);
+            this.renderShopModal();
+          });
+
+          this.shopGridEl.appendChild(card);
+        }
+      }
+
+      this.shopGridEl.scrollTop = prevScrollTop;
+      return;
+    }
+
+    this.shopBagBar.classList.remove('visible');
+    this.shopBagBar.innerHTML = '';
+
     const items = SHOP_ITEMS.filter((it) => it.category === this.activeShopCategory);
     for (const item of items) {
       const owned = store.isOwned(item.id);
@@ -458,17 +729,18 @@ export class HudController {
       let actionsHtml = '';
       if (!owned) {
         const afford = jade >= item.price;
-        actionsHtml = `<button type="button" class="shop-act-btn buy${afford ? '' : ' locked'}" data-act="buy" data-id="${item.id}">购入 ◆${item.price}</button>`;
+        actionsHtml = `<button type="button" class="shop-act-btn buy${afford ? '' : ' locked'}" data-act="buy" data-id="${item.id}"${afford ? '' : ' disabled'}>购入 ◆${item.price}</button>`;
       } else {
         const equipBtn = isEquipped
           ? '<span class="shop-done-lbl">生效中</span>'
           : `<button type="button" class="shop-act-btn equip" data-act="equip" data-id="${item.id}">穿戴</button>`;
+        const canAffordForge = jade >= forgeCost;
         const forgeBtn =
           item.category === 'skin'
             ? ''
             : lv >= MAX_FORGE_LEVEL
               ? '<span class="shop-done-lbl max">满阶 +5</span>'
-              : `<button type="button" class="shop-act-btn forge${jade >= forgeCost ? '' : ' locked'}" data-act="upgrade" data-id="${item.id}">淬炼 ◆${forgeCost}</button>`;
+              : `<button type="button" class="shop-act-btn forge${canAffordForge ? '' : ' locked'}" data-act="upgrade" data-id="${item.id}"${canAffordForge ? '' : ' disabled'}>淬炼 ◆${forgeCost}</button>`;
         actionsHtml = `${equipBtn}${forgeBtn}`;
       }
 
@@ -491,11 +763,14 @@ export class HudController {
           const act = btn.dataset.act;
           const id = btn.dataset.id ?? '';
           if (act === 'buy') {
-            this.callbacks.onShopBuy(id);
+            const res = this.callbacks.onShopBuy(id);
+            this.showShopToast(res.ok ? `已购入并穿戴「${item.name}」` : res.reason, res.ok);
           } else if (act === 'equip') {
-            this.callbacks.onShopEquip(id);
+            const ok = this.callbacks.onShopEquip(id);
+            if (ok) this.showShopToast(`已换装「${item.name}」`, true);
           } else if (act === 'upgrade') {
-            this.callbacks.onShopUpgrade(id);
+            const res = this.callbacks.onShopUpgrade(id);
+            this.showShopToast(res.ok ? `「${item.name}」淬炼至 +${res.level}` : res.reason, res.ok);
           }
           this.renderShopModal();
         });
@@ -503,6 +778,21 @@ export class HudController {
 
       this.shopGridEl.appendChild(card);
     }
+
+    this.shopGridEl.scrollTop = prevScrollTop;
+  }
+
+  private showShopToast(text: string, ok: boolean): void {
+    this.shopToastEl.textContent = text;
+    this.shopToastEl.classList.toggle('err', !ok);
+    this.shopToastEl.classList.add('visible');
+    if (this.shopToastTimer !== null) {
+      window.clearTimeout(this.shopToastTimer);
+    }
+    this.shopToastTimer = window.setTimeout(() => {
+      this.shopToastEl.classList.remove('visible');
+      this.shopToastTimer = null;
+    }, 2200);
   }
 
   selectStage(stageId: number): void {
@@ -620,17 +910,13 @@ export class HudController {
   }
 
   applyMobileMode(enabled: boolean): void {
-    this.mobileMode = enabled;
     this.appRoot.classList.toggle('mobile-mode', enabled);
+    this.pauseDesc.textContent = '暂歇剑势，随时继续试剑。';
     if (enabled) {
       this.setWheelForced(true);
       this.titleTagline.textContent = '写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 手机双摇杆王者轮盘 · 跨端双人联机。';
-      this.pauseDesc.textContent = '轻触「继续试剑」回到锁妖剑台。';
-      this.counterKey.textContent = '点「出剑」';
     } else {
       this.titleTagline.textContent = '写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。';
-      this.pauseDesc.textContent = '按 Esc 或点击继续回到锁妖剑台。';
-      this.counterKey.textContent = this.wheelForced ? '点「出剑」' : '左键 / J';
     }
   }
 
@@ -638,7 +924,7 @@ export class HudController {
     this.wheelForced = enabled;
     this.appRoot.classList.toggle('force-wheel', enabled);
     this.wheelToggleBtn.textContent = enabled ? '键鼠' : '轮盘';
-    this.counterKey.textContent = this.mobileMode || enabled ? '点「出剑」' : '左键 / J';
+    this.wheelToggleBtn.classList.toggle('active-mode', enabled);
   }
 
   setHeroName(name: string): void {
@@ -690,6 +976,7 @@ export class HudController {
     if (mode !== 'title') this.campaignOverlay.classList.remove('visible');
     if (mode === 'playing' || mode === 'cutscene' || mode === 'dialogue') {
       this.shopOverlay.classList.remove('visible');
+      this.dungeonOverlay.classList.remove('visible');
     }
     this.hudRoot.classList.toggle('visible', mode === 'playing');
     this.touchRoot.classList.toggle('visible', mode === 'playing');
@@ -697,7 +984,6 @@ export class HudController {
     this.resultOverlay.classList.toggle('visible', mode === 'victory' || mode === 'defeat');
 
     if (mode !== 'playing') {
-      this.counterPrompt.classList.remove('visible');
       this.dangerWarning.classList.remove('visible');
       this.touchDodgeBtn.classList.remove('action-hint-dodge');
       this.touchBlockBtn.classList.remove('action-hint-parry');
@@ -756,39 +1042,63 @@ export class HudController {
     const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
     const stageDef = opts?.stageDef;
-    const isFinalWin = victory && stageDef?.id === 20;
+    const dungeonDef = opts?.dungeonDef;
+    const isFinalWin = victory && !dungeonDef && stageDef?.id === 20;
+    this.resultModalCard.classList.toggle('win', victory);
+    this.resultModalCard.classList.toggle('lose', !victory);
+    this.resultStageTag.textContent = dungeonDef
+      ? `${dungeonDef.name} · 秘境打宝`
+      : stageDef
+        ? `第 ${stageDef.id} 关 · ${stageDef.name}`
+        : victory
+          ? '剑台凯旋'
+          : '剑势折戟';
     this.resultTitle.textContent =
       opts?.customTitle ??
-      (isFinalWin ? '二 十 劫 破 · 剑 圣 加 冕' : victory ? `第 ${stageDef?.id ?? ''} 关 凯 旋` : '身 陨 剑 台');
+      (dungeonDef
+        ? victory
+          ? `${dungeonDef.name} · 破阵凯旋`
+          : '秘 境 折 戟'
+        : isFinalWin
+          ? '二 十 劫 破 · 剑 圣 加 冕'
+          : victory
+            ? `第 ${stageDef?.id ?? ''} 关 凯 旋`
+            : '身 陨 剑 台');
     this.resultTitle.className = victory ? 'result-title win' : 'result-title lose';
-    this.resultSub.textContent =
-      opts?.customSub ??
-      (victory
-        ? stageDef?.victoryLine ?? '妖煞已除，剑台重归清明。'
-        : '妖气反噬，剑势折戟。整顿心神，再试剑锋。');
 
-    // 3-Star Rating Display
+    // 3-Star Seal Display
     if (victory && opts?.starResult) {
-      const { stars, checks, labels } = opts.starResult;
+      const { stars } = opts.starResult;
       this.resultStarsRow.style.display = 'flex';
       this.resultStarsRow.innerHTML = [1, 2, 3]
         .map((n) => `<span class="big-star${n <= stars ? ' lit' : ''}">★</span>`)
         .join('');
-      this.resultStarChecks.style.display = 'flex';
-      this.resultStarChecks.innerHTML = labels
-        .map((lbl, i) => `<div class="star-check${checks[i] ? ' pass' : ''}">${checks[i] ? '✓' : '○'} ${lbl}</div>`)
-        .join('');
     } else {
       this.resultStarsRow.style.display = 'none';
-      this.resultStarChecks.style.display = 'none';
     }
 
     this.resultStats.innerHTML = `
       <div class="stat-item"><span>用时</span><strong>${timeStr}</strong></div>
-      <div class="stat-item"><span>完美弹反</span><strong>${hero.parryCount} 次</strong></div>
-      <div class="stat-item"><span>最高连击</span><strong>${hero.maxCombo} 连</strong></div>
-      <div class="stat-item"><span>总剑伤</span><strong>${Math.round(hero.totalDamage)}</strong></div>
+      <div class="stat-item"><span>弹反</span><strong>${hero.parryCount} 次</strong></div>
+      <div class="stat-item"><span>连击</span><strong>${hero.maxCombo} 连</strong></div>
     `;
+
+    const droppedGear = opts?.droppedGear ?? [];
+    if (droppedGear.length > 0) {
+      const preview = droppedGear.slice(0, 3);
+      const chips = preview
+        .map((g) => `<span class="result-loot-chip rarity-${g.rarity}">${RARITY_LABELS[g.rarity]} · ${g.name}</span>`)
+        .join('');
+      const extra =
+        droppedGear.length > 3
+          ? `<span class="result-loot-chip more">+${droppedGear.length - 3}件</span>`
+          : '';
+      this.resultLootRow.style.display = 'flex';
+      this.resultLootRow.innerHTML = `${chips}${extra}`;
+    } else {
+      this.resultLootRow.style.display = 'none';
+      this.resultLootRow.innerHTML = '';
+    }
 
     const jadeEarned = opts?.jadeEarned ?? hero.stageJadeEarned;
     if (jadeEarned > 0) {
@@ -799,7 +1109,8 @@ export class HudController {
     }
 
     // 3-Pick-1 Xianxia Blessing Cards when advancing to next stage
-    this.pendingNextStageId = victory && opts?.nextStageId ? opts.nextStageId : null;
+    this.pendingDungeonId = victory && dungeonDef ? dungeonDef.id : null;
+    this.pendingNextStageId = !dungeonDef && victory && opts?.nextStageId ? opts.nextStageId : null;
     const choices = victory && this.pendingNextStageId ? opts?.blessingChoices ?? [] : [];
     if (choices.length > 0) {
       this.selectedBlessingId = choices[0].id;
@@ -828,10 +1139,14 @@ export class HudController {
       this.resultBlessingWrap.style.display = 'none';
     }
 
-    if (this.pendingNextStageId) {
+    if (this.pendingDungeonId) {
+      this.nextStageBtn.style.display = 'inline-flex';
+      this.nextStageBtn.textContent = '再刷秘境';
+      this.retryBtn.classList.remove('primary');
+    } else if (this.pendingNextStageId) {
       const nextDef = getStageDef(this.pendingNextStageId);
       this.nextStageBtn.style.display = 'inline-flex';
-      this.nextStageBtn.textContent = `下一关 · 第 ${nextDef.id} 关 ${nextDef.name}`;
+      this.nextStageBtn.textContent = `下一关 · 第 ${nextDef.id} 关`;
       this.retryBtn.classList.remove('primary');
     } else {
       this.nextStageBtn.style.display = 'none';
@@ -876,7 +1191,7 @@ export class HudController {
       this.bossHpFill.style.width = `${(clamp(peer.hp / peer.maxHp, 0, 1) * 100).toFixed(1)}%`;
       this.bossPoiseFill.style.width = `${clamp(peer.ult, 0, 100).toFixed(1)}%`;
     } else if (boss && boss.aiState !== 'dead') {
-      this.objectiveText.style.display = '';
+      this.objectiveText.style.display = 'none';
       this.bossBar.classList.add('visible');
       this.bossName.textContent = boss.phase === 2 ? `${boss.name} · 魔剑狂化` : boss.name;
       this.bossHpFill.style.width = `${(clamp(boss.hp / boss.maxHp, 0, 1) * 100).toFixed(1)}%`;
@@ -902,7 +1217,6 @@ export class HudController {
     const counterReady = hero.counterWindowTimer > 0 && hero.counterTargetId !== null;
     const shadowReady = hero.shadowStrikeTimer > 0;
     const waveReady = hero.comboStep === 3 && hero.comboWindowTimer > 0;
-    this.counterPrompt.classList.toggle('visible', counterReady);
     this.touchAtkBtn.classList.toggle('counter-ready', counterReady);
     this.touchAtkBtn.classList.toggle('shadow-ready', !counterReady && shadowReady);
     this.touchAtkLbl.textContent = counterReady ? '处决' : shadowReady ? '瞬影' : waveReady ? '剑气' : '出剑';

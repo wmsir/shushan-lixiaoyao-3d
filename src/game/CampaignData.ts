@@ -1,13 +1,22 @@
 import {
+  type EquipCategory,
+  type EquipRarity,
   type EquippedLoadout,
   type HeroLoadoutStats,
+  type RolledGearItem,
   DEFAULT_EQUIPPED,
   DEFAULT_STARTER_JADE,
   MAX_FORGE_LEVEL,
+  MAX_INVENTORY_SIZE,
   SHOP_ITEM_MAP,
   STARTER_OWNED_ITEMS,
   computeHeroLoadoutStats,
+  computeRolledGearScore,
+  computeShopItemScore,
+  getRolledUpgradeCost,
+  getSalvageJade,
   getUpgradeCost,
+  rollEquipmentDrop,
 } from './EquipmentData';
 
 export type EnemyKind = 'bladesman' | 'caster' | 'elite' | 'boss';
@@ -97,6 +106,13 @@ export interface StageClearRecord {
   maxCombo: number;
 }
 
+export interface CampaignSaveStats {
+  totalKills: number;
+  totalParries: number;
+  totalDungeons: number;
+  totalForges: number;
+}
+
 export interface CampaignSaveData {
   version: number;
   cleared: Record<number, StageClearRecord>;
@@ -105,6 +121,41 @@ export interface CampaignSaveData {
   ownedItems: string[];
   equipped: EquippedLoadout;
   upgrades: Record<string, number>;
+  inventory: RolledGearItem[];
+  pityCounter: number;
+  dungeonClears: Record<string, number>;
+  stats: CampaignSaveStats;
+  claimedBounties: string[];
+}
+
+export interface DungeonDef {
+  id: string;
+  name: string;
+  subtitle: string;
+  tier: 1 | 2 | 3;
+  recommendedPower: number;
+  dropRateText: string;
+  guaranteedMinRarity: EquipRarity;
+  bossTitle: string;
+  jadeReward: number;
+  stageDef: StageDef;
+}
+
+export interface BountyDef {
+  id: string;
+  title: string;
+  desc: string;
+  statKey: keyof CampaignSaveStats;
+  target: number;
+  rewardJade: number;
+  rewardRarity?: EquipRarity;
+}
+
+export interface BountyState {
+  def: BountyDef;
+  progress: number;
+  done: boolean;
+  claimed: boolean;
 }
 
 export interface StageDialogueLine {
@@ -256,7 +307,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     subtitle: '蜀山山门 · 妖兵破关',
     badge: '入门试剑',
     isBossStage: false,
-    parTimeSec: 65,
+    parTimeSec: 72,
     recommendedRealm: '炼气初境',
     hazard: 'none',
     introLine: '月色如霜，锁妖台外妖煞初动，先清山门先锋！',
@@ -265,9 +316,16 @@ export const CAMPAIGN_STAGES: StageDef[] = [
       {
         label: '山门先锋',
         enemies: [
-          { kind: 'bladesman', x: -4.2, z: -3.6, name: '山门妖锋', hpMult: 0.9, dmgMult: 0.85 },
-          { kind: 'bladesman', x: 4.3, z: -3.2, name: '山门妖锋', hpMult: 0.9, dmgMult: 0.85 },
-          { kind: 'caster', x: 0.0, z: -7.8, name: '幽冥符道', hpMult: 0.88, dmgMult: 0.85 },
+          { kind: 'bladesman', x: -4.2, z: -3.6, name: '山门妖锋', hpMult: 1.05, dmgMult: 1.02 },
+          { kind: 'bladesman', x: 4.3, z: -3.2, name: '山门妖锋', hpMult: 1.05, dmgMult: 1.02 },
+          { kind: 'caster', x: 0.0, z: -7.8, name: '幽冥符道', hpMult: 1.04, dmgMult: 1.02 },
+        ],
+      },
+      {
+        label: '疾风增援',
+        enemies: [
+          { kind: 'bladesman', x: -4.4, z: -4.2, name: '疾风妖锋', hpMult: 1.06, dmgMult: 1.04, affix: 'swift' },
+          { kind: 'bladesman', x: 4.4, z: -4.2, name: '疾风妖锋', hpMult: 1.06, dmgMult: 1.04, affix: 'swift' },
         ],
       },
     ],
@@ -288,17 +346,16 @@ export const CAMPAIGN_STAGES: StageDef[] = [
       {
         label: '前哨巡卒',
         enemies: [
-          { kind: 'bladesman', x: -4.8, z: -3.2, name: '玄铁刀卫', hpMult: 0.95, dmgMult: 0.9 },
-          { kind: 'bladesman', x: 4.8, z: -3.2, name: '玄铁刀卫', hpMult: 0.95, dmgMult: 0.9 },
+          { kind: 'bladesman', x: -4.8, z: -3.2, name: '玄铁刀卫', hpMult: 1.08, dmgMult: 1.04 },
+          { kind: 'bladesman', x: 4.8, z: -3.2, name: '玄铁刀卫', hpMult: 1.08, dmgMult: 1.04 },
         ],
       },
       {
         label: '后援玄道',
-        subtitle: '两翼幽冥玄道现身结阵，速用御剑术打断！',
         enemies: [
-          { kind: 'bladesman', x: 0.0, z: -5.4, name: '重甲盾锋', hpMult: 1.08, dmgMult: 0.95 },
-          { kind: 'caster', x: -5.6, z: -6.8, name: '左翼符师', hpMult: 0.95, dmgMult: 0.95 },
-          { kind: 'caster', x: 5.6, z: -6.8, name: '右翼符师', hpMult: 0.95, dmgMult: 0.95 },
+          { kind: 'bladesman', x: 0.0, z: -5.4, name: '重甲盾锋', hpMult: 1.16, dmgMult: 1.08, affix: 'swift' },
+          { kind: 'caster', x: -5.6, z: -6.8, name: '左翼符师', hpMult: 1.06, dmgMult: 1.05 },
+          { kind: 'caster', x: 5.6, z: -6.8, name: '右翼符师', hpMult: 1.06, dmgMult: 1.05 },
         ],
       },
     ],
@@ -308,7 +365,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 1,
     name: '幽符困阵',
     subtitle: '三才法阵 · 破符夺先',
-    badge: '法阵考验',
+    badge: '疾风狂雷',
     isBossStage: false,
     parTimeSec: 85,
     recommendedRealm: '炼气初境',
@@ -319,18 +376,17 @@ export const CAMPAIGN_STAGES: StageDef[] = [
       {
         label: '阴符前阵',
         enemies: [
-          { kind: 'caster', x: -5.4, z: -6.2, name: '阴煞符道', hpMult: 1.0, dmgMult: 0.98 },
-          { kind: 'caster', x: 5.4, z: -6.2, name: '阴煞符道', hpMult: 1.0, dmgMult: 0.98 },
-          { kind: 'bladesman', x: 0.0, z: -3.4, name: '护法剑卒', hpMult: 1.05, dmgMult: 0.95, affix: 'swift' },
+          { kind: 'caster', x: -5.4, z: -6.2, name: '阴煞符道', hpMult: 1.1, dmgMult: 1.06 },
+          { kind: 'caster', x: 5.4, z: -6.2, name: '阴煞符道', hpMult: 1.1, dmgMult: 1.06 },
+          { kind: 'bladesman', x: 0.0, z: -3.4, name: '护法剑卒', hpMult: 1.12, dmgMult: 1.06, affix: 'swift' },
         ],
       },
       {
         label: '阵眼增援',
-        subtitle: '法阵异变，疾风剑卒与主祭符师齐出！',
         enemies: [
-          { kind: 'bladesman', x: -3.6, z: -4.8, name: '疾风妖剑', hpMult: 1.02, dmgMult: 1.0, affix: 'swift' },
-          { kind: 'bladesman', x: 3.6, z: -4.8, name: '疾风妖剑', hpMult: 1.02, dmgMult: 1.0, affix: 'swift' },
-          { kind: 'caster', x: 0.0, z: -8.6, name: '阵眼大术师', hpMult: 1.22, dmgMult: 1.05 },
+          { kind: 'bladesman', x: -3.6, z: -4.8, name: '疾风妖剑', hpMult: 1.12, dmgMult: 1.08, affix: 'swift' },
+          { kind: 'bladesman', x: 3.6, z: -4.8, name: '狂雷刀卒', hpMult: 1.14, dmgMult: 1.08, affix: 'storm' },
+          { kind: 'caster', x: 0.0, z: -8.6, name: '阵眼大术师', hpMult: 1.24, dmgMult: 1.1 },
         ],
       },
     ],
@@ -351,17 +407,16 @@ export const CAMPAIGN_STAGES: StageDef[] = [
       {
         label: '铁骑护卫',
         enemies: [
-          { kind: 'bladesman', x: -4.5, z: -3.6, name: '玄铁锐卒', hpMult: 1.05, dmgMult: 1.0 },
-          { kind: 'bladesman', x: 4.5, z: -3.6, name: '玄铁锐卒', hpMult: 1.05, dmgMult: 1.0 },
-          { kind: 'caster', x: 0.0, z: -7.5, name: '随军玄道', hpMult: 1.0, dmgMult: 1.0 },
+          { kind: 'bladesman', x: -4.5, z: -3.6, name: '玄铁锐卒', hpMult: 1.15, dmgMult: 1.08, affix: 'swift' },
+          { kind: 'bladesman', x: 4.5, z: -3.6, name: '玄铁锐卒', hpMult: 1.15, dmgMult: 1.08, affix: 'storm' },
+          { kind: 'caster', x: 0.0, z: -7.5, name: '随军玄道', hpMult: 1.12, dmgMult: 1.08 },
         ],
       },
       {
         label: '血甲都尉降临',
-        subtitle: '血甲都尉率亲卫压阵，善用格挡弹反破其重剑！',
         enemies: [
-          { kind: 'elite', x: 0.0, z: -5.8, name: '血甲都尉 · 斩岳', hpMult: 1.05, poiseMult: 1.0, dmgMult: 1.0 },
-          { kind: 'bladesman', x: -5.2, z: -3.0, name: '亲卫魔卒', hpMult: 0.95, dmgMult: 0.95 },
+          { kind: 'elite', x: 0.0, z: -5.8, name: '血甲都尉 · 斩岳', hpMult: 1.2, poiseMult: 1.08, dmgMult: 1.14 },
+          { kind: 'bladesman', x: -5.2, z: -3.0, name: '亲卫魔卒', hpMult: 1.12, dmgMult: 1.08, affix: 'storm' },
         ],
       },
     ],
@@ -383,23 +438,23 @@ export const CAMPAIGN_STAGES: StageDef[] = [
       {
         label: '镇门亲卫',
         enemies: [
-          { kind: 'bladesman', x: -4.2, z: -3.8, name: '破岳前锋', hpMult: 1.05, dmgMult: 1.0 },
-          { kind: 'caster', x: 4.6, z: -6.5, name: '镇门咒师', hpMult: 1.02, dmgMult: 1.0 },
+          { kind: 'bladesman', x: -4.4, z: -3.8, name: '破岳前锋', hpMult: 1.18, dmgMult: 1.12, affix: 'storm' },
+          { kind: 'bladesman', x: 4.2, z: -3.8, name: '镇门锐卒', hpMult: 1.15, dmgMult: 1.1, affix: 'swift' },
+          { kind: 'caster', x: 0.0, z: -7.2, name: '镇门咒师', hpMult: 1.15, dmgMult: 1.1 },
         ],
       },
       {
         label: '章末首领 · 玄甲镇门将',
-        subtitle: '玄甲镇门将·破岳踏碎石阶登场！',
         enemies: [
           {
             kind: 'boss',
             x: 0.0,
             z: -5.0,
             name: '玄甲镇门将 · 破岳',
-            hpMult: 0.84,
-            poiseMult: 0.9,
-            dmgMult: 0.92,
-            scaleMult: 0.94,
+            hpMult: 1.22,
+            poiseMult: 1.1,
+            dmgMult: 1.12,
+            scaleMult: 0.98,
           },
         ],
       },
@@ -966,6 +1021,183 @@ export function getStageDef(stageId: number): StageDef {
   return CAMPAIGN_STAGES[idx];
 }
 
+export const DUNGEON_LIST: DungeonDef[] = [
+  {
+    id: 'dg_guling',
+    name: '锁妖古陵',
+    subtitle: '初阶秘境 · 灵品保底',
+    tier: 1,
+    recommendedPower: 520,
+    dropRateText: '灵品48% · 玄品17% · 仙品3%',
+    guaranteedMinRarity: 'rare',
+    bossTitle: '古陵镇墓兽',
+    jadeReward: 140,
+    stageDef: {
+      id: 101,
+      chapter: 2,
+      name: '锁妖古陵',
+      subtitle: '初阶秘境 · 灵品保底',
+      badge: '秘境打宝',
+      isBossStage: true,
+      bossCutscene: true,
+      parTimeSec: 100,
+      recommendedRealm: '筑基剑修',
+      hazard: 'none',
+      introLine: '古陵镇墓兽：「擅入蜀山古陵者，留下神兵作祭！」',
+      victoryLine: '古陵妖煞尽伏，满地灵宝光柱冲天！',
+      waves: [
+        {
+          label: '古陵守卫',
+          enemies: [
+            { kind: 'bladesman', x: -4.8, z: -3.8, name: '陵墓守卫', hpMult: 1.15, dmgMult: 1.08, affix: 'swift' },
+            { kind: 'bladesman', x: 4.8, z: -3.8, name: '陵墓守卫', hpMult: 1.15, dmgMult: 1.08, affix: 'storm' },
+            { kind: 'caster', x: 0.0, z: -7.5, name: '古陵咒灵', hpMult: 1.12, dmgMult: 1.06 },
+          ],
+        },
+        {
+          label: '镇墓兽降临',
+          enemies: [
+            { kind: 'elite', x: -4.2, z: -4.2, name: '墓室铁卫', hpMult: 1.12, dmgMult: 1.06 },
+            { kind: 'boss', x: 0.5, z: -5.4, name: '古陵镇墓兽', hpMult: 1.25, poiseMult: 1.1, dmgMult: 1.12 },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    id: 'dg_jianzhong',
+    name: '剑冢宝窟',
+    subtitle: '中阶秘境 · 玄品保底',
+    tier: 2,
+    recommendedPower: 860,
+    dropRateText: '灵品48% · 玄品40% · 仙品12%',
+    guaranteedMinRarity: 'epic',
+    bossTitle: '剑冢残魂',
+    jadeReward: 240,
+    stageDef: {
+      id: 102,
+      chapter: 2,
+      name: '剑冢宝窟',
+      subtitle: '中阶秘境 · 玄品保底',
+      badge: '玄品必掉',
+      isBossStage: true,
+      bossCutscene: true,
+      parTimeSec: 115,
+      recommendedRealm: '金丹剑宗',
+      hazard: 'lightning',
+      hazardLabel: '天雷剑阵',
+      hazardIntervalSec: 4.8,
+      hazardDamage: 24,
+      introLine: '剑冢残魂：「百代剑魄聚此一窟，敢来夺宝者先接我魔剑！」',
+      victoryLine: '剑冢残魂散尽，玄光紫柱照耀剑台！',
+      waves: [
+        {
+          label: '嗜血剑奴',
+          enemies: [
+            { kind: 'elite', x: -4.2, z: -4.0, name: '血煞剑侍', hpMult: 1.26, dmgMult: 1.18, affix: 'vampiric' },
+            { kind: 'elite', x: 4.2, z: -4.0, name: '玄铁剑卫', hpMult: 1.28, dmgMult: 1.18, affix: 'ironclad' },
+            { kind: 'caster', x: 0.0, z: -8.0, name: '雷法冥师', hpMult: 1.22, dmgMult: 1.15, affix: 'storm' },
+          ],
+        },
+        {
+          label: '剑冢主宰',
+          enemies: [
+            { kind: 'bladesman', x: -4.6, z: -3.5, name: '疾风剑傀', hpMult: 1.24, dmgMult: 1.16, affix: 'swift' },
+            { kind: 'boss', x: 0.0, z: -5.4, name: '剑冢残魂', hpMult: 1.52, poiseMult: 1.28, dmgMult: 1.25, affix: 'storm' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    id: 'dg_jiuyou',
+    name: '九幽魔殿',
+    subtitle: '绝巅秘境 · 高阶仙品',
+    tier: 3,
+    recommendedPower: 1280,
+    dropRateText: '灵品22% · 玄品54% · 仙品24%',
+    guaranteedMinRarity: 'epic',
+    bossTitle: '九幽魔尊',
+    jadeReward: 380,
+    stageDef: {
+      id: 103,
+      chapter: 4,
+      name: '九幽魔殿',
+      subtitle: '绝巅秘境 · 高阶仙品',
+      badge: '仙品爆装',
+      isBossStage: true,
+      bossCutscene: true,
+      parTimeSec: 130,
+      recommendedRealm: '蜀山剑圣',
+      hazard: 'abyss',
+      hazardLabel: '灭世天劫',
+      hazardIntervalSec: 4.1,
+      hazardDamage: 30,
+      introLine: '九幽魔尊：「区区凡胎也敢窥伺太初仙兵？入本尊魔殿者有去无回！」',
+      victoryLine: '九幽魔尊伏诛！金色传奇光柱直贯九霄！',
+      waves: [
+        {
+          label: '魔殿铁卫',
+          enemies: [
+            { kind: 'elite', x: -4.8, z: -4.2, name: '魔殿左将', hpMult: 1.45, dmgMult: 1.28, affix: 'ironclad' },
+            { kind: 'elite', x: 4.8, z: -4.2, name: '魔殿右将', hpMult: 1.45, dmgMult: 1.28, affix: 'vampiric' },
+            { kind: 'caster', x: -3.5, z: -7.8, name: '九幽妖师', hpMult: 1.35, dmgMult: 1.24, affix: 'storm' },
+            { kind: 'caster', x: 3.5, z: -7.8, name: '九幽妖师', hpMult: 1.35, dmgMult: 1.24, affix: 'swift' },
+          ],
+        },
+        {
+          label: '九幽魔尊亲临',
+          enemies: [
+            { kind: 'elite', x: -4.8, z: -4.8, name: '魔尊护法', hpMult: 1.4, dmgMult: 1.26, affix: 'swift' },
+            { kind: 'boss', x: 0.0, z: -5.4, name: '九幽魔尊', hpMult: 1.82, poiseMult: 1.42, dmgMult: 1.38, affix: 'storm', scaleMult: 1.06 },
+          ],
+        },
+      ],
+    },
+  },
+];
+
+export function getDungeonDef(id: string): DungeonDef {
+  return DUNGEON_LIST.find((d) => d.id === id) ?? DUNGEON_LIST[0];
+}
+
+export const BOUNTY_LIST: BountyDef[] = [
+  {
+    id: 'b_slay',
+    title: '除魔卫道',
+    desc: '累计斩杀 12 名妖邪',
+    statKey: 'totalKills',
+    target: 12,
+    rewardJade: 160,
+    rewardRarity: 'rare',
+  },
+  {
+    id: 'b_parry',
+    title: '以剑破招',
+    desc: '累计完成 3 次完美弹反',
+    statKey: 'totalParries',
+    target: 3,
+    rewardJade: 180,
+  },
+  {
+    id: 'b_dungeon',
+    title: '秘境寻宝',
+    desc: '通关 1 次秘境打宝',
+    statKey: 'totalDungeons',
+    target: 1,
+    rewardJade: 220,
+    rewardRarity: 'epic',
+  },
+  {
+    id: 'b_forge',
+    title: '神兵淬炼',
+    desc: '淬炼强化任意装备 1 次',
+    statKey: 'totalForges',
+    target: 1,
+    rewardJade: 150,
+  },
+];
+
 export function getChapterDef(chapterId: number): ChapterDef {
   return CHAPTERS.find((c) => c.id === chapterId) ?? CHAPTERS[0];
 }
@@ -1066,8 +1298,7 @@ const CHAPTER_ELDER_BRIEF: Record<1 | 2 | 3 | 4, { elder: string; seal: string; 
   },
 };
 
-export function getStageDialogue(stageId: number): StageDialogueDef {
-  const stage = getStageDef(stageId);
+export function getStageDialogueForStage(stage: StageDef, includeElder = false): StageDialogueDef {
   const chapter = getChapterDef(stage.chapter);
   const elderBrief = CHAPTER_ELDER_BRIEF[stage.chapter];
   const allEnemies = stage.waves.flatMap((w) => w.enemies);
@@ -1091,36 +1322,54 @@ export function getStageDialogue(stageId: number): StageDialogueDef {
     intel.push(`妖邪词缀：${affixLabels.join(' / ')}`);
   }
 
+  const lines: StageDialogueLine[] = [];
+  if (includeElder) {
+    lines.push({
+      speaker: elderBrief.elder,
+      role: 'elder',
+      seal: elderBrief.seal,
+      text: `「${elderBrief.advice}」`,
+    });
+  }
+  lines.push(
+    {
+      speaker: bossOrLead,
+      role: 'enemy',
+      seal: '妖',
+      text: enemyLine,
+    },
+    {
+      speaker: '李逍遥',
+      role: 'hero',
+      seal: '李',
+      text: heroReply,
+    },
+  );
+
   return {
     stageId: stage.id,
-    kicker: `${chapter.roman} · 第 ${stage.id} 关 · ${stage.badge}`,
+    kicker: stage.id > 100 ? `秘境打宝 · ${stage.badge}` : `${chapter.roman} · 第 ${stage.id} 关 · ${stage.badge}`,
     title: `${stage.name} — ${stage.subtitle}`,
-    chapterName: `${chapter.roman} ${chapter.name}`,
+    chapterName: stage.id > 100 ? '蜀山秘境' : `${chapter.roman} ${chapter.name}`,
     intel,
-    lines: [
-      {
-        speaker: elderBrief.elder,
-        role: 'elder',
-        seal: elderBrief.seal,
-        text: `「${elderBrief.advice}」`,
-      },
-      {
-        speaker: bossOrLead,
-        role: 'enemy',
-        seal: '妖',
-        text: enemyLine,
-      },
-      {
-        speaker: '李逍遥',
-        role: 'hero',
-        seal: '李',
-        text: heroReply,
-      },
-    ],
+    lines,
   };
 }
 
+export function getStageDialogue(stageId: number): StageDialogueDef {
+  const stage = getStageDef(stageId);
+  const chapter = getChapterDef(stage.chapter);
+  return getStageDialogueForStage(stage, stage.id === chapter.stageRange[0]);
+}
+
 const SAVE_KEY = 'shushan_lixiaoyao_campaign_v1';
+
+const GEAR_RARITY_RANK: Record<EquipRarity, number> = {
+  common: 0,
+  rare: 1,
+  epic: 2,
+  legendary: 3,
+};
 
 export class CampaignSaveStore {
   data: CampaignSaveData;
@@ -1139,12 +1388,31 @@ export class CampaignSaveStore {
             ...STARTER_OWNED_ITEMS,
             ...(Array.isArray(parsed.ownedItems) ? parsed.ownedItems : []),
           ]);
+          const inventory: RolledGearItem[] = Array.isArray(parsed.inventory)
+            ? parsed.inventory
+                .filter(
+                  (g): g is RolledGearItem =>
+                    Boolean(g && typeof g === 'object' && typeof g.uid === 'string' && typeof g.templateId === 'string'),
+                )
+                .slice(0, MAX_INVENTORY_SIZE)
+                .map((g) => ({
+                  ...g,
+                  forgeLevel: Math.max(0, Math.min(MAX_FORGE_LEVEL, Math.floor(Number(g.forgeLevel) || 0))),
+                  powerScore: computeRolledGearScore(g),
+                }))
+            : [];
+          const hasValidSlotItem = (id: string | undefined, cat: EquipCategory): string => {
+            if (!id) return DEFAULT_EQUIPPED[cat];
+            if (ownedSet.has(id) && SHOP_ITEM_MAP[id]?.category === cat) return id;
+            if (cat !== 'skin' && inventory.some((g) => g.uid === id && g.category === cat)) return id;
+            return DEFAULT_EQUIPPED[cat];
+          };
           const eq = parsed.equipped;
           const equipped: EquippedLoadout = {
-            weapon: eq?.weapon && ownedSet.has(eq.weapon) && SHOP_ITEM_MAP[eq.weapon] ? eq.weapon : DEFAULT_EQUIPPED.weapon,
-            armor: eq?.armor && ownedSet.has(eq.armor) && SHOP_ITEM_MAP[eq.armor] ? eq.armor : DEFAULT_EQUIPPED.armor,
-            relic: eq?.relic && ownedSet.has(eq.relic) && SHOP_ITEM_MAP[eq.relic] ? eq.relic : DEFAULT_EQUIPPED.relic,
-            skin: eq?.skin && ownedSet.has(eq.skin) && SHOP_ITEM_MAP[eq.skin] ? eq.skin : DEFAULT_EQUIPPED.skin,
+            weapon: hasValidSlotItem(eq?.weapon, 'weapon'),
+            armor: hasValidSlotItem(eq?.armor, 'armor'),
+            relic: hasValidSlotItem(eq?.relic, 'relic'),
+            skin: hasValidSlotItem(eq?.skin, 'skin'),
           };
           const jade =
             typeof parsed.jade === 'number' && Number.isFinite(parsed.jade) && parsed.jade >= 0
@@ -1157,14 +1425,35 @@ export class CampaignSaveStore {
               if (lv > 0) upgrades[k] = lv;
             }
           }
+          const rawStats = parsed.stats;
+          const stats: CampaignSaveStats = {
+            totalKills: Math.max(0, Math.floor(Number(rawStats?.totalKills) || 0)),
+            totalParries: Math.max(0, Math.floor(Number(rawStats?.totalParries) || 0)),
+            totalDungeons: Math.max(0, Math.floor(Number(rawStats?.totalDungeons) || 0)),
+            totalForges: Math.max(0, Math.floor(Number(rawStats?.totalForges) || 0)),
+          };
+          const dungeonClears: Record<string, number> = {};
+          if (parsed.dungeonClears && typeof parsed.dungeonClears === 'object') {
+            for (const [k, v] of Object.entries(parsed.dungeonClears)) {
+              const n = Math.max(0, Math.floor(Number(v) || 0));
+              if (n > 0) dungeonClears[k] = n;
+            }
+          }
           return {
-            version: 2,
+            version: 3,
             cleared: parsed.cleared,
             lastPlayedStage: Math.max(1, Math.min(20, Number(parsed.lastPlayedStage || 1))),
             jade,
             ownedItems: Array.from(ownedSet),
             equipped,
             upgrades,
+            inventory,
+            pityCounter: Math.max(0, Math.min(4, Math.floor(Number(parsed.pityCounter) || 0))),
+            dungeonClears,
+            stats,
+            claimedBounties: Array.isArray(parsed.claimedBounties)
+              ? parsed.claimedBounties.filter((id): id is string => typeof id === 'string')
+              : [],
           };
         }
       }
@@ -1172,13 +1461,18 @@ export class CampaignSaveStore {
       // ignore storage failure in private mode
     }
     return {
-      version: 2,
+      version: 3,
       cleared: {},
       lastPlayedStage: 1,
       jade: DEFAULT_STARTER_JADE,
       ownedItems: [...STARTER_OWNED_ITEMS],
       equipped: { ...DEFAULT_EQUIPPED },
       upgrades: {},
+      inventory: [],
+      pityCounter: 0,
+      dungeonClears: {},
+      stats: { totalKills: 0, totalParries: 0, totalDungeons: 0, totalForges: 0 },
+      claimedBounties: [],
     };
   }
 
@@ -1254,7 +1548,7 @@ export class CampaignSaveStore {
   }
 
   getLoadoutStats(): HeroLoadoutStats {
-    return computeHeroLoadoutStats(this.data.equipped, this.data.upgrades);
+    return computeHeroLoadoutStats(this.data.equipped, this.data.upgrades, this.data.inventory);
   }
 
   buyItem(itemId: string): { ok: boolean; reason: string } {
@@ -1287,7 +1581,190 @@ export class CampaignSaveStore {
     if (this.data.jade < cost) return { ok: false, level: cur, reason: `灵石不足（需 ${cost}）` };
     this.data.jade -= cost;
     this.data.upgrades[itemId] = cur + 1;
+    this.data.stats.totalForges += 1;
     this.persist();
     return { ok: true, level: cur + 1, reason: `「${item.name}」淬炼至 +${cur + 1}` };
+  }
+
+  getInventory(): RolledGearItem[] {
+    return this.data.inventory;
+  }
+
+  addRolledItem(item: RolledGearItem): {
+    added: boolean;
+    replacedCategoryUpgrade?: boolean;
+    overflowSalvagedJade?: number;
+  } {
+    const isUpgrade = item.powerScore > this.getEquippedScore(item.category);
+    let overflowSalvagedJade: number | undefined;
+    if (this.data.inventory.length >= MAX_INVENTORY_SIZE) {
+      let victimIdx = -1;
+      let victimRank = Infinity;
+      let victimScore = Infinity;
+      for (let i = 0; i < this.data.inventory.length; i++) {
+        const g = this.data.inventory[i];
+        if (this.data.equipped[g.category] === g.uid) continue;
+        const r = GEAR_RARITY_RANK[g.rarity];
+        if (r < victimRank || (r === victimRank && g.powerScore < victimScore)) {
+          victimRank = r;
+          victimScore = g.powerScore;
+          victimIdx = i;
+        }
+      }
+      if (victimIdx >= 0) {
+        const [removed] = this.data.inventory.splice(victimIdx, 1);
+        overflowSalvagedJade = getSalvageJade(removed);
+        this.data.jade += overflowSalvagedJade;
+      } else {
+        const jade = getSalvageJade(item);
+        this.data.jade += jade;
+        this.persist();
+        return { added: false, overflowSalvagedJade: jade };
+      }
+    }
+    this.data.inventory.push(item);
+    this.persist();
+    return { added: true, replacedCategoryUpgrade: isUpgrade, overflowSalvagedJade };
+  }
+
+  equipRolledItem(uid: string): boolean {
+    const item = this.data.inventory.find((g) => g.uid === uid);
+    if (!item) return false;
+    this.data.equipped[item.category] = item.uid;
+    this.persist();
+    return true;
+  }
+
+  upgradeRolledItem(uid: string): { ok: boolean; level: number; reason: string } {
+    const item = this.data.inventory.find((g) => g.uid === uid);
+    if (!item) return { ok: false, level: 0, reason: '装备不存在' };
+    if (item.forgeLevel >= MAX_FORGE_LEVEL) return { ok: false, level: item.forgeLevel, reason: '已达巅峰 +5' };
+    const cost = getRolledUpgradeCost(item);
+    if (this.data.jade < cost) return { ok: false, level: item.forgeLevel, reason: `灵石不足（需 ${cost}）` };
+    this.data.jade -= cost;
+    item.forgeLevel += 1;
+    item.powerScore = computeRolledGearScore(item);
+    this.data.stats.totalForges += 1;
+    this.persist();
+    return { ok: true, level: item.forgeLevel, reason: `「${item.name}」淬炼至 +${item.forgeLevel}` };
+  }
+
+  salvageRolledItem(uid: string): { ok: boolean; jade: number; reason: string } {
+    const idx = this.data.inventory.findIndex((g) => g.uid === uid);
+    if (idx < 0) return { ok: false, jade: 0, reason: '装备不存在' };
+    const item = this.data.inventory[idx];
+    if (this.data.equipped[item.category] === item.uid) {
+      this.data.equipped[item.category] = DEFAULT_EQUIPPED[item.category];
+    }
+    this.data.inventory.splice(idx, 1);
+    const jade = getSalvageJade(item);
+    this.data.jade += jade;
+    this.persist();
+    return { ok: true, jade, reason: `分解「${item.name}」得 ◆${jade} 灵石` };
+  }
+
+  salvageLowRarity(maxRarity: 'common' | 'rare'): { count: number; jade: number } {
+    const maxRank = GEAR_RARITY_RANK[maxRarity];
+    let count = 0;
+    let jade = 0;
+    const kept: RolledGearItem[] = [];
+    for (const g of this.data.inventory) {
+      const isEq = this.data.equipped[g.category] === g.uid;
+      if (!isEq && GEAR_RARITY_RANK[g.rarity] <= maxRank) {
+        count += 1;
+        jade += getSalvageJade(g);
+      } else {
+        kept.push(g);
+      }
+    }
+    if (count > 0) {
+      this.data.inventory = kept;
+      this.data.jade += jade;
+      this.persist();
+    }
+    return { count, jade };
+  }
+
+  getEquippedItemName(category: EquipCategory): string {
+    const id = this.data.equipped[category];
+    if (category !== 'skin') {
+      const rolled = this.data.inventory.find((g) => g.uid === id);
+      if (rolled) return rolled.name;
+    }
+    return SHOP_ITEM_MAP[id]?.name ?? '';
+  }
+
+  getEquippedScore(category: 'weapon' | 'armor' | 'relic'): number {
+    const id = this.data.equipped[category];
+    const rolled = this.data.inventory.find((g) => g.uid === id);
+    if (rolled) return rolled.powerScore;
+    const shopItem = SHOP_ITEM_MAP[id];
+    return shopItem ? computeShopItemScore(shopItem, this.getUpgradeLevel(id)) : 0;
+  }
+
+  getPityCount(): number {
+    return this.data.pityCounter;
+  }
+
+  advancePityAndCheck(): boolean {
+    this.data.pityCounter += 1;
+    if (this.data.pityCounter >= 5) {
+      this.data.pityCounter = 0;
+      this.persist();
+      return true;
+    }
+    this.persist();
+    return false;
+  }
+
+  recordDungeonClear(dungeonId: string): void {
+    this.data.dungeonClears[dungeonId] = (this.data.dungeonClears[dungeonId] ?? 0) + 1;
+    this.persist();
+  }
+
+  getDungeonClears(dungeonId: string): number {
+    return this.data.dungeonClears[dungeonId] ?? 0;
+  }
+
+  incrementStat(key: keyof CampaignSaveStats, delta = 1): void {
+    if (!Number.isFinite(delta) || delta <= 0) return;
+    this.data.stats[key] = (this.data.stats[key] ?? 0) + Math.floor(delta);
+    this.persist();
+  }
+
+  getBountyStates(): BountyState[] {
+    return BOUNTY_LIST.map((def) => {
+      const progress = Math.min(def.target, this.data.stats[def.statKey] ?? 0);
+      const done = progress >= def.target;
+      const claimed = this.data.claimedBounties.includes(def.id);
+      return { def, progress, done, claimed };
+    });
+  }
+
+  claimBounty(id: string): { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string } {
+    const def = BOUNTY_LIST.find((b) => b.id === id);
+    if (!def) return { ok: false, jade: 0, reason: '悬赏不存在' };
+    if (this.data.claimedBounties.includes(id)) return { ok: false, jade: 0, reason: '已领取该悬赏' };
+    const progress = this.data.stats[def.statKey] ?? 0;
+    if (progress < def.target) return { ok: false, jade: 0, reason: '尚未达成条件' };
+
+    this.data.claimedBounties.push(id);
+    this.data.jade += def.rewardJade;
+    let droppedItem: RolledGearItem | undefined;
+    if (def.rewardRarity) {
+      droppedItem = rollEquipmentDrop({
+        tier: def.rewardRarity === 'epic' ? 2 : 1,
+        guaranteedMinRarity: def.rewardRarity,
+        source: `悬赏·${def.title}`,
+      });
+      this.addRolledItem(droppedItem);
+    }
+    this.persist();
+    return {
+      ok: true,
+      jade: def.rewardJade,
+      droppedItem,
+      reason: droppedItem ? `领取 ◆${def.rewardJade} + 「${droppedItem.name}」` : `领取 ◆${def.rewardJade} 灵石`,
+    };
   }
 }

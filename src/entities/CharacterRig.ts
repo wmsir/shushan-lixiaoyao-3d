@@ -9,10 +9,12 @@ import {
 } from './RealisticTextures';
 import {
   applyHumanSkinSss,
+  applySilhouetteRim,
   createAnatomicalHeadGeometry,
   createCurvedHairCardGeo,
   createEarGeometry,
   createHairStrandAlphaTexture,
+  type SilhouetteRimHandle,
 } from './HumanSculpt';
 import {
   ContinuousLimbRig,
@@ -393,7 +395,11 @@ export class CharacterRig {
   private readonly capeMesh?: THREE.Mesh;
   private readonly floatingOrbitals: THREE.Object3D[] = [];
   private readonly weaponGlowMat: THREE.MeshStandardMaterial;
-  private bladeSteelMat?: THREE.MeshStandardMaterial;
+  private bladeSteelMat?: THREE.MeshPhysicalMaterial;
+  private weaponEdgeMat?: THREE.MeshStandardMaterial;
+  private guardCrystalMat?: THREE.MeshPhysicalMaterial;
+  private bossRelicEmberMat?: THREE.MeshStandardMaterial;
+  private readonly bossRimHandles: SilhouetteRimHandle[] = [];
   private readonly skinPrimaryMat?: THREE.MeshPhysicalMaterial;
   private readonly skinSecondaryMat?: THREE.MeshPhysicalMaterial;
   private readonly skinRobeInnerMat?: THREE.MeshPhysicalMaterial;
@@ -401,6 +407,7 @@ export class CharacterRig {
   private readonly skinTrimMat?: THREE.MeshStandardMaterial;
   private readonly skinBronzeMat?: THREE.MeshStandardMaterial;
   private readonly flashMats: THREE.MeshStandardMaterial[] = [];
+  private readonly flashMatBase: Array<{ mat: THREE.MeshStandardMaterial; emissive: THREE.Color; intensity: number }> = [];
   private readonly gourdMesh?: THREE.Group;
   private readonly gourdHipMount?: THREE.Group;
 
@@ -408,6 +415,9 @@ export class CharacterRig {
   private hitFlash = 0;
   private ribbonPhase = 0;
   private phase2Active = false;
+  private weaponTierFactor = 0.08;
+  private weaponTierBoost = 0.65;
+  private swordGlowInput = 0.85;
 
   private readonly _rShoulder = new THREE.Vector3();
   private readonly _lShoulder = new THREE.Vector3();
@@ -480,6 +490,13 @@ export class CharacterRig {
       this.skinBronzeMat = palette.bronze;
     }
     this.flashMats.push(palette.primary, palette.secondary, palette.armor);
+    for (const m of this.flashMats) {
+      this.flashMatBase.push({
+        mat: m,
+        emissive: m.emissive.clone(),
+        intensity: m.emissiveIntensity,
+      });
+    }
 
     // Pelvis Root & Seamless Continuous Torso SkinnedMesh
     this.pelvis.position.set(0, this.hipY, 0);
@@ -688,9 +705,9 @@ export class CharacterRig {
     } else if (archetype === 'caster') {
       const talMat = new THREE.MeshStandardMaterial({
         map: assets.talismanTex,
-        emissive: new THREE.Color('#2c1e0c'),
-        emissiveIntensity: 0.18,
-        roughness: 0.9,
+        emissive: new THREE.Color('#6b32d6'),
+        emissiveIntensity: 0.46,
+        roughness: 0.85,
         side: THREE.DoubleSide,
       });
       const talGeo = new THREE.PlaneGeometry(0.088, 0.25);
@@ -741,17 +758,18 @@ export class CharacterRig {
         roughnessMap: assets.steelPbr.roughnessMap,
         color: '#b8c0ca',
         emissive: new THREE.Color('#2a090d'),
-        emissiveIntensity: 0.18,
+        emissiveIntensity: 0.22,
         roughness: 0.28,
         metalness: 0.88,
       });
       const emberFullerMat = new THREE.MeshStandardMaterial({
         color: '#802026',
-        emissive: new THREE.Color('#a62628'),
-        emissiveIntensity: 0.65,
+        emissive: new THREE.Color('#b6282e'),
+        emissiveIntensity: 0.72,
         roughness: 0.35,
         metalness: 0.6,
       });
+      this.bossRelicEmberMat = emberFullerMat;
       for (const ang of [-0.72, 0, 0.72]) {
         const sw = new THREE.Group();
         const b = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.042, 0.84, 4), relicSteelMat);
@@ -978,8 +996,8 @@ export class CharacterRig {
 
     if (archetype === 'xiaoyao') {
       const heroBronze = bronze.clone();
-      return {
-        primary: new THREE.MeshPhysicalMaterial({
+      const heroPrimary = applySilhouetteRim(
+        new THREE.MeshPhysicalMaterial({
           map: assets.heroClothLinen.map,
           bumpMap: assets.heroClothLinen.bumpMap,
           bumpScale: 0.04,
@@ -989,6 +1007,13 @@ export class CharacterRig {
           sheenColor: new THREE.Color('#ded6c8'),
           sheenRoughness: 0.84,
         }),
+        '#6ad8e8',
+        0.2,
+        3.1,
+      );
+      applySilhouetteRim(indigoBrocade, '#5ecae0', 0.3, 2.9);
+      return {
+        primary: heroPrimary,
         secondary: indigoBrocade,
         robeOuter: indigoBrocade,
         robeInner: new THREE.MeshPhysicalMaterial({
@@ -1020,8 +1045,8 @@ export class CharacterRig {
           map: assets.steelPbr.map,
           color: '#cfdbe2',
           emissive: new THREE.Color('#1d6a7c'),
-          emissiveIntensity: 0.24,
-          roughness: 0.22,
+          emissiveIntensity: 0.28,
+          roughness: 0.2,
           metalness: 0.92,
         }),
       };
@@ -1040,8 +1065,9 @@ export class CharacterRig {
     if (archetype === 'ally') {
       const silverBrocade = indigoBrocade.clone();
       silverBrocade.color.set('#7496ac');
-      return {
-        primary: new THREE.MeshPhysicalMaterial({
+      applySilhouetteRim(silverBrocade, '#62dbb8', 0.3, 2.9);
+      const allyPrimary = applySilhouetteRim(
+        new THREE.MeshPhysicalMaterial({
           map: assets.heroClothLinen.map,
           bumpMap: assets.heroClothLinen.bumpMap,
           bumpScale: 0.04,
@@ -1052,6 +1078,12 @@ export class CharacterRig {
           sheenColor: new THREE.Color('#7ca2b8'),
           sheenRoughness: 0.8,
         }),
+        '#62dbb8',
+        0.24,
+        3.0,
+      );
+      return {
+        primary: allyPrimary,
         secondary: silverBrocade,
         robeOuter: silverBrocade,
         robeInner: new THREE.MeshPhysicalMaterial({
@@ -1081,27 +1113,34 @@ export class CharacterRig {
           map: assets.steelPbr.map,
           color: '#cce0dc',
           emissive: new THREE.Color('#207868'),
-          emissiveIntensity: 0.26,
-          roughness: 0.22,
+          emissiveIntensity: 0.32,
+          roughness: 0.2,
           metalness: 0.92,
         }),
       };
     }
 
     if (archetype === 'bladesman') {
+      applySilhouetteRim(ironArmor, '#d95236', 0.42, 2.7);
+      const bladesmanAccent = applySilhouetteRim(
+        new THREE.MeshPhysicalMaterial({
+          color: '#6e1e18',
+          roughness: 0.78,
+          sheen: 0.3,
+          sheenColor: new THREE.Color('#a44236'),
+          side: THREE.DoubleSide,
+        }),
+        '#e25b3c',
+        0.34,
+        2.7,
+      );
       return {
         primary: ironArmor,
         secondary: new THREE.MeshStandardMaterial({ color: '#381c1d', roughness: 0.82, metalness: 0.14 }),
         robeOuter: ironArmor,
         robeInner: new THREE.MeshStandardMaterial({ color: '#2d1617', roughness: 0.88, side: THREE.DoubleSide }),
         armor: ironArmor,
-        accent: new THREE.MeshPhysicalMaterial({
-          color: '#621d18',
-          roughness: 0.82,
-          sheen: 0.24,
-          sheenColor: new THREE.Color('#8e3830'),
-          side: THREE.DoubleSide,
-        }),
+        accent: bladesmanAccent,
         trim: new THREE.MeshStandardMaterial({ color: '#45201a', roughness: 0.76 }),
         bronze,
         leather,
@@ -1112,10 +1151,10 @@ export class CharacterRig {
         pants: new THREE.MeshStandardMaterial({ color: '#1f1b1b', roughness: 0.9 }),
         weaponGlow: new THREE.MeshStandardMaterial({
           map: assets.steelPbr.map,
-          color: '#c8b2a2',
-          emissive: new THREE.Color('#702812'),
-          emissiveIntensity: 0.26,
-          roughness: 0.28,
+          color: '#e0a888',
+          emissive: new THREE.Color('#a83218'),
+          emissiveIntensity: 0.44,
+          roughness: 0.26,
           metalness: 0.9,
         }),
       };
@@ -1124,23 +1163,30 @@ export class CharacterRig {
     if (archetype === 'elite') {
       const eliteArmor = ironArmor.clone();
       eliteArmor.color.set('#ad4e54');
-      eliteArmor.emissive.set('#20070a');
-      eliteArmor.emissiveIntensity = 0.16;
-      eliteArmor.roughness = 0.34;
-      eliteArmor.metalness = 0.72;
+      eliteArmor.emissive.set('#2a080c');
+      eliteArmor.emissiveIntensity = 0.22;
+      eliteArmor.roughness = 0.32;
+      eliteArmor.metalness = 0.74;
+      applySilhouetteRim(eliteArmor, '#ff4838', 0.66, 2.5);
+      const eliteAccent = applySilhouetteRim(
+        new THREE.MeshPhysicalMaterial({
+          color: '#6b1820',
+          roughness: 0.78,
+          sheen: 0.36,
+          sheenColor: new THREE.Color('#c4424c'),
+          side: THREE.DoubleSide,
+        }),
+        '#ff5a42',
+        0.52,
+        2.5,
+      );
       return {
         primary: eliteArmor,
         secondary: new THREE.MeshStandardMaterial({ color: '#44151b', roughness: 0.8, metalness: 0.2 }),
         robeOuter: eliteArmor,
         robeInner: new THREE.MeshStandardMaterial({ color: '#331116', roughness: 0.86, side: THREE.DoubleSide }),
         armor: eliteArmor,
-        accent: new THREE.MeshPhysicalMaterial({
-          color: '#5f161d',
-          roughness: 0.82,
-          sheen: 0.28,
-          sheenColor: new THREE.Color('#92323a'),
-          side: THREE.DoubleSide,
-        }),
+        accent: eliteAccent,
         trim: new THREE.MeshStandardMaterial({ color: '#782626', roughness: 0.66, metalness: 0.28 }),
         bronze,
         leather,
@@ -1151,10 +1197,10 @@ export class CharacterRig {
         pants: new THREE.MeshStandardMaterial({ color: '#1d171b', roughness: 0.88 }),
         weaponGlow: new THREE.MeshStandardMaterial({
           map: assets.steelPbr.map,
-          color: '#d4a298',
-          emissive: new THREE.Color('#8c1e26'),
-          emissiveIntensity: 0.42,
-          roughness: 0.28,
+          color: '#eab0a4',
+          emissive: new THREE.Color('#c2242e'),
+          emissiveIntensity: 0.68,
+          roughness: 0.24,
           metalness: 0.9,
         }),
       };
@@ -1163,19 +1209,28 @@ export class CharacterRig {
     if (archetype === 'caster') {
       const casterBrocade = indigoBrocade.clone();
       casterBrocade.color.set('#565268');
+      casterBrocade.emissive.set('#1a0e32');
+      casterBrocade.emissiveIntensity = 0.16;
+      applySilhouetteRim(casterBrocade, '#9c60ff', 0.58, 2.5);
+      const casterAccent = applySilhouetteRim(
+        new THREE.MeshPhysicalMaterial({
+          color: '#463760',
+          roughness: 0.78,
+          sheen: 0.3,
+          sheenColor: new THREE.Color('#8e74c0'),
+          side: THREE.DoubleSide,
+        }),
+        '#b078ff',
+        0.48,
+        2.5,
+      );
       return {
         primary: casterBrocade,
         secondary: new THREE.MeshStandardMaterial({ color: '#292436', roughness: 0.84 }),
         robeOuter: casterBrocade,
         robeInner: new THREE.MeshStandardMaterial({ color: '#1f1b2a', roughness: 0.9, side: THREE.DoubleSide }),
         armor: casterBrocade,
-        accent: new THREE.MeshPhysicalMaterial({
-          color: '#463760',
-          roughness: 0.8,
-          sheen: 0.22,
-          sheenColor: new THREE.Color('#746492'),
-          side: THREE.DoubleSide,
-        }),
+        accent: casterAccent,
         trim: new THREE.MeshStandardMaterial({ color: '#5e5274', roughness: 0.78 }),
         bronze,
         leather,
@@ -1185,11 +1240,11 @@ export class CharacterRig {
         hairBase: new THREE.MeshStandardMaterial({ color: '#34353c', roughness: 0.76 }),
         pants: new THREE.MeshStandardMaterial({ color: '#181822', roughness: 0.92 }),
         weaponGlow: new THREE.MeshStandardMaterial({
-          color: '#9c8ab8',
-          emissive: new THREE.Color('#4c2688'),
-          emissiveIntensity: 0.55,
-          roughness: 0.32,
-          metalness: 0.54,
+          color: '#c8a8ff',
+          emissive: new THREE.Color('#7838e8'),
+          emissiveIntensity: 0.92,
+          roughness: 0.26,
+          metalness: 0.5,
         }),
       };
     }
@@ -1197,8 +1252,24 @@ export class CharacterRig {
     // Boss: Live-action Fallen Warlord / Demon Sovereign in heavy Tang/Ming Shanwen Armor (山文甲)
     const bossArmor = shanwenArmor.clone();
     bossArmor.color.set('#cfc6cf');
-    bossArmor.emissive.set('#180b10');
-    bossArmor.emissiveIntensity = 0.14;
+    bossArmor.emissive.set('#220a10');
+    bossArmor.emissiveIntensity = 0.18;
+    applySilhouetteRim(bossArmor, '#ff2c46', 0.62, 2.4, this.bossRimHandles);
+    const bossAccent = applySilhouetteRim(
+      new THREE.MeshPhysicalMaterial({
+        color: '#5a161e',
+        roughness: 0.82,
+        metalness: 0.04,
+        sheen: 0.36,
+        sheenColor: new THREE.Color('#a6323e'),
+        sheenRoughness: 0.74,
+        side: THREE.DoubleSide,
+      }),
+      '#ff3848',
+      0.54,
+      2.4,
+      this.bossRimHandles,
+    );
 
     return {
       primary: bossArmor,
@@ -1206,15 +1277,7 @@ export class CharacterRig {
       robeOuter: bossArmor,
       robeInner: new THREE.MeshStandardMaterial({ color: '#3c131b', roughness: 0.84, side: THREE.DoubleSide }),
       armor: bossArmor,
-      accent: new THREE.MeshPhysicalMaterial({
-        color: '#5a161e',
-        roughness: 0.84,
-        metalness: 0.04,
-        sheen: 0.32,
-        sheenColor: new THREE.Color('#8e2e38'),
-        sheenRoughness: 0.76,
-        side: THREE.DoubleSide,
-      }),
+      accent: bossAccent,
       trim: new THREE.MeshStandardMaterial({ color: '#78222a', roughness: 0.66, metalness: 0.32 }),
       bronze,
       leather,
@@ -1225,10 +1288,10 @@ export class CharacterRig {
       pants: new THREE.MeshStandardMaterial({ color: '#1f1b26', roughness: 0.82 }),
       weaponGlow: new THREE.MeshStandardMaterial({
         map: assets.steelPbr.map,
-        color: '#d49a90',
-        emissive: new THREE.Color('#961e2a'),
-        emissiveIntensity: 0.58,
-        roughness: 0.26,
+        color: '#e8a296',
+        emissive: new THREE.Color('#b02230'),
+        emissiveIntensity: 0.68,
+        roughness: 0.24,
         metalness: 0.88,
       }),
     };
@@ -1540,7 +1603,7 @@ export class CharacterRig {
     assets: ReturnType<typeof getSharedAssets>,
   ): THREE.Group {
     const g = new THREE.Group();
-    const steelMat = new THREE.MeshStandardMaterial({
+    const steelMat = new THREE.MeshPhysicalMaterial({
       map: assets.steelPbr.map,
       bumpMap: assets.steelPbr.bumpMap,
       bumpScale: 0.024,
@@ -1548,15 +1611,38 @@ export class CharacterRig {
       color: '#d8e0e8',
       roughness: 0.22,
       metalness: 0.88,
+      clearcoat: archetype === 'xiaoyao' || archetype === 'ally' ? 0.42 : 0.18,
+      clearcoatRoughness: 0.18,
     });
     this.bladeSteelMat = steelMat;
 
     if (archetype === 'xiaoyao' || archetype === 'ally') {
-      // Authentic Forged Chinese Jian (七星龙渊剑): pure Damascus steel + cast bronze cloud-guard (ZERO plastic neon cylinder!)
+      // Authentic Forged Chinese Jian (七星龙渊剑): Damascus steel + beveled glowing edge + faceted guard crystal
+      const edgeMat = new THREE.MeshStandardMaterial({
+        color: palette.weaponGlow.color.clone(),
+        emissive: palette.weaponGlow.emissive.clone(),
+        emissiveIntensity: 0.22,
+        roughness: 0.16,
+        metalness: 0.92,
+      });
+      const crystalMat = new THREE.MeshPhysicalMaterial({
+        color: palette.weaponGlow.color.clone(),
+        emissive: palette.weaponGlow.emissive.clone(),
+        emissiveIntensity: 0.55,
+        roughness: 0.1,
+        metalness: 0.16,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.06,
+      });
+      this.weaponEdgeMat = edgeMat;
+      this.guardCrystalMat = crystalMat;
+
       const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.017, 0.23, 12), palette.leather);
       grip.position.y = -0.05;
       const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.018, 0.036, 12), palette.bronze);
       pommel.position.y = -0.176;
+      const pommelGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.013, 0), crystalMat);
+      pommelGem.position.y = -0.194;
       const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.16, 10), palette.accent);
       tassel.position.y = -0.265;
 
@@ -1567,6 +1653,9 @@ export class CharacterRig {
       const guardCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.03, 1), palette.bronze);
       guardCore.scale.set(1.15, 0.72, 0.62);
       guardCore.position.y = 0.072;
+      const guardCrystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.024, 0), crystalMat);
+      guardCrystal.scale.set(0.92, 1.4, 0.96);
+      guardCrystal.position.y = 0.072;
 
       const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.026, 0.98, 4), steelMat);
       blade.scale.set(1.0, 1.0, 0.28);
@@ -1574,17 +1663,46 @@ export class CharacterRig {
       blade.position.y = 0.57;
       blade.castShadow = true;
 
-      const fuller = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.009, 0.88, 4), this.weaponGlowMat);
-      fuller.scale.set(1.0, 1.0, 0.45);
+      const bladeEdge = new THREE.Mesh(new THREE.CylinderGeometry(0.0156, 0.0282, 0.985, 4), edgeMat);
+      bladeEdge.scale.set(1.06, 1.0, 0.135);
+      bladeEdge.rotation.y = Math.PI / 4;
+      bladeEdge.position.y = 0.57;
+
+      const fuller = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.01, 0.9, 4), this.weaponGlowMat);
+      fuller.scale.set(1.0, 1.0, 0.48);
       fuller.rotation.y = Math.PI / 4;
-      fuller.position.y = 0.56;
+      fuller.position.y = 0.57;
 
       const tip = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.23, 4), steelMat);
       tip.scale.set(1.0, 1.0, 0.28);
       tip.rotation.y = Math.PI / 4;
       tip.position.y = 1.175;
 
-      g.add(grip, pommel, tassel, guardWing, guardCore, blade, fuller, tip);
+      const tipEdge = new THREE.Mesh(new THREE.ConeGeometry(0.0156, 0.236, 4), edgeMat);
+      tipEdge.scale.set(1.06, 1.0, 0.135);
+      tipEdge.rotation.y = Math.PI / 4;
+      tipEdge.position.y = 1.175;
+
+      const tipFuller = new THREE.Mesh(new THREE.ConeGeometry(0.0048, 0.15, 4), this.weaponGlowMat);
+      tipFuller.scale.set(1.0, 1.0, 0.48);
+      tipFuller.rotation.y = Math.PI / 4;
+      tipFuller.position.y = 1.085;
+
+      g.add(
+        grip,
+        pommel,
+        pommelGem,
+        tassel,
+        guardWing,
+        guardCore,
+        guardCrystal,
+        blade,
+        bladeEdge,
+        fuller,
+        tip,
+        tipEdge,
+        tipFuller,
+      );
       this.weaponTipLocal.set(0, 1.29, 0);
     } else if (archetype === 'bladesman') {
       const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 0.34, 10), palette.leather);
@@ -1598,11 +1716,15 @@ export class CharacterRig {
       blade.rotation.y = Math.PI / 4;
       blade.position.set(0.012, 0.62, 0);
       blade.castShadow = true;
+      const bladeFuller = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.011, 0.92, 4), this.weaponGlowMat);
+      bladeFuller.scale.set(1.0, 1.0, 0.44);
+      bladeFuller.rotation.y = Math.PI / 4;
+      bladeFuller.position.set(0.012, 0.6, 0);
       const tip = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.22, 4), steelMat);
       tip.scale.set(1.0, 1.0, 0.24);
       tip.rotation.y = Math.PI / 4;
       tip.position.set(0.012, 1.25, 0);
-      g.add(grip, ring, guard, blade, tip);
+      g.add(grip, ring, guard, blade, bladeFuller, tip);
       this.weaponTipLocal.set(0, 1.32, 0);
     } else if (archetype === 'elite') {
       const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.024, 0.42, 10), palette.leather);
@@ -1612,6 +1734,9 @@ export class CharacterRig {
       const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.036, 0.34, 8), palette.bronze);
       guard.rotation.z = Math.PI / 2;
       guard.position.y = 0.08;
+      const guardCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.042, 0), this.weaponGlowMat);
+      guardCore.scale.set(1.1, 1.0, 0.72);
+      guardCore.position.y = 0.085;
       const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.07, 1.28, 4), steelMat);
       blade.scale.set(1.0, 1.0, 0.3);
       blade.rotation.y = Math.PI / 4;
@@ -1625,16 +1750,18 @@ export class CharacterRig {
       tip.scale.set(1.0, 1.0, 0.3);
       tip.rotation.y = Math.PI / 4;
       tip.position.y = 1.52;
-      g.add(grip, pommel, guard, blade, runeCore, tip);
+      g.add(grip, pommel, guard, guardCore, blade, runeCore, tip);
       this.weaponTipLocal.set(0, 1.66, 0);
     } else if (archetype === 'caster') {
       const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 1.72, 12), palette.leather);
       shaft.position.y = 0.56;
       const finial = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.016, 10, 22), palette.bronze);
       finial.position.y = 1.5;
+      const innerRing = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.0085, 8, 20), this.weaponGlowMat);
+      innerRing.position.y = 1.5;
       const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.062, 2), this.weaponGlowMat);
       orb.position.y = 1.5;
-      g.add(shaft, finial, orb);
+      g.add(shaft, finial, innerRing, orb);
       this.weaponTipLocal.set(0, 1.56, 0);
     } else {
       // Boss: Forged Beveled Damascus Greatsword (九幽断岳重剑)
@@ -1648,6 +1775,9 @@ export class CharacterRig {
       const guardCenter = new THREE.Mesh(new THREE.OctahedronGeometry(0.064, 1), palette.bronze);
       guardCenter.scale.set(1.2, 0.85, 0.62);
       guardCenter.position.y = 0.085;
+      const guardGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.044, 0), this.weaponGlowMat);
+      guardGem.scale.set(0.95, 1.15, 0.88);
+      guardGem.position.y = 0.085;
 
       const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.054, 0.092, 1.44, 4), steelMat);
       blade.scale.set(1.0, 1.0, 0.32);
@@ -1664,7 +1794,7 @@ export class CharacterRig {
       tip.rotation.y = Math.PI / 4;
       tip.scale.set(1, 1, 0.32);
       tip.position.y = 1.72;
-      g.add(grip, pommel, guard, guardCenter, blade, runeCore, tip);
+      g.add(grip, pommel, guard, guardCenter, guardGem, blade, runeCore, tip);
       this.weaponTipLocal.set(0, 1.9, 0);
     }
 
@@ -1688,8 +1818,16 @@ export class CharacterRig {
   setPhase2(active: boolean): void {
     this.phase2Active = active;
     if (this.archetype === 'boss') {
-      this.weaponGlowMat.emissive.set(active ? '#c82028' : '#961e2a');
-      this.weaponGlowMat.emissiveIntensity = active ? 1.15 : 0.58;
+      this.weaponGlowMat.emissive.set(active ? '#e0242c' : '#b02230');
+      this.weaponGlowMat.emissiveIntensity = active ? 1.38 : 0.68;
+      if (this.bossRelicEmberMat) {
+        this.bossRelicEmberMat.emissive.set(active ? '#e6302a' : '#b6282e');
+        this.bossRelicEmberMat.emissiveIntensity = active ? 1.32 : 0.72;
+      }
+      for (const h of this.bossRimHandles) {
+        h.uRimColor.value.set(active ? '#ff5828' : '#ff2c46');
+        h.uRimStrength.value = active ? 1.04 : 0.62;
+      }
     }
   }
 
@@ -1698,7 +1836,30 @@ export class CharacterRig {
   }
 
   setSwordGlow(intensity: number): void {
-    this.weaponGlowMat.emissiveIntensity = Math.min(1.05, intensity * 0.48);
+    this.swordGlowInput = intensity;
+    this.updateWeaponShimmer(0);
+  }
+
+  private updateWeaponShimmer(pulse: number): void {
+    const shimmer = 1 + pulse * (0.06 + this.weaponTierFactor * 0.16);
+    const tierBoost = this.weaponTierBoost;
+    this.weaponGlowMat.emissiveIntensity = Math.min(2.2, this.swordGlowInput * 0.48 * tierBoost * shimmer);
+    if (this.weaponEdgeMat) {
+      this.weaponEdgeMat.emissiveIntensity = Math.min(
+        1.65,
+        (0.1 + this.weaponTierFactor * 0.72) * (0.72 + this.swordGlowInput * 0.36) * shimmer,
+      );
+    }
+    if (this.guardCrystalMat) {
+      this.guardCrystalMat.emissiveIntensity = Math.min(
+        2.3,
+        (0.32 + this.weaponTierFactor * 1.12) * (0.8 + this.swordGlowInput * 0.28) * shimmer,
+      );
+    }
+    if (this.bladeSteelMat && (this.archetype === 'xiaoyao' || this.archetype === 'ally')) {
+      const baseSteel = 0.03 + this.weaponTierFactor * 0.2;
+      this.bladeSteelMat.emissiveIntensity = baseSteel * (0.85 + this.swordGlowInput * 0.22) * shimmer;
+    }
   }
 
   applyHeroAppearance(skin: HeroSkinVisual, weapon: WeaponVisual): void {
@@ -1714,9 +1875,42 @@ export class CharacterRig {
     }
     if (this.skinTrimMat) this.skinTrimMat.color.set(skin.trimHex);
     if (this.skinBronzeMat) this.skinBronzeMat.color.set(skin.bronzeHex);
-    if (this.bladeSteelMat) this.bladeSteelMat.color.set(weapon.steelHex);
+
+    const emCol = new THREE.Color(weapon.emissiveHex);
+    const glowCol = new THREE.Color(weapon.glowHex);
+    const emMax = Math.max(emCol.r, emCol.g, emCol.b);
+    const emSat = emMax - Math.min(emCol.r, emCol.g, emCol.b);
+    const edgeSum = weapon.trailEdge[0] + weapon.trailEdge[1] + weapon.trailEdge[2];
+    const chromaScore = clamp((emSat - 0.36) / 0.44, 0, 1);
+    const lumaScore = clamp((emMax - 0.48) / 0.42, 0, 1);
+    const trailScore = clamp((edgeSum - 2.6) / 0.95, 0, 1);
+    const amberEpicBonus = emCol.r > 0.8 && emCol.b < 0.2 ? 0.12 : 0;
+    const goldLegendBonus = glowCol.r > 0.9 && glowCol.g > 0.85 && glowCol.b < 0.75 ? 0.25 : 0;
+    const tier = clamp(chromaScore * 0.4 + lumaScore * 0.35 + trailScore * 0.25 + amberEpicBonus + goldLegendBonus, 0, 1);
+
+    this.weaponTierFactor = tier;
+    this.weaponTierBoost = 0.58 + tier * 1.07;
+
+    if (this.bladeSteelMat) {
+      this.bladeSteelMat.color.set(weapon.steelHex);
+      this.bladeSteelMat.emissive.set(weapon.emissiveHex);
+      this.bladeSteelMat.roughness = 0.24 - tier * 0.09;
+      this.bladeSteelMat.metalness = 0.88 + tier * 0.06;
+      this.bladeSteelMat.clearcoat = 0.35 + tier * 0.55;
+      this.bladeSteelMat.sheen = tier * 0.45;
+      this.bladeSteelMat.sheenColor.set(weapon.glowHex);
+    }
     this.weaponGlowMat.color.set(weapon.glowHex);
     this.weaponGlowMat.emissive.set(weapon.emissiveHex);
+    if (this.weaponEdgeMat) {
+      this.weaponEdgeMat.color.set(weapon.glowHex);
+      this.weaponEdgeMat.emissive.set(weapon.emissiveHex);
+    }
+    if (this.guardCrystalMat) {
+      this.guardCrystalMat.color.set(weapon.glowHex);
+      this.guardCrystalMat.emissive.set(weapon.emissiveHex);
+    }
+    this.updateWeaponShimmer(0);
   }
 
   getWeaponTipWorld(out: THREE.Vector3): THREE.Vector3 {
@@ -1727,10 +1921,21 @@ export class CharacterRig {
   applyPose(pose: PoseName, t: number, elapsed: number, dt: number, moveSpeed = 0): void {
     if (this.hitFlash > 0) {
       this.hitFlash = Math.max(0, this.hitFlash - dt * 7.5);
-      for (const m of this.flashMats) {
-        m.emissive.setRGB(this.hitFlash * 0.62, this.hitFlash * 0.16, this.hitFlash * 0.14);
-        m.emissiveIntensity = this.hitFlash > 0.01 ? 0.85 : 0;
+      if (this.hitFlash > 0.01) {
+        for (const m of this.flashMats) {
+          m.emissive.setRGB(this.hitFlash * 0.62, this.hitFlash * 0.16, this.hitFlash * 0.14);
+          m.emissiveIntensity = 0.85;
+        }
+      } else {
+        this.hitFlash = 0;
+        for (const base of this.flashMatBase) {
+          base.mat.emissive.copy(base.emissive);
+          base.mat.emissiveIntensity = base.intensity;
+        }
       }
+    }
+    if (this.archetype === 'xiaoyao' && this.weaponTierFactor > 0.12) {
+      this.updateWeaponShimmer(Math.sin(elapsed * 4.2));
     }
 
     let pelX = 0;

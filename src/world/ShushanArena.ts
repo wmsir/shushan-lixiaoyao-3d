@@ -70,11 +70,11 @@ export class ShushanArena {
     this.floorMat = new THREE.MeshStandardMaterial({
       map: stoneMaps.map,
       bumpMap: stoneMaps.bumpMap,
-      bumpScale: 0.08,
+      bumpScale: 0.11,
       roughnessMap: stoneMaps.roughnessMap,
-      roughness: 0.92,
-      metalness: 0.03,
-      color: new THREE.Color('#aab9ca'),
+      roughness: 0.9,
+      metalness: 0.04,
+      color: new THREE.Color('#9fb2c7'),
     });
 
     const terrace = new THREE.Mesh(new THREE.CylinderGeometry(19.6, 20.8, 1.4, 32), this.floorMat);
@@ -128,33 +128,41 @@ export class ShushanArena {
           if (r > 1.0) discard;
           float a = atan(vUv.y, vUv.x);
 
-          float outerRing = smoothstep(0.02, 0.005, abs(r - 0.94));
-          float midRing = smoothstep(0.016, 0.004, abs(r - 0.72));
-          float innerRing = smoothstep(0.015, 0.004, abs(r - 0.42));
+          float outerRing = smoothstep(0.018, 0.004, abs(r - 0.94));
+          float outerRim = smoothstep(0.010, 0.002, abs(r - 0.985));
+          float midRing = smoothstep(0.015, 0.004, abs(r - 0.72));
+          float innerRing = smoothstep(0.014, 0.003, abs(r - 0.42));
+          float coreRing = smoothstep(0.011, 0.003, abs(r - 0.16));
 
           float octA = mod(a + 0.3927, 0.7854) - 0.3927;
           float octR = 0.82 / cos(octA);
-          float octLine = smoothstep(0.015, 0.004, abs(r - octR));
+          float octLine = smoothstep(0.014, 0.003, abs(r - octR));
+          float compassTicks = step(0.86, cos(a * 24.0)) * smoothstep(0.024, 0.006, abs(r - 0.962));
 
           float rotA = a + uTime * 0.07;
           float sector = floor(mod((rotA + 3.14159265) / 0.7854, 8.0));
           float localA = fract((rotA + 3.14159265) / 0.7854);
           float inBand = step(0.16, localA) * step(localA, 0.84);
           float gap = step(0.44, localA) * step(localA, 0.56);
-          float b0 = smoothstep(0.013, 0.004, abs(r - 0.52)) * (mod(sector, 2.0) > 0.5 ? (1.0 - gap) : 1.0);
-          float b1 = smoothstep(0.013, 0.004, abs(r - 0.58)) * (mod(floor(sector * 0.5), 2.0) > 0.5 ? (1.0 - gap) : 1.0);
-          float b2 = smoothstep(0.013, 0.004, abs(r - 0.64)) * (mod(floor(sector * 0.25), 2.0) > 0.5 ? (1.0 - gap) : 1.0);
+          float b0 = smoothstep(0.013, 0.003, abs(r - 0.52)) * (mod(sector, 2.0) > 0.5 ? (1.0 - gap) : 1.0);
+          float b1 = smoothstep(0.013, 0.003, abs(r - 0.58)) * (mod(floor(sector * 0.5), 2.0) > 0.5 ? (1.0 - gap) : 1.0);
+          float b2 = smoothstep(0.013, 0.003, abs(r - 0.64)) * (mod(floor(sector * 0.25), 2.0) > 0.5 ? (1.0 - gap) : 1.0);
           float trigrams = (b0 + b1 + b2) * inBand;
 
-          float spoke = smoothstep(0.032, 0.008, abs(sin((a - uTime * 0.12) * 4.0))) * smoothstep(0.41, 0.10, r) * smoothstep(0.05, 0.12, r);
-          float pattern = clamp(outerRing + midRing + innerRing + octLine * 0.8 + trigrams * 0.85 + spoke * 0.38, 0.0, 1.15);
-          float pulse = 0.78 + 0.22 * sin(uTime * 1.8 - r * 4.5);
+          float spoke = smoothstep(0.028, 0.006, abs(sin((a - uTime * 0.12) * 4.0))) * smoothstep(0.41, 0.16, r) * smoothstep(0.12, 0.18, r);
+          float pattern = clamp(
+            outerRing + outerRim * 0.55 + midRing + innerRing + coreRing * 0.7 +
+            octLine * 0.88 + compassTicks * 0.65 + trigrams * 0.95 + spoke * 0.42,
+            0.0,
+            1.15
+          );
+          float pulse = 0.82 + 0.18 * sin(uTime * 1.8 - r * 4.5);
 
-          vec3 jadeGold = mix(vec3(0.24, 0.72, 0.78), vec3(0.88, 0.72, 0.34), smoothstep(0.35, 0.92, r));
-          vec3 bossCrimson = mix(vec3(0.86, 0.22, 0.32), vec3(0.78, 0.45, 0.25), smoothstep(0.25, 0.9, r));
+          vec3 jadeGold = mix(vec3(0.22, 0.76, 0.80), vec3(0.92, 0.74, 0.34), smoothstep(0.38, 0.94, r));
+          vec3 bossCrimson = mix(vec3(0.90, 0.24, 0.34), vec3(0.84, 0.52, 0.26), smoothstep(0.25, 0.9, r));
           vec3 col = mix(jadeGold, bossCrimson, uBossIntensity);
 
-          float alpha = pattern * pulse * (0.34 + uBossIntensity * 0.16);
+          float alpha = pattern * pulse * (0.42 + uBossIntensity * 0.16);
           gl_FragColor = vec4(col, alpha);
         }
       `,
@@ -396,11 +404,20 @@ export class ShushanArena {
         opacity: 1,
       });
       const matRune = new THREE.MeshStandardMaterial({
-        color: '#34d8d4',
-        emissive: new THREE.Color('#22b4c2'),
-        emissiveIntensity: 1.15,
+        color: '#2cd8d2',
+        emissive: new THREE.Color('#1eaab8'),
+        emissiveIntensity: 0.95,
         roughness: 0.35,
         metalness: 0.3,
+        transparent: true,
+        opacity: 1,
+      });
+      const matBronze = new THREE.MeshStandardMaterial({
+        color: '#b88c4a',
+        emissive: new THREE.Color('#3b2408'),
+        emissiveIntensity: 0.28,
+        roughness: 0.36,
+        metalness: 0.68,
         transparent: true,
         opacity: 1,
       });
@@ -424,12 +441,18 @@ export class ShushanArena {
       pGroup.add(band);
 
       const topY = 0.65 + 4.9 * sy;
+      const collar = new THREE.Mesh(pBandGeo, matBronze);
+      collar.rotation.x = Math.PI / 2;
+      collar.scale.setScalar(1.06);
+      collar.position.y = topY - 0.12;
+      pGroup.add(collar);
+
       const cap = new THREE.Mesh(pCapGeo, matStone);
       cap.position.y = topY + 0.22;
       cap.castShadow = true;
       pGroup.add(cap);
 
-      const finial = new THREE.Mesh(pFinialGeo, matStone);
+      const finial = new THREE.Mesh(pFinialGeo, matBronze);
       finial.position.y = topY + 0.84;
       pGroup.add(finial);
 
@@ -438,7 +461,7 @@ export class ShushanArena {
       this.occludables.push({
         position: new THREE.Vector3(px, 2.5, pz),
         radius: 2.2,
-        materials: [matStone, matRune],
+        materials: [matStone, matRune, matBronze],
         currentOpacity: 1,
       });
     }
@@ -477,14 +500,22 @@ export class ShushanArena {
     });
     this.group.add(postInst, orbInst);
 
-    // 6 Carved Stone Lanterns (shared geometries!)
+    // 6 Carved Stone Lanterns with warm bronze rim trays (shared geometries!)
     const lPedGeo = new THREE.CylinderGeometry(0.28, 0.42, 1.35, 6);
+    const lRimGeo = new THREE.CylinderGeometry(0.36, 0.32, 0.12, 6);
     const lFlameGeo = new THREE.OctahedronGeometry(0.22, 1);
     const lCapGeo = new THREE.ConeGeometry(0.66, 0.48, 6);
     const lanternStoneMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
-      color: '#7c8b9c',
+      color: '#7a8a9c',
       roughness: 0.84,
+    });
+    const lanternBronzeMat = new THREE.MeshStandardMaterial({
+      color: '#b88444',
+      emissive: new THREE.Color('#472909'),
+      emissiveIntensity: 0.32,
+      roughness: 0.38,
+      metalness: 0.65,
     });
     const roofCapMat = new THREE.MeshStandardMaterial({
       map: lacquerTex,
@@ -505,6 +536,10 @@ export class ShushanArena {
       ped.castShadow = true;
       lGroup.add(ped);
 
+      const rim = new THREE.Mesh(lRimGeo, lanternBronzeMat);
+      rim.position.y = 1.38;
+      lGroup.add(rim);
+
       const flame = new THREE.Mesh(lFlameGeo, flameMat);
       flame.position.y = 1.62;
       lGroup.add(flame);
@@ -515,10 +550,10 @@ export class ShushanArena {
       lGroup.add(cap);
 
       if (idx < 4) {
-        const light = new THREE.PointLight('#ffaa4c', 11, 16, 1.8);
+        const light = new THREE.PointLight('#ff9c42', 12.5, 15.5, 1.85);
         light.position.set(0, 1.75, 0);
         lGroup.add(light);
-        this.lanterns.push({ light, flame, baseIntensity: 11, phase: idx * 1.7 });
+        this.lanterns.push({ light, flame, baseIntensity: 12.5, phase: idx * 1.7 });
       }
 
       this.group.add(lGroup);
@@ -762,15 +797,18 @@ export class ShushanArena {
     const petalTex = createSoftParticleTexture('petal');
     const orbTex = createSoftParticleTexture('orb');
 
-    const petalCount = 130;
+    const petalCount = 110;
     const petalPos = new Float32Array(petalCount * 3);
     const petalData = new Float32Array(petalCount * 3);
     for (let i = 0; i < petalCount; i++) {
-      petalPos[i * 3] = (this.rng() - 0.5) * 32;
-      petalPos[i * 3 + 1] = this.rng() * 11;
-      petalPos[i * 3 + 2] = (this.rng() - 0.5) * 32;
+      // Perimeter-ring spawn (r >= 11.4m) so falling petals frame the courtyard without blocking center combat sightlines
+      const a = this.rng() * Math.PI * 2;
+      const r = 11.4 + this.rng() * 6.8;
+      petalPos[i * 3] = Math.cos(a) * r;
+      petalPos[i * 3 + 1] = this.rng() * 9.5;
+      petalPos[i * 3 + 2] = Math.sin(a) * r;
       petalData[i * 3] = 0.55 + this.rng() * 0.65;
-      petalData[i * 3 + 1] = this.rng() * Math.PI * 2;
+      petalData[i * 3 + 1] = a;
       petalData[i * 3 + 2] = 0.7 + this.rng() * 0.9;
     }
     const petalGeo = new THREE.BufferGeometry();
@@ -787,8 +825,8 @@ export class ShushanArena {
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           float dist = max(0.5, -mv.z);
-          vAlpha = smoothstep(2.8, 5.8, dist) * 0.72;
-          gl_PointSize = clamp(240.0 / dist, 2.0, 14.0);
+          vAlpha = smoothstep(3.4, 6.4, dist) * 0.68;
+          gl_PointSize = clamp(220.0 / dist, 2.0, 13.0);
           gl_Position = projectionMatrix * mv;
         }
       `,
@@ -805,14 +843,15 @@ export class ShushanArena {
     const petals = new THREE.Points(petalGeo, petalMat);
     this.group.add(petals);
 
-    const ffCount = 55;
+    // Ambient spirit motes strictly along the outer arena perimeter (r >= 12.2m, low rim height)
+    const ffCount = 52;
     const ffPos = new Float32Array(ffCount * 3);
     const ffData = new Float32Array(ffCount * 3);
     for (let i = 0; i < ffCount; i++) {
       const a = this.rng() * Math.PI * 2;
-      const r = 7 + this.rng() * 12;
+      const r = 12.2 + this.rng() * 6.4;
       ffPos[i * 3] = Math.cos(a) * r;
-      ffPos[i * 3 + 1] = 0.7 + this.rng() * 3.4;
+      ffPos[i * 3 + 1] = 0.65 + this.rng() * 1.95;
       ffPos[i * 3 + 2] = Math.sin(a) * r;
       ffData[i * 3] = a;
       ffData[i * 3 + 1] = r;
@@ -820,14 +859,32 @@ export class ShushanArena {
     }
     const ffGeo = new THREE.BufferGeometry();
     ffGeo.setAttribute('position', new THREE.BufferAttribute(ffPos, 3));
-    const ffMat = new THREE.PointsMaterial({
-      map: orbTex,
-      color: new THREE.Color(1.25, 1.45, 1.05),
-      size: 0.36,
+    const ffMat = new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uMap: { value: orbTex },
+      },
+      vertexShader: /* glsl */ `
+        varying float vAlpha;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          float dist = max(0.5, -mv.z);
+          vAlpha = smoothstep(3.4, 6.8, dist) * 0.82;
+          gl_PointSize = clamp(210.0 / dist, 2.0, 11.0);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D uMap;
+        varying float vAlpha;
+        void main() {
+          vec4 t = texture2D(uMap, gl_PointCoord);
+          if (t.a * vAlpha < 0.04) discard;
+          gl_FragColor = vec4(t.rgb * vec3(0.88, 1.15, 0.96), t.a * vAlpha);
+        }
+      `,
     });
     const fireflies = new THREE.Points(ffGeo, ffMat);
     this.group.add(fireflies);
@@ -1128,10 +1185,10 @@ export class ShushanArena {
               : 0.08;
     const lightHex =
       overrideChapter?.lanternLightHex ??
-      (ch === 4 ? '#ff424c' : ch === 3 ? '#ff6e3a' : ch === 2 ? '#b96cff' : '#ffb86b');
+      (ch === 4 ? '#ff424c' : ch === 3 ? '#ff6e3a' : ch === 2 ? '#b96cff' : '#ff9c42');
     const flameHex =
       overrideChapter?.lanternFlameHex ??
-      (ch === 4 ? '#ff8278' : ch === 3 ? '#ffae70' : ch === 2 ? '#e1a8ff' : '#ffd89a');
+      (ch === 4 ? '#ff8278' : ch === 3 ? '#ffae70' : ch === 2 ? '#e1a8ff' : '#ffd28a');
     this.bossIntensity = bagua;
     for (const l of this.lanterns) {
       l.light.color.set(lightHex);
@@ -1157,7 +1214,7 @@ export class ShushanArena {
       (skyUniforms.uSkyTint.value as THREE.Color).set(skyTintHex);
     }
     if (this.floorMat) {
-      const floorHex = ch === 4 ? '#9e7e92' : ch === 3 ? '#b89484' : ch === 2 ? '#9c92bc' : '#aab9ca';
+      const floorHex = ch === 4 ? '#927488' : ch === 3 ? '#ab8879' : ch === 2 ? '#8e86b2' : '#9fb2c7';
       this.floorMat.color.set(floorHex);
     }
   }
@@ -1251,9 +1308,11 @@ export class ShushanArena {
       pArr[i * 3 + 1] -= sp * dt;
       pArr[i * 3 + 2] += Math.cos(elapsed * 0.9 + ph) * 0.35 * dt;
       if (pArr[i * 3 + 1] < 0.05) {
-        pArr[i * 3] = focusPos.x + Math.sin(ph * 17.1 + elapsed) * 16;
-        pArr[i * 3 + 1] = 10 + (ph % 3);
-        pArr[i * 3 + 2] = focusPos.z + Math.cos(ph * 13.7 + elapsed) * 16;
+        const ringA = ph + elapsed * 0.37;
+        const ringR = 11.4 + ((ph * 3.17) % 6.6);
+        pArr[i * 3] = Math.cos(ringA) * ringR + focusPos.x * 0.08;
+        pArr[i * 3 + 1] = 8.5 + (ph % 2.8);
+        pArr[i * 3 + 2] = Math.sin(ringA) * ringR + focusPos.z * 0.08;
       }
     }
     pAttr.needsUpdate = true;
@@ -1265,7 +1324,7 @@ export class ShushanArena {
       const r = this.fireflyData[i * 3 + 1];
       const ph = this.fireflyData[i * 3 + 2];
       fArr[i * 3] = Math.cos(a) * r;
-      fArr[i * 3 + 1] = 1.2 + Math.sin(elapsed * 1.6 + ph) * 0.7 + (ph % 2.0);
+      fArr[i * 3 + 1] = 0.85 + Math.sin(elapsed * 1.45 + ph) * 0.45 + (ph % 1.3);
       fArr[i * 3 + 2] = Math.sin(a) * r;
     }
     fAttr.needsUpdate = true;

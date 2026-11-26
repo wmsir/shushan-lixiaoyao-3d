@@ -37,12 +37,12 @@ export interface HeroState {
   state: HeroActionState;
   stateTime: number;
   stateDuration: number;
-  comboStep: number; // 1 | 2 | 3
+  comboStep: number; // 1 | 2 | 3 | 4
   comboWindowTimer: number;
   attackHasHit: Set<number>;
   attackVfxFired: boolean;
 
-  blockElapsed: number; // tracks 0.24s perfect parry window!
+  blockElapsed: number; // tracks 0.26s perfect parry window!
   dodgeDir: THREE.Vector3;
   dodgeInvuln: number;
   dodgePerfectTriggered: boolean;
@@ -383,7 +383,7 @@ export function createEnemy(
     comboFollowup: false,
 
     orbitDir: rng() > 0.5 ? 1 : -1,
-    attackCooldown: (isBoss ? 1.15 : 0.9 + rng() * 1.05) / speedMult,
+    attackCooldown: (isBoss ? 0.95 : 0.7 + rng() * 0.65) / speedMult,
     hitstopTimer: 0,
     shakeTimer: 0,
     deathTimer: 0,

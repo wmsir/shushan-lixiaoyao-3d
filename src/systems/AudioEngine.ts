@@ -7,6 +7,7 @@
  * - Automatic mute for automated testing, gesture unlock, and cutscene volume ducking
  */
 
+import type { EquipRarity } from '../game/EquipmentData';
 import voiceQ1 from '../assets/voices/voice-q1.mp3';
 import voiceQ2 from '../assets/voices/voice-q2.mp3';
 import voiceE1 from '../assets/voices/voice-e1.mp3';
@@ -49,6 +50,7 @@ const VOICE_BANKS: Record<HeroVoiceKind, VoiceClipDef[]> = {
 
 // D Major Pentatonic (宫商角徵羽): D4, E4, F#4, A4, B4, D5, E5, F#5, A5
 const PENTATONIC = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25, 739.99, 880.0];
+const MUTE_STORAGE_KEY = 'shushan_audio_muted_v1';
 
 export class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -81,8 +83,16 @@ export class AudioEngine {
   private musicStep = 0;
   private musicTimer = 0;
 
-  constructor(startMuted = false) {
-    this.muted = startMuted;
+  constructor(startMuted = false, private readonly persistMute = true) {
+    if (startMuted) {
+      this.muted = true;
+    } else if (persistMute) {
+      try {
+        this.muted = window.localStorage.getItem(MUTE_STORAGE_KEY) === '1';
+      } catch {
+        this.muted = false;
+      }
+    }
   }
 
   unlock(): void {
@@ -182,8 +192,9 @@ export class AudioEngine {
       src.onended = () => {
         if (this.activeVoiceSource === src) this.activeVoiceSource = null;
       };
-    } else {
+    } else if (!this.muted) {
       const el = new Audio(clip.url);
+      el.muted = this.muted;
       el.volume = 0.92;
       this.activeVoiceAudio = el;
       this.activeVoiceUntil = nowMs + 2600;
@@ -223,6 +234,16 @@ export class AudioEngine {
 
   setMuted(muted: boolean): void {
     this.muted = muted;
+    if (this.persistMute) {
+      try {
+        window.localStorage.setItem(MUTE_STORAGE_KEY, muted ? '1' : '0');
+      } catch {
+        // ignore storage errors
+      }
+    }
+    if (this.activeVoiceAudio) {
+      this.activeVoiceAudio.muted = muted;
+    }
     if (muted) this.stopActiveVoice();
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.72, this.ctx.currentTime, 0.04);
@@ -540,6 +561,29 @@ export class AudioEngine {
     const base = rarity === 'gourd' ? 1174.66 : rarity === 'heal' ? 880 : 739.99;
     this.playChime(now, base, 0.24, rarity === 'gourd' ? 0.65 : 0.36);
     if (rarity === 'gourd') this.playChime(now + 0.08, base * 1.5, 0.2, 0.72);
+  }
+
+  playGearDropChime(rarity: EquipRarity): void {
+    if (this.muted || !this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+    if (rarity === 'common') {
+      this.playChime(now, 587.33, 0.22, 0.38);
+      this.playChime(now + 0.08, 739.99, 0.2, 0.44);
+    } else if (rarity === 'rare') {
+      this.playChime(now, 587.33, 0.24, 0.42);
+      this.playChime(now + 0.07, 739.99, 0.24, 0.48);
+      this.playChime(now + 0.14, 880, 0.26, 0.58);
+    } else if (rarity === 'epic') {
+      this.playChime(now, 587.33, 0.25, 0.48);
+      this.playChime(now + 0.06, 739.99, 0.26, 0.52);
+      this.playChime(now + 0.12, 880, 0.28, 0.62);
+      this.playChime(now + 0.19, 1174.66, 0.28, 0.78);
+    } else {
+      const notes = [587.33, 739.99, 880, 1174.66, 1479.98];
+      notes.forEach((f, idx) => {
+        this.playChime(now + idx * 0.06, f, idx >= 3 ? 0.32 : 0.26, 0.58 + idx * 0.1);
+      });
+    }
   }
 
   private playChime(start: number, freq: number, vol: number, dur: number): void {
