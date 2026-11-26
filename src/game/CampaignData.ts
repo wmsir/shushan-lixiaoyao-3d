@@ -18,6 +18,16 @@ import {
   getUpgradeCost,
   rollEquipmentDrop,
 } from './EquipmentData';
+import type { WorldBiome } from '../world/ShushanArena';
+
+export const BIOME_LABELS: Record<WorldBiome, string> = {
+  bamboo_canyon: '翠竹云溪',
+  peach_shrine: '十里桃源',
+  sword_graveyard: '古剑荒冢',
+  lava_abyss: '赤焰火狱',
+  celestial_sanctum: '星穹天坛',
+  haven_camp: '云来剑庐',
+};
 
 export type EnemyKind = 'bladesman' | 'caster' | 'elite' | 'boss';
 export type EnemyAffix = 'swift' | 'vampiric' | 'ironclad' | 'storm';
@@ -61,6 +71,8 @@ export interface StageWaveDef {
 export interface StageDef {
   id: number;
   chapter: 1 | 2 | 3 | 4;
+  episodeNum: number;
+  biome: WorldBiome;
   name: string;
   subtitle: string;
   badge: string;
@@ -126,6 +138,31 @@ export interface CampaignSaveData {
   dungeonClears: Record<string, number>;
   stats: CampaignSaveStats;
   claimedBounties: string[];
+  cultivationLevel: number;
+  activeMealId: string | null;
+}
+
+export interface CultivationRealmStep {
+  level: number;
+  name: string;
+  costJade: number;
+  hpBonus: number;
+  atkPct: number;
+  spiritRegenPct: number;
+  startUltBonus: number;
+  desc: string;
+}
+
+export interface CampMealDef {
+  id: string;
+  name: string;
+  costJade: number;
+  badge: string;
+  desc: string;
+  hpBonus: number;
+  dmgBonus: number;
+  speedBonus: number;
+  ultBonus: number;
 }
 
 export interface DungeonDef {
@@ -165,13 +202,27 @@ export interface StageDialogueLine {
   text: string;
 }
 
+export interface EpisodeChoiceDef {
+  id: string;
+  title: string;
+  subtitle: string;
+  dmgBonus?: number;
+  speedBonus?: number;
+  ultBonus?: number;
+  hpBonus?: number;
+  extraGourd?: number;
+}
+
 export interface StageDialogueDef {
   stageId: number;
+  episodeTag: string;
+  biomeLabel: string;
   kicker: string;
   title: string;
   chapterName: string;
   intel: string[];
   lines: StageDialogueLine[];
+  choices: [EpisodeChoiceDef, EpisodeChoiceDef];
 }
 
 export interface SwordRealmInfo {
@@ -303,6 +354,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 1,
     chapter: 1,
+    episodeNum: 1,
+    biome: 'bamboo_canyon',
     name: '剑启山门',
     subtitle: '蜀山山门 · 妖兵破关',
     badge: '入门试剑',
@@ -334,6 +387,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 2,
     chapter: 1,
+    episodeNum: 2,
+    biome: 'bamboo_canyon',
     name: '霜阶巡煞',
     subtitle: '长阶双波 · 夹击破阵',
     badge: '双波攻势',
@@ -365,6 +420,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 3,
     chapter: 1,
+    episodeNum: 3,
+    biome: 'peach_shrine',
     name: '幽符困阵',
     subtitle: '三才法阵 · 破符夺先',
     badge: '疾风狂雷',
@@ -396,6 +453,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 4,
     chapter: 1,
+    episodeNum: 4,
+    biome: 'bamboo_canyon',
     name: '残碑铁骑',
     subtitle: '血甲都尉 · 弹反初试',
     badge: '精英试炼',
@@ -427,6 +486,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 5,
     chapter: 1,
+    episodeNum: 5,
+    biome: 'peach_shrine',
     name: '守门魔将',
     subtitle: '第一章首领 · 玄甲破岳',
     badge: '章末 Boss',
@@ -468,6 +529,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 6,
     chapter: 2,
+    episodeNum: 6,
+    biome: 'sword_graveyard',
     name: '断剑荒原',
     subtitle: '剑冢外围 · 疾风煞影',
     badge: '疾风词缀',
@@ -499,6 +562,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 7,
     chapter: 2,
+    episodeNum: 7,
+    biome: 'sword_graveyard',
     name: '鬼火祭坛',
     subtitle: '天雷阵域 · 步步惊心',
     badge: '天雷灾害',
@@ -533,6 +598,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 8,
     chapter: 2,
+    episodeNum: 8,
+    biome: 'sword_graveyard',
     name: '血甲双煞',
     subtitle: '左右护法 · 双将夹击',
     badge: '双精英战',
@@ -556,6 +623,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 9,
     chapter: 2,
+    episodeNum: 9,
+    biome: 'sword_graveyard',
     name: '剑冢围城',
     subtitle: '三波血战 · 万剑扫荡',
     badge: '三波血战',
@@ -600,6 +669,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 10,
     chapter: 2,
+    episodeNum: 10,
+    biome: 'sword_graveyard',
     name: '血狱剑尊',
     subtitle: '第二章首领 · 赤霄魔君',
     badge: '章末 Boss',
@@ -644,6 +715,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 11,
     chapter: 3,
+    episodeNum: 11,
+    biome: 'lava_abyss',
     name: '赤焰剑狱',
     subtitle: '地火喷涌 · 焦土血战',
     badge: '地火灾害',
@@ -679,6 +752,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 12,
     chapter: 3,
+    episodeNum: 12,
+    biome: 'lava_abyss',
     name: '嗜血狂潮',
     subtitle: '嗜血词缀 · 弹反克制',
     badge: '嗜血魔甲',
@@ -714,6 +789,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 13,
     chapter: 3,
+    episodeNum: 13,
+    biome: 'lava_abyss',
     name: '符阵合围',
     subtitle: '四象幽冥 · 弹幕破阵',
     badge: '四方弹幕',
@@ -750,6 +827,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 14,
     chapter: 3,
+    episodeNum: 14,
+    biome: 'lava_abyss',
     name: '锁妖双王',
     subtitle: '深渊双将 · 天剑破局',
     badge: '双将压境',
@@ -776,6 +855,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 15,
     chapter: 3,
+    episodeNum: 15,
+    biome: 'lava_abyss',
     name: '焚天剑煞',
     subtitle: '第三章首领 · 炎狱妖王',
     badge: '章末 Boss',
@@ -821,6 +902,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 16,
     chapter: 4,
+    episodeNum: 16,
+    biome: 'celestial_sanctum',
     name: '九幽玄阶',
     subtitle: '绝巅初阶 · 九幽劫雷',
     badge: '九幽天劫',
@@ -856,6 +939,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 17,
     chapter: 4,
+    episodeNum: 17,
+    biome: 'celestial_sanctum',
     name: '剑意试炼',
     subtitle: '极速剑道 · 生死一念',
     badge: '极速试炼',
@@ -890,6 +975,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 18,
     chapter: 4,
+    episodeNum: 18,
+    biome: 'celestial_sanctum',
     name: '魔将车轮',
     subtitle: '三连首领 · 绝地突围',
     badge: '三波车轮',
@@ -931,6 +1018,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 19,
     chapter: 4,
+    episodeNum: 19,
+    biome: 'celestial_sanctum',
     name: '绝巅双魔',
     subtitle: '双首领同台 · 终局前夜',
     badge: '双 Boss 战',
@@ -977,6 +1066,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
   {
     id: 20,
     chapter: 4,
+    episodeNum: 20,
+    biome: 'celestial_sanctum',
     name: '锁妖终劫',
     subtitle: '终极决战 · 镇狱天尊',
     badge: '终极 Boss',
@@ -1038,6 +1129,8 @@ export const DUNGEON_LIST: DungeonDef[] = [
     stageDef: {
       id: 101,
       chapter: 2,
+      episodeNum: 101,
+      biome: 'bamboo_canyon',
       name: '锁妖古陵',
       subtitle: '初阶秘境 · 灵品保底',
       badge: '秘境打宝',
@@ -1080,6 +1173,8 @@ export const DUNGEON_LIST: DungeonDef[] = [
     stageDef: {
       id: 102,
       chapter: 2,
+      episodeNum: 102,
+      biome: 'sword_graveyard',
       name: '剑冢宝窟',
       subtitle: '中阶秘境 · 玄品保底',
       badge: '玄品必掉',
@@ -1125,6 +1220,8 @@ export const DUNGEON_LIST: DungeonDef[] = [
     stageDef: {
       id: 103,
       chapter: 4,
+      episodeNum: 103,
+      biome: 'lava_abyss',
       name: '九幽魔殿',
       subtitle: '绝巅秘境 · 高阶仙品',
       badge: '仙品爆装',
@@ -1257,6 +1354,135 @@ export function getSwordRealm(totalStars: number): SwordRealmInfo {
   return cur;
 }
 
+export const CULTIVATION_STEPS: CultivationRealmStep[] = [
+  {
+    level: 0,
+    name: '引气入体 · 凡心',
+    costJade: 0,
+    hpBonus: 0,
+    atkPct: 0,
+    spiritRegenPct: 0,
+    startUltBonus: 0,
+    desc: '初入云来剑庐，吐纳天地灵气稳固丹田',
+  },
+  {
+    level: 1,
+    name: '凝气一重',
+    costJade: 60,
+    hpBonus: 20,
+    atkPct: 0.05,
+    spiritRegenPct: 0.06,
+    startUltBonus: 6,
+    desc: '气血 +20 · 剑伤 +5% · 回气 +6% · 开局剑意 +6',
+  },
+  {
+    level: 2,
+    name: '筑基二重',
+    costJade: 110,
+    hpBonus: 45,
+    atkPct: 0.1,
+    spiritRegenPct: 0.12,
+    startUltBonus: 12,
+    desc: '气血 +45 · 剑伤 +10% · 回气 +12% · 开局剑意 +12',
+  },
+  {
+    level: 3,
+    name: '金丹三重',
+    costJade: 170,
+    hpBonus: 75,
+    atkPct: 0.16,
+    spiritRegenPct: 0.18,
+    startUltBonus: 18,
+    desc: '气血 +75 · 剑伤 +16% · 回气 +18% · 开局剑意 +18',
+  },
+  {
+    level: 4,
+    name: '元婴四重',
+    costJade: 240,
+    hpBonus: 110,
+    atkPct: 0.23,
+    spiritRegenPct: 0.24,
+    startUltBonus: 24,
+    desc: '气血 +110 · 剑伤 +23% · 回气 +24% · 开局剑意 +24',
+  },
+  {
+    level: 5,
+    name: '化神五重',
+    costJade: 320,
+    hpBonus: 150,
+    atkPct: 0.3,
+    spiritRegenPct: 0.3,
+    startUltBonus: 30,
+    desc: '气血 +150 · 剑伤 +30% · 回气 +30% · 开局剑意 +30',
+  },
+  {
+    level: 6,
+    name: '合体六重',
+    costJade: 420,
+    hpBonus: 195,
+    atkPct: 0.38,
+    spiritRegenPct: 0.38,
+    startUltBonus: 36,
+    desc: '气血 +195 · 剑伤 +38% · 回气 +38% · 开局剑意 +36',
+  },
+  {
+    level: 7,
+    name: '大乘七重',
+    costJade: 540,
+    hpBonus: 245,
+    atkPct: 0.46,
+    spiritRegenPct: 0.46,
+    startUltBonus: 44,
+    desc: '气血 +245 · 剑伤 +46% · 回气 +46% · 开局剑意 +44',
+  },
+  {
+    level: 8,
+    name: '蜀山剑神',
+    costJade: 700,
+    hpBonus: 300,
+    atkPct: 0.55,
+    spiritRegenPct: 0.55,
+    startUltBonus: 55,
+    desc: '气血 +300 · 剑伤 +55% · 回气 +55% · 开局剑意 +55',
+  },
+];
+
+export const CAMP_MEALS: CampMealDef[] = [
+  {
+    id: 'meal_tea',
+    name: '云雾灵泉茗',
+    costJade: 0,
+    badge: '免费清茶',
+    desc: '+25 气血 · +6% 剑伤',
+    hpBonus: 25,
+    dmgBonus: 0.06,
+    speedBonus: 0,
+    ultBonus: 0,
+  },
+  {
+    id: 'meal_peach',
+    name: '十里桃花酿',
+    costJade: 35,
+    badge: '剑意沸腾',
+    desc: '+14% 剑伤 · 开局+25 剑意',
+    hpBonus: 0,
+    dmgBonus: 0.14,
+    speedBonus: 0,
+    ultBonus: 25,
+  },
+  {
+    id: 'meal_herbal',
+    name: '蜀山百草羹',
+    costJade: 35,
+    badge: '强体御风',
+    desc: '+60 气血 · +10% 移速',
+    hpBonus: 60,
+    dmgBonus: 0,
+    speedBonus: 0.1,
+    ultBonus: 0,
+  },
+];
+
 export function evaluateStageStars(
   stage: StageDef,
   elapsedSec: number,
@@ -1301,6 +1527,137 @@ const CHAPTER_ELDER_BRIEF: Record<1 | 2 | 3 | 4, { elder: string; seal: string; 
   },
 };
 
+const VOLUME_LABELS: Record<1 | 2 | 3 | 4, string> = {
+  1: '第一卷',
+  2: '第二卷',
+  3: '第三卷',
+  4: '第四卷',
+};
+
+const EPISODE_DRAMA_TITLES: Record<number, string> = {
+  1: '第一集 · 山门异变',
+  2: '第二集 · 溪涧伏兵',
+  3: '第三集 · 桃林诡阵',
+  4: '第四集 · 残碑铁骑',
+  5: '第五集 · 桃源破岳',
+  6: '第六集 · 断剑荒原',
+  7: '第七集 · 鬼火惊雷',
+  8: '第八集 · 双煞拦道',
+  9: '第九集 · 剑冢围城',
+  10: '第十集 · 血狱魔君',
+  11: '第十一集 · 赤焰初燃',
+  12: '第十二集 · 嗜血狂潮',
+  13: '第十三集 · 四象合围',
+  14: '第十四集 · 双王压境',
+  15: '第十五集 · 焚天剑煞',
+  16: '第十六集 · 星穹玄阶',
+  17: '第十七集 · 瞬影试炼',
+  18: '第十八集 · 魔将车轮',
+  19: '第十九集 · 绝巅双魔',
+  20: '第二十集 · 镇狱终劫',
+  101: '外传秘境 · 古陵探宝',
+  102: '外传秘境 · 剑窟问锋',
+  103: '外传秘境 · 魔殿争仙',
+};
+
+function buildEpisodeChoices(stage: StageDef): [EpisodeChoiceDef, EpisodeChoiceDef] {
+  const ch = stage.chapter;
+  const ep = stage.episodeNum;
+  if (stage.biome === 'peach_shrine') {
+    return [
+      {
+        id: `ep${ep}_peach_blade`,
+        title: '花影递剑 · 破阵争先',
+        subtitle: '剑伤 +15% · 开局剑意 +30',
+        dmgBonus: 0.15,
+        ultBonus: 30,
+      },
+      {
+        id: `ep${ep}_peach_breeze`,
+        title: '踏花凌波 · 灵泉护心',
+        subtitle: '移速 +13% · 气血 +45 · 灵葫 +1',
+        speedBonus: 0.13,
+        hpBonus: 45,
+        extraGourd: 1,
+      },
+    ];
+  }
+  if (stage.biome === 'sword_graveyard') {
+    return [
+      {
+        id: `ep${ep}_grave_resonance`,
+        title: '古剑共鸣 · 剑意如虹',
+        subtitle: '剑伤 +16% · 开局剑意 +34',
+        dmgBonus: 0.16,
+        ultBonus: 34,
+      },
+      {
+        id: `ep${ep}_grave_ward`,
+        title: '残碑定神 · 守御化煞',
+        subtitle: '移速 +12% · 气血 +52 · 灵葫 +1',
+        speedBonus: 0.12,
+        hpBonus: 52,
+        extraGourd: 1,
+      },
+    ];
+  }
+  if (stage.biome === 'lava_abyss') {
+    return [
+      {
+        id: `ep${ep}_lava_cleave`,
+        title: '焚锋斩狱 · 烈焰增威',
+        subtitle: '剑伤 +18% · 开局剑意 +38',
+        dmgBonus: 0.18,
+        ultBonus: 38,
+      },
+      {
+        id: `ep${ep}_lava_ice`,
+        title: '冰心镇火 · 丹元续命',
+        subtitle: '移速 +12% · 气血 +62 · 灵葫 +1',
+        speedBonus: 0.12,
+        hpBonus: 62,
+        extraGourd: 1,
+      },
+    ];
+  }
+  if (stage.biome === 'celestial_sanctum' || ch === 4) {
+    return [
+      {
+        id: `ep${ep}_star_heaven`,
+        title: '引星入剑 · 天剑凌霄',
+        subtitle: '剑伤 +20% · 开局剑意 +42',
+        dmgBonus: 0.2,
+        ultBonus: 42,
+      },
+      {
+        id: `ep${ep}_star_taiji`,
+        title: '太极化劫 · 星穹护体',
+        subtitle: '移速 +14% · 气血 +72 · 灵葫 +1',
+        speedBonus: 0.14,
+        hpBonus: 72,
+        extraGourd: 1,
+      },
+    ];
+  }
+  return [
+    {
+      id: `ep${ep}_strike`,
+      title: '拔剑破阵 · 剑意如虹',
+      subtitle: '剑伤 +14% · 开局剑意 +28',
+      dmgBonus: 0.14,
+      ultBonus: 28,
+    },
+    {
+      id: `ep${ep}_guard`,
+      title: '御风稳守 · 灵泉护体',
+      subtitle: '移速 +12% · 气血 +42 · 灵葫 +1',
+      speedBonus: 0.12,
+      hpBonus: 42,
+      extraGourd: 1,
+    },
+  ];
+}
+
 export function getStageDialogueForStage(stage: StageDef, includeElder = false): StageDialogueDef {
   const chapter = getChapterDef(stage.chapter);
   const elderBrief = CHAPTER_ELDER_BRIEF[stage.chapter];
@@ -1308,15 +1665,22 @@ export function getStageDialogueForStage(stage: StageDef, includeElder = false):
   const bossOrLead = [...allEnemies].reverse().find((e) => e.name)?.name ?? (stage.isBossStage ? '镇狱妖王' : '山门妖将');
   const affixes = Array.from(new Set(allEnemies.map((e) => e.affix).filter(Boolean))) as EnemyAffix[];
   const affixLabels = affixes.map((a) => AFFIX_META[a].label);
+  const isDungeon = stage.id > 100;
+  const biomeLabel = BIOME_LABELS[stage.biome] ?? '翠竹云溪';
+  const episodeTag = isDungeon
+    ? `秘境外传 · ${stage.badge}`
+    : `${VOLUME_LABELS[stage.chapter]}第 ${stage.episodeNum} 集`;
+  const tvTitle = EPISODE_DRAMA_TITLES[stage.id] ?? `第 ${stage.episodeNum} 集 · ${stage.name}`;
 
   const enemyLine = stage.introLine;
   const heroReply = stage.isBossStage
-    ? `「${bossOrLead}，少废话！今日我李逍遥便以七星剑魄斩你于剑台之上！」`
+    ? `「${bossOrLead}，少废话！今日我李逍遥便以七星剑魄斩你于${biomeLabel}之上！」`
     : stage.waves.length >= 2
       ? `「妖气虽盛，不过土鸡瓦狗！待我连破这 ${stage.waves.length} 阵妖兵，再取灵石锻剑！」`
       : `「既已至此，便让我试一试蜀山真传剑招！」`;
 
   const intel: string[] = [
+    `地界：${biomeLabel}`,
     `共 ${stage.waves.length} 波 · ${allEnemies.length} 名妖邪`,
     `推荐境界：${stage.recommendedRealm}`,
     stage.hazardLabel ? `场地异变：${stage.hazardLabel}` : '剑阵稳固 · 无场地天劫',
@@ -1351,11 +1715,14 @@ export function getStageDialogueForStage(stage: StageDef, includeElder = false):
 
   return {
     stageId: stage.id,
-    kicker: stage.id > 100 ? `秘境打宝 · ${stage.badge}` : `${chapter.roman} · 第 ${stage.id} 关 · ${stage.badge}`,
-    title: `${stage.name} — ${stage.subtitle}`,
-    chapterName: stage.id > 100 ? '蜀山秘境' : `${chapter.roman} ${chapter.name}`,
+    episodeTag,
+    biomeLabel,
+    kicker: `${episodeTag} · ${biomeLabel}`,
+    title: `${tvTitle} — ${stage.subtitle}`,
+    chapterName: isDungeon ? '蜀山秘境' : `${chapter.roman} ${chapter.name}`,
     intel,
     lines,
+    choices: buildEpisodeChoices(stage),
   };
 }
 
@@ -1442,8 +1809,16 @@ export class CampaignSaveStore {
               if (n > 0) dungeonClears[k] = n;
             }
           }
+          const maxCultLv = CULTIVATION_STEPS.length - 1;
+          const cultivationLevel = Math.max(
+            0,
+            Math.min(maxCultLv, Math.floor(Number(parsed.cultivationLevel) || 0)),
+          );
+          const rawMealId = typeof parsed.activeMealId === 'string' ? parsed.activeMealId : null;
+          const activeMealId =
+            rawMealId && CAMP_MEALS.some((m) => m.id === rawMealId) ? rawMealId : null;
           return {
-            version: 3,
+            version: 4,
             cleared: parsed.cleared,
             lastPlayedStage: Math.max(1, Math.min(20, Number(parsed.lastPlayedStage || 1))),
             jade,
@@ -1457,6 +1832,8 @@ export class CampaignSaveStore {
             claimedBounties: Array.isArray(parsed.claimedBounties)
               ? parsed.claimedBounties.filter((id): id is string => typeof id === 'string')
               : [],
+            cultivationLevel,
+            activeMealId,
           };
         }
       }
@@ -1464,7 +1841,7 @@ export class CampaignSaveStore {
       // ignore storage failure in private mode
     }
     return {
-      version: 3,
+      version: 4,
       cleared: {},
       lastPlayedStage: 1,
       jade: DEFAULT_STARTER_JADE,
@@ -1476,6 +1853,8 @@ export class CampaignSaveStore {
       dungeonClears: {},
       stats: { totalKills: 0, totalParries: 0, totalDungeons: 0, totalForges: 0 },
       claimedBounties: [],
+      cultivationLevel: 0,
+      activeMealId: null,
     };
   }
 
@@ -1769,5 +2148,80 @@ export class CampaignSaveStore {
       droppedItem,
       reason: droppedItem ? `领取 ◆${def.rewardJade} + 「${droppedItem.name}」` : `领取 ◆${def.rewardJade} 灵石`,
     };
+  }
+
+  getCultivationLevel(): number {
+    const maxLv = CULTIVATION_STEPS.length - 1;
+    return Math.max(0, Math.min(maxLv, Math.floor(this.data.cultivationLevel || 0)));
+  }
+
+  getCultivationBonus(): {
+    hpBonus: number;
+    atkPct: number;
+    spiritRegenPct: number;
+    startUltBonus: number;
+    current: CultivationRealmStep;
+    next: CultivationRealmStep | null;
+  } {
+    const lv = this.getCultivationLevel();
+    const current = CULTIVATION_STEPS[lv] ?? CULTIVATION_STEPS[0];
+    const next = CULTIVATION_STEPS[lv + 1] ?? null;
+    return {
+      hpBonus: current.hpBonus,
+      atkPct: current.atkPct,
+      spiritRegenPct: current.spiritRegenPct,
+      startUltBonus: current.startUltBonus,
+      current,
+      next,
+    };
+  }
+
+  breakthroughCultivation(): { ok: boolean; level: number; reason: string } {
+    const cur = this.getCultivationLevel();
+    const next = CULTIVATION_STEPS[cur + 1];
+    if (!next) {
+      return { ok: false, level: cur, reason: '已臻至「蜀山剑神」绝顶境界' };
+    }
+    if (this.data.jade < next.costJade) {
+      return { ok: false, level: cur, reason: `灵石不足（需 ◆${next.costJade}）` };
+    }
+    this.data.jade -= next.costJade;
+    this.data.cultivationLevel = next.level;
+    this.persist();
+    return { ok: true, level: next.level, reason: `修为突破至「${next.name}」！` };
+  }
+
+  getActiveMealId(): string | null {
+    return this.data.activeMealId ?? null;
+  }
+
+  getActiveMeal(): CampMealDef | null {
+    if (!this.data.activeMealId) return null;
+    return CAMP_MEALS.find((m) => m.id === this.data.activeMealId) ?? null;
+  }
+
+  selectCampMeal(mealId: string): { ok: boolean; reason: string } {
+    const meal = CAMP_MEALS.find((m) => m.id === mealId);
+    if (!meal) return { ok: false, reason: '灵膳不存在' };
+    if (this.data.activeMealId === meal.id) {
+      return { ok: true, reason: `「${meal.name}」已在温养中` };
+    }
+    if (this.data.jade < meal.costJade) {
+      return { ok: false, reason: `灵石不足（需 ◆${meal.costJade}）` };
+    }
+    if (meal.costJade > 0) {
+      this.data.jade -= meal.costJade;
+    }
+    this.data.activeMealId = meal.id;
+    this.persist();
+    return { ok: true, reason: `已备好「${meal.name}」，下场出战生效！` };
+  }
+
+  consumeActiveMeal(): CampMealDef | null {
+    const meal = this.getActiveMeal();
+    if (!meal) return null;
+    this.data.activeMealId = null;
+    this.persist();
+    return meal;
   }
 }

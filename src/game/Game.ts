@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GameInput } from '../core/Input';
 import { RenderPipeline } from '../core/RenderPipeline';
 import { triggerHaptic } from '../core/NativeBridge';
-import { ShushanArena } from '../world/ShushanArena';
+import { ShushanArena, type WorldBiome } from '../world/ShushanArena';
 import { VfxSystem } from '../vfx/VfxSystem';
 import { AudioEngine } from '../systems/AudioEngine';
 import { CameraRig } from '../systems/CameraRig';
@@ -20,6 +20,7 @@ import {
   createEnemy,
   createHero,
   createPeerHero,
+  createPracticeDummy,
   ENEMY_BASE_STATS,
   type EnemyCreateOverrides,
   type EnemyEntity,
@@ -28,10 +29,15 @@ import {
   type ProjectileEntity,
 } from './CombatEntities';
 import {
+  BIOME_LABELS,
+  CAMP_MEALS,
   CAMPAIGN_STAGES,
+  CULTIVATION_STEPS,
   CampaignSaveStore,
+  type ChapterDef,
   type DungeonDef,
   type StageDef,
+  type StageDialogueDef,
   type StageHazardType,
   type RunBlessingState,
   applyBlessingToRun,
@@ -140,6 +146,10 @@ export class Game {
   private q2AttackActive = false;
   private q2DashTargetId: number | null = null;
   private corridorMode = false;
+  private healingShrineCollected = false;
+  private activeDialogueDef: StageDialogueDef | null = null;
+  private activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+  private episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
   private moonKeyLight: THREE.DirectionalLight | null = null;
 
   private frame = 0;
@@ -291,8 +301,42 @@ export class Game {
         this.blessings = createEmptyBlessings();
         this.startNewRun(false, stageId, false, false);
       },
-      onConfirmDialogue: () => {
-        this.confirmStageDialogue();
+      onConfirmDialogue: (choiceId?: string) => {
+        this.confirmStageDialogue(choiceId);
+      },
+      onEnterCamp: () => {
+        this.enterCampMode();
+      },
+      onLeaveCampToEpisode: (stageId: number) => {
+        this.mp.leave();
+        this.clearPeerHero();
+        this.hud.setMpHudBadge('');
+        this.hud.setHeroName('李逍遥');
+        this.blessings = createEmptyBlessings();
+        this.startNewRun(false, stageId, false, false);
+      },
+      onCampCultivate: () => {
+        const res = this.saveStore.breakthroughCultivation();
+        if (res.ok) {
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playDropChime('spirit');
+          triggerHaptic('heavy');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        } else {
+          this.hud.showCampErrorToast?.(res.reason);
+        }
+        return res;
+      },
+      onCampSelectMeal: (mealId: string) => {
+        const res = this.saveStore.selectCampMeal(mealId);
+        if (res.ok) {
+          this.audio.playHeal();
+          triggerHaptic('light');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        } else {
+          this.hud.showCampErrorToast?.(res.reason);
+        }
+        return res;
       },
       onNextStage: (nextStageId, selectedBlessingId) => {
         if (selectedBlessingId) {
@@ -523,6 +567,7 @@ export class Game {
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
     window.__THREE_GAME_TEST_HOOKS__ = undefined;
     window.G = undefined;
+    (window as unknown as Record<string, unknown>).__omGame = undefined;
   }
 
   private onGlobalKey = (e: KeyboardEvent): void => {
@@ -566,12 +611,39 @@ export class Game {
     );
   }
 
+  private applyBiomeAtmosphere(biome: WorldBiome, chDef?: ChapterDef): void {
+    if (biome === 'haven_camp') {
+      this.scene.background = new THREE.Color('#191522');
+      this.scene.fog = new THREE.FogExp2('#221b2c', 0.0115);
+    } else if (biome === 'peach_shrine') {
+      this.scene.background = new THREE.Color('#161124');
+      this.scene.fog = new THREE.FogExp2('#21172f', 0.0128);
+    } else if (biome === 'celestial_sanctum') {
+      this.scene.background = new THREE.Color('#0a1224');
+      this.scene.fog = new THREE.FogExp2('#101c36', 0.0124);
+    } else if (chDef) {
+      this.scene.background = new THREE.Color(chDef.bgHex);
+      this.scene.fog = new THREE.FogExp2(chDef.fogHex, 0.0138);
+    } else {
+      this.scene.background = new THREE.Color('#0c1522');
+      this.scene.fog = new THREE.FogExp2('#101d2c', 0.0138);
+    }
+  }
+
   private syncLiveHeroCapsFromLoadout(): void {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
+    const cultivation = this.saveStore.getCultivationBonus();
     const h = this.hero;
     const prevMaxHp = h.maxHp;
-    const nextMaxHp = 180 + realm.hpBonus + loadout.maxHpBonus + this.blessings.maxHpBonus;
+    const nextMaxHp =
+      180 +
+      realm.hpBonus +
+      loadout.maxHpBonus +
+      this.blessings.maxHpBonus +
+      cultivation.hpBonus +
+      this.activeMealBuff.hpBonus +
+      this.episodeChoiceBuff.hpBonus;
     h.maxHp = nextMaxHp;
     if (nextMaxHp > prevMaxHp) {
       h.hp = Math.min(h.maxHp, h.hp + (nextMaxHp - prevMaxHp));
@@ -580,7 +652,7 @@ export class Game {
       h.hp = Math.min(h.maxHp, h.hp);
       h.delayedHp = Math.min(h.maxHp, h.delayedHp);
     }
-    const nextMaxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds;
+    const nextMaxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds + this.episodeChoiceBuff.extraGourd;
     if (nextMaxGourds > h.maxGourds) {
       h.gourds += nextMaxGourds - h.maxGourds;
     }
@@ -593,15 +665,20 @@ export class Game {
     this.activeDungeon = null;
     this.stageDroppedGear = [];
     this.corridorMode = false;
+    this.healingShrineCollected = false;
+    this.activeDialogueDef = null;
+    this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
     this.arena.setArenaLayout('arena', 0);
+    this.arena.setBiome('bamboo_canyon');
+    this.arena.setHealingShrineUsed(false);
     this.targetRingMesh.visible = false;
     this.pendingCutsceneAfterDialogue = false;
     this.resetHero(new THREE.Vector3(0, 0, 2.2), Math.PI);
     this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(false);
     this.arena.setStageTheme(1);
-    this.scene.background = new THREE.Color('#0c1522');
-    this.scene.fog = new THREE.FogExp2('#101d2c', 0.0138);
+    this.applyBiomeAtmosphere('bamboo_canyon');
     this.mode = 'title';
     this.stagePhase = 'combat';
     this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
@@ -613,7 +690,10 @@ export class Game {
   private enterShowcaseMode(): void {
     this.clearCombatEntities();
     this.corridorMode = false;
+    this.healingShrineCollected = false;
     this.arena.setArenaLayout('arena', 0);
+    this.arena.setBiome('bamboo_canyon');
+    this.arena.setHealingShrineUsed(false);
     this.targetRingMesh.visible = false;
     this.resetHero(new THREE.Vector3(-0.95, 0, 0.55), 0.16);
     this.applyCurrentLoadoutVisuals();
@@ -629,6 +709,45 @@ export class Game {
     this.cameraRig.updateShowcase(new THREE.Vector3(0.1, 0, 0.25), 0);
   }
 
+  enterCampMode(): void {
+    this.audio.unlock();
+    this.mp.leave();
+    this.clearPeerHero();
+    this.hud.setMpHudBadge('');
+    this.hud.setMpLobbyStatus('', false, false);
+    this.hud.setHeroName('李逍遥');
+    this.clearCombatEntities();
+    this.activeDungeon = null;
+    this.stageDroppedGear = [];
+    this.blessings = createEmptyBlessings();
+    this.activeDialogueDef = null;
+    this.pendingCutsceneAfterDialogue = false;
+    this.corridorMode = false;
+    this.healingShrineCollected = false;
+    this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
+
+    this.arena.setArenaLayout('arena', 0);
+    this.arena.setBiome('haven_camp');
+    this.arena.setHealingShrineUsed(false);
+    this.applyBiomeAtmosphere('haven_camp');
+    this.targetRingMesh.visible = false;
+
+    this.resetHero(new THREE.Vector3(0, 0, 5.4), Math.PI);
+    this.applyCurrentLoadoutVisuals();
+    this.hero.rig.setWeaponDrawn(true);
+    this.hero.spirit = this.hero.maxSpirit;
+    this.spawnPracticeDummy(0, -4.6);
+
+    this.mode = 'camp';
+    this.stagePhase = 'combat';
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    this.hud.setMode('camp');
+    this.audio.setMood('title');
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, 'none', this.buildTacticalState());
+  }
+
   private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false, skipDialogue = false): void {
     this.audio.unlock();
     this.clearCombatEntities();
@@ -636,9 +755,20 @@ export class Game {
     this.stageDroppedGear = [];
     if (!keepBlessings) {
       this.blessings = createEmptyBlessings();
+      this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    }
+    const meal = this.saveStore.consumeActiveMeal();
+    if (meal) {
+      this.activeMealBuff = {
+        hpBonus: meal.hpBonus,
+        dmgBonus: meal.dmgBonus,
+        speedBonus: meal.speedBonus,
+        ultBonus: meal.ultBonus,
+      };
     }
     const targetStage = jumpToBoss ? 20 : clamp(Math.floor(stageId), 1, 20);
     this.saveStore.setLastPlayed(targetStage);
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
     this.resetHero(new THREE.Vector3(0, 0, jumpToBoss ? 7.2 : 8.8), Math.PI);
     this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(true);
@@ -649,6 +779,7 @@ export class Game {
     this.pvpResultDecided = false;
 
     this.enterStage(targetStage, !jumpToBoss, true, jumpToBoss, !skipDialogue && !jumpToBoss);
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
     this.cameraRig.snapTo(this.hero.pos);
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
   }
@@ -664,6 +795,17 @@ export class Game {
     this.activeDungeon = dungeon;
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
+    this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    const meal = this.saveStore.consumeActiveMeal();
+    if (meal) {
+      this.activeMealBuff = {
+        hpBonus: meal.hpBonus,
+        dmgBonus: meal.dmgBonus,
+        speedBonus: meal.speedBonus,
+        ultBonus: meal.ultBonus,
+      };
+    }
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
     this.resetHero(new THREE.Vector3(0, 0, 8.8), Math.PI);
     this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(true);
@@ -674,14 +816,35 @@ export class Game {
     this.pvpResultDecided = false;
 
     this.enterStage(dungeon.stageDef.id, true, true, false, !skipDialogue);
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
     this.cameraRig.snapTo(this.hero.pos);
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
   }
 
-  confirmStageDialogue(): boolean {
+  confirmStageDialogue(choiceId?: string): boolean {
     if (this.mode !== 'dialogue') return false;
     this.audio.unlock();
     this.audio.playDropChime('spirit');
+
+    const dlg = this.activeDialogueDef;
+    this.activeDialogueDef = null;
+    const chosen = dlg ? (dlg.choices.find((c) => c.id === choiceId) ?? dlg.choices[0]) : undefined;
+    if (chosen) {
+      this.episodeChoiceBuff = {
+        dmgBonus: chosen.dmgBonus ?? 0,
+        speedBonus: chosen.speedBonus ?? 0,
+        hpBonus: chosen.hpBonus ?? 0,
+        ultBonus: chosen.ultBonus ?? 0,
+        extraGourd: chosen.extraGourd ?? 0,
+      };
+      this.syncLiveHeroCapsFromLoadout();
+      if (this.episodeChoiceBuff.ultBonus > 0) {
+        this.hero.ult = clamp(this.hero.ult + this.episodeChoiceBuff.ultBonus, 0, 100);
+      }
+      this.spawnWorldCallout(chosen.title, this.hero.pos, 'parry');
+      this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
+    }
+
     const boss = this.getActiveBoss();
     if (this.pendingCutsceneAfterDialogue && boss) {
       this.pendingCutsceneAfterDialogue = false;
@@ -703,6 +866,10 @@ export class Game {
     this.activeDungeon = null;
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
+    this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
+    this.activeDialogueDef = null;
+    this.healingShrineCollected = false;
     this.runElapsed = 0;
     this.timeScale = 1;
     this.slowMoTimer = 0;
@@ -741,8 +908,9 @@ export class Game {
       this.stagePhase = 'combat';
       const ch = getChapterDef(4);
       this.arena.setStageTheme(20, ch);
-      this.scene.background = new THREE.Color(ch.bgHex);
-      this.scene.fog = new THREE.FogExp2(ch.fogHex, 0.0138);
+      this.arena.setBiome('celestial_sanctum');
+      this.arena.setHealingShrineUsed(false);
+      this.applyBiomeAtmosphere('celestial_sanctum', ch);
       this.mode = 'playing';
       this.hud.setMode('playing');
       this.audio.setMood('boss1');
@@ -792,6 +960,9 @@ export class Game {
     this.stageTimer = 0;
     this.hazardTimer = stageDef.hazardIntervalSec ? stageDef.hazardIntervalSec * 0.75 : 0;
     this.pendingCutsceneAfterDialogue = false;
+    this.healingShrineCollected = false;
+    this.activeDialogueDef = null;
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
 
     const isCorridor = this.mp.mode !== 'solo';
     const maxZone: 0 | 1 | 2 = stageDef.waves.length >= 3 ? 2 : 1;
@@ -806,8 +977,9 @@ export class Game {
     }
 
     this.arena.setStageTheme(this.activeDungeon ? stageDef.chapter * 5 : this.currentStageId, chDef);
-    this.scene.background = new THREE.Color(chDef.bgHex);
-    this.scene.fog = new THREE.FogExp2(chDef.fogHex, 0.0138);
+    this.arena.setBiome(stageDef.biome);
+    this.arena.setHealingShrineUsed(false);
+    this.applyBiomeAtmosphere(stageDef.biome, chDef);
 
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     this.hud.setRealmAndBlessings(realm.title, this.blessings.ids.length);
@@ -828,6 +1000,7 @@ export class Game {
         const dlg = this.activeDungeon
           ? getStageDialogueForStage(stageDef, false)
           : getStageDialogue(this.currentStageId);
+        this.activeDialogueDef = dlg;
         this.hud.showStageDialogue(dlg);
       } else {
         this.spawnWave(stageDef, this.currentWaveIdx, withCutscene);
@@ -909,9 +1082,17 @@ export class Game {
   private resetHero(pos: THREE.Vector3, yaw: number): void {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
+    const cultivation = this.saveStore.getCultivationBonus();
     const h = this.hero;
-    h.maxHp = 180 + realm.hpBonus + loadout.maxHpBonus + this.blessings.maxHpBonus;
-    h.maxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds;
+    h.maxHp =
+      180 +
+      realm.hpBonus +
+      loadout.maxHpBonus +
+      this.blessings.maxHpBonus +
+      cultivation.hpBonus +
+      this.activeMealBuff.hpBonus +
+      this.episodeChoiceBuff.hpBonus;
+    h.maxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds + this.episodeChoiceBuff.extraGourd;
     h.pos.copy(pos);
     h.vel.set(0, 0, 0);
     h.yaw = yaw;
@@ -919,7 +1100,7 @@ export class Game {
     h.delayedHp = h.maxHp;
     h.spirit = 85;
     h.stamina = h.maxStamina;
-    h.ult = 35;
+    h.ult = clamp(35 + cultivation.startUltBonus + this.activeMealBuff.ultBonus + this.episodeChoiceBuff.ultBonus, 0, 100);
     h.gourds = h.maxGourds;
     h.state = 'idle';
     h.stateTime = 0;
@@ -1002,6 +1183,18 @@ export class Game {
     this.scene.add(enemy.rig.root);
     this.enemies.push(enemy);
     return enemy;
+  }
+
+  private spawnPracticeDummy(x: number, z: number): EnemyEntity {
+    const pos = new THREE.Vector3(x, 0, z);
+    this.arena.constrainPosition(pos, 0.75);
+    const id = this.nextEntityId++;
+    const dummy = createPracticeDummy(id, pos, this.rng);
+    dummy.yaw = Math.atan2(this.hero.pos.x - pos.x, this.hero.pos.z - pos.z);
+    dummy.rig.root.rotation.y = dummy.yaw;
+    this.scene.add(dummy.rig.root);
+    this.enemies.push(dummy);
+    return dummy;
   }
 
   private getActiveBoss(): EnemyEntity | null {
@@ -1144,6 +1337,28 @@ export class Game {
       this.updateStageProgression(dt);
       this.tickMultiplayerSync(rawDt);
 
+      if (
+        this.corridorMode &&
+        this.arena.getMaxZone() >= 1 &&
+        !this.healingShrineCollected &&
+        this.hero.state !== 'dead'
+      ) {
+        const shrinePos = this.arena.getHealingShrinePos();
+        if (Math.hypot(this.hero.pos.x - shrinePos.x, this.hero.pos.z - shrinePos.z) <= 2.4) {
+          this.healingShrineCollected = true;
+          this.arena.setHealingShrineUsed(true);
+          const healHp = Math.round(this.hero.maxHp * 0.35);
+          this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + healHp);
+          this.hero.delayedHp = Math.max(this.hero.delayedHp, this.hero.hp);
+          this.hero.spirit = Math.min(this.hero.maxSpirit, this.hero.spirit + 40);
+          this.audio.playHeal();
+          this.vfx.spawnHealVortex(this.hero.pos);
+          this.vfx.spawnShockRing(shrinePos, new THREE.Color(0.45, 2.1, 1.35), 0.35, 2.8, 0.48);
+          this.spawnWorldCallout('仙灵清泉 +气血真气!', this.hero.pos, 'heal');
+          triggerHaptic('medium');
+        }
+      }
+
       this.vfx.update(
         dt,
         this.elapsed,
@@ -1171,6 +1386,23 @@ export class Game {
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
       const threat = this.updateTargetRingAndThreat(rawDt);
       this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer, threat, this.buildTacticalState());
+    } else if (this.mode === 'camp') {
+      this.updateHero(dt, rawDt);
+      this.updateCampDummy(dt);
+      this.updateProjectiles(dt);
+      this.resolveEntitySeparation();
+
+      this.vfx.update(dt, this.elapsed, this.hero.pos, undefined, undefined, this.camera.position);
+      this.arena.update(dt, this.elapsed, this.hero.pos);
+      this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, null, this.input.mouseNdc);
+      if (this.moonKeyLight) {
+        this.moonKeyLight.position.set(this.hero.pos.x - 15, 24, this.hero.pos.z - 18);
+        this.moonKeyLight.target.position.copy(this.hero.pos);
+        this.moonKeyLight.target.updateMatrixWorld();
+      }
+      this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
+      const threat = this.updateTargetRingAndThreat(rawDt);
+      this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, threat, this.buildTacticalState());
     } else {
       this.targetRingMesh.visible = false;
       this.updatePeerHero(dt * 0.5);
@@ -1308,7 +1540,12 @@ export class Game {
       if (h.comboDecayTimer <= 0) h.comboCount = 0;
     }
 
-    h.spirit = Math.min(h.maxSpirit, h.spirit + dt * 6.5 * realm.spiritRegenMult * loadout.spiritRegenMult);
+    const cultivation = this.saveStore.getCultivationBonus();
+    const campRegenMult = this.mode === 'camp' ? 3.5 : 1.0;
+    h.spirit = Math.min(
+      h.maxSpirit,
+      h.spirit + dt * 6.5 * realm.spiritRegenMult * loadout.spiritRegenMult * (1 + cultivation.spiritRegenPct) * campRegenMult,
+    );
     if (h.state !== 'block' && h.state !== 'dodge') {
       h.stamina = Math.min(h.maxStamina, h.stamina + dt * 28);
     }
@@ -1477,7 +1714,11 @@ export class Game {
     }
 
     if (h.state === 'idle' || h.state === 'run') {
-      const speed = 7.4 * this.blessings.speedMult * loadout.speedMult;
+      const speed =
+        7.4 *
+        this.blessings.speedMult *
+        loadout.speedMult *
+        (1 + this.activeMealBuff.speedBonus + this.episodeChoiceBuff.speedBonus);
       const moving = Math.hypot(this.moveVec.x, this.moveVec.z) > 0.05;
       if (moving) {
         h.state = 'run';
@@ -1581,7 +1822,13 @@ export class Game {
   private getHeroDamageScale(): number {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
-    return realm.dmgMult * loadout.dmgMult * this.blessings.dmgMult;
+    const cultivation = this.saveStore.getCultivationBonus();
+    return (
+      realm.dmgMult *
+      loadout.dmgMult *
+      this.blessings.dmgMult *
+      (1 + cultivation.atkPct + this.activeMealBuff.dmgBonus + this.episodeChoiceBuff.dmgBonus)
+    );
   }
 
   private startHeroAttack(step: number): void {
@@ -1824,7 +2071,12 @@ export class Game {
     const loadout = this.getLoadoutStats();
     h.stateTime += dt;
     const p = clamp(h.stateTime / h.stateDuration, 0, 1);
-    const speed = 15.8 * this.blessings.speedMult * loadout.speedMult * (1 - p * 0.45);
+    const speed =
+      15.8 *
+      this.blessings.speedMult *
+      loadout.speedMult *
+      (1 + this.activeMealBuff.speedBonus + this.episodeChoiceBuff.speedBonus) *
+      (1 - p * 0.45);
     h.pos.addScaledVector(h.dodgeDir, speed * dt);
     this.arena.constrainPosition(h.pos, h.radius, prevPos);
     h.rig.root.position.copy(h.pos);
@@ -1947,7 +2199,7 @@ export class Game {
   }
 
   private recordComboSigil(sig: 'A' | 'Q' | 'E' | 'D'): void {
-    if (this.mode !== 'playing') return;
+    if (this.mode !== 'playing' && this.mode !== 'camp') return;
     const h = this.hero;
     if (h.comboUltReady) return;
     if (h.comboSigilTimer <= 0) {
@@ -1967,7 +2219,7 @@ export class Game {
 
   tryCastComboUlt(): boolean {
     const h = this.hero;
-    if (this.mode !== 'playing' || h.state === 'dead' || !h.comboUltReady) return false;
+    if ((this.mode !== 'playing' && this.mode !== 'camp') || h.state === 'dead' || !h.comboUltReady) return false;
     this.rmbMoveTarget = null;
     this.startComboUlt();
     return true;
@@ -2573,7 +2825,12 @@ export class Game {
     const critScale = rolledCrit ? loadout.critMult : 1.0;
     const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0) * critScale);
     const scaledPoise = poiseGain * (interrupted ? 1.6 : 1.0) * (fromLocalHero ? loadout.poiseMult : 1.0);
-    e.hp = Math.max(0, e.hp - dmg);
+    if (e.isDummy) {
+      e.hp = Math.max(1, e.hp - dmg);
+      e.stateTime = 0;
+    } else {
+      e.hp = Math.max(0, e.hp - dmg);
+    }
     e.poise = Math.min(e.maxPoise, e.poise + scaledPoise);
 
     const isSkillE = skill === 'skillE';
@@ -2649,7 +2906,7 @@ export class Game {
       this.hud.showSubtitle(`${e.name}：「魔剑狂化！」`, 1.5);
     }
 
-    if (e.hp <= 0) {
+    if (!e.isDummy && e.hp <= 0) {
       this.killEnemy(e);
       return;
     }
@@ -2660,8 +2917,8 @@ export class Game {
       e.telegraph = null;
       e.aiState = 'stagger';
       e.stateTime = 0;
-      e.stateDuration = e.kind === 'boss' ? 2.1 : e.kind === 'elite' ? 1.8 : 1.5;
-      if (fromLocalHero) {
+      e.stateDuration = e.isDummy ? 1.1 : e.kind === 'boss' ? 2.1 : e.kind === 'elite' ? 1.8 : 1.5;
+      if (fromLocalHero && !e.isDummy) {
         h.counterTargetId = e.id;
         h.counterWindowTimer = 1.4;
       }
@@ -2864,6 +3121,67 @@ export class Game {
           this.tryHitHero(null, hz.damage, true, hz.pos);
         }
         this.hazards.splice(i, 1);
+      }
+    }
+  }
+
+  private updateCampDummy(dt: number): void {
+    const h = this.hero;
+    for (const e of this.enemies) {
+      if (!e.isDummy) continue;
+      if (e.hpBarGroup.visible) {
+        e.hpBarGroup.quaternion.copy(this.camera.quaternion);
+        e.hpFillMesh.scale.x = clamp(e.hp / e.maxHp, 0.001, 1);
+      }
+      e.counterRing.visible = h.counterTargetId === e.id && h.counterWindowTimer > 0;
+      if (e.counterRing.visible) e.counterRing.rotation.z += dt * 4.5;
+
+      if (e.swordMarkTimer && e.swordMarkTimer > 0) {
+        e.swordMarkTimer = Math.max(0, e.swordMarkTimer - dt);
+      }
+      if (e.hitstopTimer > 0) {
+        e.hitstopTimer = Math.max(0, e.hitstopTimer - dt);
+        const j = Math.sin(this.elapsed * 95) * 0.06;
+        e.rig.root.position.set(e.pos.x + j, e.pos.y, e.pos.z - j);
+        continue;
+      }
+
+      if (e.aiState === 'hit' || e.aiState === 'stagger') {
+        e.stateTime += dt;
+        const p = clamp(e.stateTime / Math.max(0.1, e.stateDuration), 0, 1);
+        e.pos.addScaledVector(e.vel, dt * (1 - p) * 0.45);
+        this.arena.constrainPosition(e.pos, e.radius);
+        e.rig.root.position.copy(e.pos);
+        e.rig.applyPose(e.aiState === 'stagger' ? 'stagger' : 'hit', p, this.elapsed, dt, 0);
+        if (p >= 1) {
+          e.aiState = 'orbit';
+          e.stateTime = 0;
+        }
+        continue;
+      }
+
+      const toHeroYaw = Math.atan2(h.pos.x - e.pos.x, h.pos.z - e.pos.z);
+      e.yaw = dampAngle(e.yaw, toHeroYaw, 6, dt);
+      const homeDx = -e.pos.x;
+      const homeDz = -4.6 - e.pos.z;
+      const homeDist = Math.hypot(homeDx, homeDz);
+      if (homeDist > 0.35) {
+        const step = Math.min(homeDist, dt * 3.0);
+        e.pos.x += (homeDx / homeDist) * step;
+        e.pos.z += (homeDz / homeDist) * step;
+      }
+      e.rig.root.position.copy(e.pos);
+      e.rig.root.rotation.y = e.yaw;
+      e.rig.applyPose('combatIdle', 0, this.elapsed, dt, 0);
+
+      e.stateTime += dt;
+      if (e.stateTime >= 1.8 && e.hp < e.maxHp) {
+        const prevHp = e.hp;
+        e.hp = Math.min(e.maxHp, e.hp + dt * 950);
+        if (prevHp < e.maxHp && e.hp >= e.maxHp) {
+          this.vfx.spawnHealVortex(e.pos);
+          this.spawnWorldCallout('剑桩复原', e.pos, 'heal');
+        }
       }
     }
   }
@@ -4167,7 +4485,7 @@ export class Game {
       },
       getFallingSwordStats: () => this.vfx.getFallingSwordStats(),
       triggerComboUlt: () => {
-        if (this.mode !== 'playing') return false;
+        if (this.mode !== 'playing' && this.mode !== 'camp') return false;
         this.hero.comboSigils = ['A', 'Q', 'E'];
         this.hero.comboSigilTimer = 6.0;
         this.hero.comboUltReady = true;
@@ -4175,7 +4493,7 @@ export class Game {
         this.startComboUlt();
         this.hud.update(
           this.hero,
-          this.getObjectiveLabel(),
+          this.mode === 'camp' ? '云来剑庐 · 自由演武' : this.getObjectiveLabel(),
           this.getActiveBoss(),
           this.peer,
           'none',
@@ -4225,6 +4543,202 @@ export class Game {
         };
       },
     };
+
+    const phaseMap: Record<ScreenMode, string> = {
+      title: 'ready',
+      dialogue: 'ready',
+      paused: 'ready',
+      playing: 'playing',
+      cutscene: 'playing',
+      camp: 'explore',
+      showcase: 'explore',
+      victory: 'win',
+      defeat: 'loss',
+    };
+
+    (window as unknown as Record<string, unknown>).__omGame = {
+      getState: () => ({
+        selfId: 'xiaoyao',
+        players: {
+          xiaoyao: {
+            connected: true,
+            x: Number(this.hero.pos.x.toFixed(3)),
+            z: Number(this.hero.pos.z.toFixed(3)),
+          },
+        },
+        phase: phaseMap[this.mode] ?? 'ready',
+        biome: this.arena.getBiome(),
+        stageId: this.currentStageId,
+        zone: this.arena.getZoneIndexAtZ(this.hero.pos.z),
+      }),
+      getStats: () => {
+        const stats = this.pipeline.getStats();
+        return {
+          drawCalls: stats.calls,
+          triangles: stats.triangles,
+          geometries: stats.geometries,
+          entities: this.enemies.length,
+          biome: this.arena.getBiome(),
+          episodeNum: this.mode === 'camp' ? 0 : this.getActiveStageDef().episodeNum,
+        };
+      },
+      sendAction: (action: string) => {
+        if (action === 'enterCamp') {
+          this.enterCampMode();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action.startsWith('switchBiome:')) {
+          const raw = action.slice('switchBiome:'.length) as WorldBiome;
+          if (!Object.prototype.hasOwnProperty.call(BIOME_LABELS, raw)) return false;
+          this.arena.setBiome(raw);
+          this.applyBiomeAtmosphere(raw, getChapterDef(this.getActiveStageDef().chapter));
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action.startsWith('startEpisode:')) {
+          const ep = clamp(Math.round(Number(action.slice('startEpisode:'.length))), 1, 20);
+          if (!Number.isFinite(ep)) return false;
+          this.mp.leave();
+          this.clearPeerHero();
+          this.hud.setMpHudBadge('');
+          this.hud.setHeroName('李逍遥');
+          this.blessings = createEmptyBlessings();
+          this.startNewRun(false, ep, false, false);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action === 'confirmDialogue') {
+          const ok = this.confirmStageDialogue();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action === 'hitDummy') {
+          const dummy = this.enemies.find((e) => e.isDummy && e.aiState !== 'dead');
+          if (!dummy) return false;
+          const dx = dummy.pos.x - this.hero.pos.x;
+          const dz = dummy.pos.z - this.hero.pos.z;
+          const dist = Math.hypot(dx, dz);
+          this.hero.yaw = dist > 0.05 ? Math.atan2(dx, dz) : this.hero.yaw;
+          if (dist > 2.2) {
+            const stand = 1.65;
+            this.hero.pos.set(
+              dummy.pos.x - Math.sin(this.hero.yaw) * stand,
+              0,
+              dummy.pos.z - Math.cos(this.hero.yaw) * stand,
+            );
+            this.hero.rig.root.position.copy(this.hero.pos);
+          }
+          this.hero.rig.root.rotation.y = this.hero.yaw;
+          this.applyHeroAttackToEnemy(
+            dummy,
+            Math.round(68 * this.getHeroDamageScale()),
+            true,
+            this.hero.yaw,
+            28,
+            true,
+            'combo1',
+          );
+          this.stepFrame(1 / 60, true);
+          return true;
+        }
+        return false;
+      },
+      runSelfTests: () => {
+        const prevBiome = this.arena.getBiome();
+        const allBiomes: WorldBiome[] = [
+          'bamboo_canyon',
+          'peach_shrine',
+          'sword_graveyard',
+          'lava_abyss',
+          'celestial_sanctum',
+          'haven_camp',
+        ];
+        const stageBiomes = new Set(CAMPAIGN_STAGES.map((s) => s.biome));
+        let biomeSwitchOk = stageBiomes.size >= 5;
+        const propCounts: number[] = [];
+        for (const b of allBiomes) {
+          this.arena.setBiome(b);
+          if (this.arena.getBiome() !== b) biomeSwitchOk = false;
+          propCounts.push(this.arena.getSightlineStats().activeBiomeProps);
+        }
+        this.arena.setBiome(prevBiome);
+
+        const sl = this.arena.getSightlineStats();
+        const sightlinePass =
+          sl.centerBeamCount === 0 &&
+          sl.occludableCount >= 12 &&
+          (!this.corridorMode || (sl.waterMeshCount >= 2 && sl.canyonCliffCount >= 6));
+
+        const lv = this.saveStore.getCultivationLevel();
+        const stepsValid =
+          CULTIVATION_STEPS.length === 9 &&
+          CULTIVATION_STEPS.every(
+            (st, idx) =>
+              st.level === idx &&
+              Number.isFinite(st.costJade) &&
+              st.costJade >= 0 &&
+              Number.isFinite(st.hpBonus) &&
+              Number.isFinite(st.atkPct),
+          );
+        const mealsValid = CAMP_MEALS.length >= 3 && CAMP_MEALS.some((m) => m.costJade === 0);
+        const campPass = stepsValid && mealsValid && lv >= 0 && lv < CULTIVATION_STEPS.length;
+
+        const heroFinite =
+          Number.isFinite(this.hero.pos.x) &&
+          Number.isFinite(this.hero.pos.z) &&
+          Number.isFinite(this.hero.hp) &&
+          Number.isFinite(this.hero.maxHp) &&
+          this.hero.maxHp > 0;
+        const liveEnemiesFinite = this.enemies.every(
+          (e) =>
+            Number.isFinite(e.pos.x) &&
+            Number.isFinite(e.pos.z) &&
+            Number.isFinite(e.hp) &&
+            Number.isFinite(e.maxHp) &&
+            e.maxHp > 0,
+        );
+        const stagesFinite = CAMPAIGN_STAGES.every((st) =>
+          st.waves.every((w) => w.enemies.every((sp) => Number.isFinite(sp.x) && Number.isFinite(sp.z))),
+        );
+        const enemiesPass = heroFinite && liveEnemiesFinite && stagesFinite;
+
+        const stage1Hp = CAMPAIGN_STAGES[0].waves
+          .flatMap((w) => w.enemies)
+          .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
+        const stage20Hp = CAMPAIGN_STAGES[19].waves
+          .flatMap((w) => w.enemies)
+          .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
+        const diffPass = stage1Hp >= 1200 && stage20Hp > stage1Hp;
+
+        return {
+          biomesDistinct: {
+            pass: biomeSwitchOk,
+            detail: `stageBiomes=${stageBiomes.size}, switched=${allBiomes.length}, props=[${propCounts.join(',')}]`,
+          },
+          sightlineClean: {
+            pass: sightlinePass,
+            detail: `centerBeams=${sl.centerBeamCount}, occludables=${sl.occludableCount}, water=${sl.waterMeshCount}, cliffs=${sl.canyonCliffCount}`,
+          },
+          campCultivationBounded: {
+            pass: campPass,
+            detail: `lv=${lv}/${CULTIVATION_STEPS.length - 1}, meals=${CAMP_MEALS.length}`,
+          },
+          enemiesFinite: {
+            pass: enemiesPass,
+            detail: `heroFinite=${heroFinite}, liveCount=${this.enemies.length}, stages=${CAMPAIGN_STAGES.length}`,
+          },
+          stageDifficultyBuffed: {
+            pass: diffPass,
+            detail: `stage1Hp=${stage1Hp}, stage20Hp=${stage20Hp}`,
+          },
+        };
+      },
+    };
   }
 
   private buildTacticalState(): HudTacticalState {
@@ -4255,6 +4769,7 @@ export class Game {
     }
     return {
       corridorMode: this.corridorMode,
+      biome: this.arena.getBiome(),
       heroX: h.pos.x,
       heroZ: h.pos.z,
       heroYaw: h.yaw,

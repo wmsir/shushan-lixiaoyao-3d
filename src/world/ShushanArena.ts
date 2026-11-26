@@ -8,6 +8,7 @@ import {
 } from '../utils/math';
 import {
   createArchwayPlaqueTexture,
+  createCampWoodTexture,
   createCanyonCliffMaps,
   createCarvedStoneTexture,
   createCourtyardStoneMaps,
@@ -20,6 +21,14 @@ import {
 import skyUrl from '../assets/shushan-sky.jpg';
 
 export type ArenaLayout = 'corridor' | 'arena';
+
+export type WorldBiome =
+  | 'bamboo_canyon'
+  | 'peach_shrine'
+  | 'sword_graveyard'
+  | 'lava_abyss'
+  | 'celestial_sanctum'
+  | 'haven_camp';
 
 interface OccludableProp {
   position: THREE.Vector3;
@@ -103,7 +112,38 @@ export class ShushanArena {
   private bambooLeafMat?: THREE.ShaderMaterial;
   private readonly barriers: SpiritBarrierGate[] = [];
 
+  private readonly biomePropsGroup = new THREE.Group();
+  private readonly bambooArenaGroup = new THREE.Group();
+  private readonly peachShrineGroup = new THREE.Group();
+  private readonly peachCorridorSubGroup = new THREE.Group();
+  private readonly swordGraveyardGroup = new THREE.Group();
+  private readonly swordCorridorSubGroup = new THREE.Group();
+  private readonly lavaAbyssGroup = new THREE.Group();
+  private readonly lavaCorridorSubGroup = new THREE.Group();
+  private readonly celestialSanctumGroup = new THREE.Group();
+  private readonly celestialCorridorSubGroup = new THREE.Group();
+  private readonly campPropsGroup = new THREE.Group();
+  private readonly bambooGrovesGroup = new THREE.Group();
+  private readonly campObstacles: CircleObstacle[] = [];
+
+  private readonly shrineGroup = new THREE.Group();
+  private readonly healingShrinePos = new THREE.Vector3(-4.6, 0, -30.5);
+  private healingShrineUsed = false;
+  private shrineOrb!: THREE.Mesh;
+  private shrineRing!: THREE.Mesh;
+  private shrineLight!: THREE.PointLight;
+  private shrineOrbMat!: THREE.MeshStandardMaterial;
+
+  private campFireLight?: THREE.PointLight;
+  private readonly campFlames: THREE.Mesh[] = [];
+  private campLanternLight?: THREE.PointLight;
+  private readonly magmaVentPlumes: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }> = [];
+  private readonly cloudPillars: Array<{ group: THREE.Group; baseY: number; phase: number; halo: THREE.Mesh }> = [];
+  private readonly graveyardCrystals: Array<{ mat: THREE.MeshStandardMaterial; phase: number }> = [];
+
   private layout: ArenaLayout = 'arena';
+  private currentBiome: WorldBiome = 'bamboo_canyon';
+  private lastStageNum = 1;
   private maxZone: 0 | 1 | 2 = 0;
   private unlockedZone: 0 | 1 | 2 = 0;
   private backdropAnchorZ = 0;
@@ -111,6 +151,18 @@ export class ShushanArena {
   private bossIntensity = 0;
   private floorMat!: THREE.MeshStandardMaterial;
   private cliffMat!: THREE.MeshStandardMaterial;
+  private trimMat!: THREE.MeshStandardMaterial;
+  private bridgeDeckMat?: THREE.MeshStandardMaterial;
+  private streamBedMat?: THREE.MeshStandardMaterial;
+  private slabMat?: THREE.MeshStandardMaterial;
+  private bankMat?: THREE.MeshStandardMaterial;
+  private lowCurbMat?: THREE.MeshStandardMaterial;
+  private canyonCliffMat?: THREE.MeshStandardMaterial;
+  private cliffCrestMat?: THREE.MeshStandardMaterial;
+  private mistMat!: THREE.MeshBasicMaterial;
+  private petalMat!: THREE.ShaderMaterial;
+  private fireflyMat!: THREE.ShaderMaterial;
+  private mountainMat!: THREE.ShaderMaterial;
 
   constructor(rng: () => number) {
     this.rng = rng;
@@ -153,6 +205,7 @@ export class ShushanArena {
       roughness: 0.82,
       metalness: 0.08,
     });
+    this.trimMat = trimMat;
     this.zone0FullCurb = new THREE.Mesh(new THREE.TorusGeometry(19.1, 0.36, 10, 48), trimMat);
     this.zone0FullCurb.rotation.x = Math.PI / 2;
     this.zone0FullCurb.position.y = 0.08;
@@ -317,6 +370,12 @@ export class ShushanArena {
     this.corridorGroup.visible = false;
     this.group.add(this.corridorGroup);
     this.buildCorridorWorld(carvedTex, lacquerTex, trimMat);
+
+    // 13. Reusable 6-Biome Decoration Groups & Zone 1 Healing Spring Shrine
+    this.group.add(this.biomePropsGroup);
+    this.buildBiomeProps(carvedTex, lacquerTex);
+    this.buildHealingShrine(carvedTex);
+    this.applyBiomeVisuals();
     this.syncLayoutObstacles();
   }
 
@@ -834,6 +893,7 @@ export class ShushanArena {
         }
       `,
     });
+    this.mountainMat = peakMat;
 
     const count = 10;
     for (let i = 0; i < count; i++) {
@@ -954,6 +1014,7 @@ export class ShushanArena {
       depthWrite: false,
       uniforms: {
         uMap: { value: petalTex },
+        uPetalTint: { value: new THREE.Color(1.0, 0.88, 0.92) },
       },
       vertexShader: /* glsl */ `
         varying float vAlpha;
@@ -967,14 +1028,16 @@ export class ShushanArena {
       `,
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap;
+        uniform vec3 uPetalTint;
         varying float vAlpha;
         void main() {
           vec4 t = texture2D(uMap, gl_PointCoord);
           if (t.a * vAlpha < 0.04) discard;
-          gl_FragColor = vec4(t.rgb * vec3(1.0, 0.88, 0.92), t.a * vAlpha);
+          gl_FragColor = vec4(t.rgb * uPetalTint, t.a * vAlpha);
         }
       `,
     });
+    this.petalMat = petalMat;
     const petals = new THREE.Points(petalGeo, petalMat);
     this.group.add(petals);
 
@@ -1000,6 +1063,7 @@ export class ShushanArena {
       blending: THREE.AdditiveBlending,
       uniforms: {
         uMap: { value: orbTex },
+        uOrbTint: { value: new THREE.Color(0.88, 1.15, 0.96) },
       },
       vertexShader: /* glsl */ `
         varying float vAlpha;
@@ -1013,14 +1077,16 @@ export class ShushanArena {
       `,
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap;
+        uniform vec3 uOrbTint;
         varying float vAlpha;
         void main() {
           vec4 t = texture2D(uMap, gl_PointCoord);
           if (t.a * vAlpha < 0.04) discard;
-          gl_FragColor = vec4(t.rgb * vec3(0.88, 1.15, 0.96), t.a * vAlpha);
+          gl_FragColor = vec4(t.rgb * uOrbTint, t.a * vAlpha);
         }
       `,
     });
+    this.fireflyMat = ffMat;
     const fireflies = new THREE.Points(ffGeo, ffMat);
     this.group.add(fireflies);
 
@@ -1042,11 +1108,13 @@ export class ShushanArena {
 
     const mistMat = new THREE.MeshBasicMaterial({
       map: mistTex,
+      color: new THREE.Color('#ffffff'),
       transparent: true,
       opacity: 0.4,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
+    this.mistMat = mistMat;
     const mistGeo = new THREE.PlaneGeometry(24, 16);
 
     for (let i = 0; i < 12; i++) {
@@ -1307,6 +1375,7 @@ export class ShushanArena {
     lanternFlameHex: string;
     skySwordRgb: [number, number, number];
   }): void {
+    this.lastStageNum = stageNum;
     const ch = stageNum <= 5 ? 1 : stageNum <= 10 ? 2 : stageNum <= 15 ? 3 : 4;
     const isBoss = stageNum % 5 === 0 || stageNum === 19;
     const bagua = overrideChapter
@@ -1344,16 +1413,7 @@ export class ShushanArena {
         }
       });
     }
-    // Distinct 4-chapter sky & courtyard stone atmosphere tinting (Ch1 Frost Moon -> Ch2 Violet Dusk -> Ch3 Crimson Magma -> Ch4 Abyssal Crimson-Indigo)
-    const skyUniforms = (this.skyDome.material as THREE.ShaderMaterial).uniforms;
-    if (skyUniforms?.uSkyTint) {
-      const skyTintHex = ch === 4 ? '#c46c86' : ch === 3 ? '#d88b68' : ch === 2 ? '#a88ce0' : '#ffffff';
-      (skyUniforms.uSkyTint.value as THREE.Color).set(skyTintHex);
-    }
-    if (this.floorMat) {
-      const floorHex = ch === 4 ? '#927488' : ch === 3 ? '#ab8879' : ch === 2 ? '#8e86b2' : '#9fb2c7';
-      this.floorMat.color.set(floorHex);
-    }
+    this.applyBiomeVisuals();
   }
 
   private buildCorridorWorld(
@@ -1372,6 +1432,7 @@ export class ShushanArena {
       metalness: 0.08,
       color: new THREE.Color('#7f9aa8'),
     });
+    this.bridgeDeckMat = bridgeDeckMat;
     const streamBedMat = new THREE.MeshStandardMaterial({
       map: streamMaps.map,
       bumpMap: streamMaps.bumpMap,
@@ -1381,6 +1442,7 @@ export class ShushanArena {
       metalness: 0.08,
       color: new THREE.Color('#5a868d'),
     });
+    this.streamBedMat = streamBedMat;
     const bronzeChainMat = new THREE.MeshStandardMaterial({
       color: '#9c7840',
       emissive: new THREE.Color('#2c1a06'),
@@ -1467,6 +1529,7 @@ export class ShushanArena {
       metalness: 0.04,
       color: new THREE.Color('#6b8896'),
     });
+    this.canyonCliffMat = canyonCliffMat;
     const cliffCrestMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
       color: '#2c4a48',
@@ -1474,13 +1537,15 @@ export class ShushanArena {
       metalness: 0.03,
       flatShading: true,
     });
+    this.cliffCrestMat = cliffCrestMat;
 
-    // 1. Continuous Animated Flowing Emerald-Turquoise Canyon River (y = -1.65m)
+    // 1. Continuous Animated Flowing Canyon River (supports 6 biome shader modes via uWaterMode)
     this.riverMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       uniforms: {
         uTime: { value: 0 },
+        uWaterMode: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -1494,6 +1559,7 @@ export class ShushanArena {
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
+        uniform float uWaterMode;
         varying vec2 vUv;
         varying vec3 vWorld;
 
@@ -1521,19 +1587,66 @@ export class ShushanArena {
           float pierWake = exp(-pow((vWorld.z + 63.0) * 0.16, 2.0)) *
                            (exp(-pow((abs(vWorld.x) - 3.2) * 0.7, 2.0)) * 0.7 + 0.25);
           float bankFoam = smoothstep(14.5, 22.0, abs(vWorld.x)) * 0.42;
-
-          vec3 deepRiver = vec3(0.045, 0.18, 0.23);
-          vec3 jadeCurrent = vec3(0.11, 0.42, 0.46);
-          vec3 moonSpec = vec3(0.46, 0.80, 0.84);
-          vec3 col = mix(deepRiver, jadeCurrent, smoothstep(0.32, 0.76, stream));
           float foam = smoothstep(0.66, 0.88, stream + pierWake * 0.35 + bankFoam * 0.22);
-          col = mix(col, moonSpec, foam * 0.65);
-
-          // Subtle moonlight glint
           float glint = pow(max(0.0, sin(vWorld.x * 0.9 + vWorld.z * 0.5 - uTime * 2.4)), 14.0);
-          col += vec3(0.28, 0.52, 0.56) * glint * 0.35;
 
-          gl_FragColor = vec4(col, 0.92);
+          vec3 col;
+          float alpha = 0.92;
+          if (uWaterMode < 0.5) {
+            // 0: bamboo_canyon emerald-turquoise
+            vec3 deepRiver = vec3(0.045, 0.18, 0.23);
+            vec3 jadeCurrent = vec3(0.11, 0.42, 0.46);
+            vec3 moonSpec = vec3(0.46, 0.80, 0.84);
+            col = mix(deepRiver, jadeCurrent, smoothstep(0.32, 0.76, stream));
+            col = mix(col, moonSpec, foam * 0.65);
+            col += vec3(0.28, 0.52, 0.56) * glint * 0.35;
+          } else if (uWaterMode < 1.5) {
+            // 1: peach_shrine warm rose-gold water
+            vec3 deepRose = vec3(0.14, 0.08, 0.15);
+            vec3 peachFlow = vec3(0.56, 0.27, 0.36);
+            vec3 petalGold = vec3(0.98, 0.78, 0.74);
+            col = mix(deepRose, peachFlow, smoothstep(0.30, 0.78, stream));
+            col = mix(col, petalGold, foam * 0.68);
+            col += vec3(0.86, 0.55, 0.46) * glint * 0.42;
+          } else if (uWaterMode < 2.5) {
+            // 2: sword_graveyard eerie violet spirit-water
+            vec3 deepSpirit = vec3(0.05, 0.03, 0.14);
+            vec3 violetFlow = vec3(0.24, 0.14, 0.46);
+            vec3 wispSpec = vec3(0.66, 0.52, 0.96);
+            col = mix(deepSpirit, violetFlow, smoothstep(0.30, 0.76, stream));
+            col = mix(col, wispSpec, foam * 0.62);
+            col += vec3(0.50, 0.35, 0.88) * glint * 0.38;
+          } else if (uWaterMode < 3.5) {
+            // 3: lava_abyss molten glowing crimson-gold magma
+            float crust = smoothstep(0.36, 0.72, stream + pierWake * 0.25);
+            vec3 cooledBasalt = vec3(0.09, 0.02, 0.015);
+            vec3 moltenRed = vec3(0.92, 0.20, 0.03);
+            vec3 moltenGold = vec3(1.0, 0.74, 0.18);
+            col = mix(cooledBasalt, moltenRed, crust);
+            col = mix(col, moltenGold, smoothstep(0.66, 0.90, stream + bankFoam * 0.28));
+            col += vec3(1.0, 0.55, 0.12) * glint * 0.45;
+            alpha = 0.98;
+          } else if (uWaterMode < 4.5) {
+            // 4: celestial_sanctum shimmering starry astral-cyan Celestial River
+            vec3 cosmosDeep = vec3(0.02, 0.07, 0.20);
+            vec3 astralCyan = vec3(0.16, 0.58, 0.86);
+            vec3 starGold = vec3(0.96, 0.88, 0.56);
+            col = mix(cosmosDeep, astralCyan, smoothstep(0.28, 0.78, stream));
+            col = mix(col, vec3(0.70, 0.94, 1.0), foam * 0.62);
+            vec2 starCell = floor(vec2(vWorld.x * 1.5, vWorld.z * 1.5 - uTime * 0.4));
+            float starSeed = hash(starCell);
+            float starTwinkle = step(0.93, starSeed) * (0.55 + 0.45 * sin(uTime * 4.2 + starSeed * 40.0));
+            col += starGold * starTwinkle * 0.95;
+            col += vec3(0.42, 0.84, 0.98) * glint * 0.40;
+          } else {
+            // 5: haven_camp warm jade-amber stream
+            vec3 deepJade = vec3(0.06, 0.17, 0.19);
+            vec3 warmStream = vec3(0.22, 0.48, 0.46);
+            col = mix(deepJade, warmStream, smoothstep(0.32, 0.76, stream));
+            col = mix(col, vec3(0.92, 0.82, 0.60), foam * 0.58);
+          }
+
+          gl_FragColor = vec4(col, alpha);
         }
       `,
     });
@@ -1634,6 +1747,7 @@ export class ShushanArena {
       side: THREE.DoubleSide,
       uniforms: {
         uTime: { value: 0 },
+        uWaterMode: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -1644,6 +1758,7 @@ export class ShushanArena {
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
+        uniform float uWaterMode;
         varying vec2 vUv;
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float noise(vec2 p) {
@@ -1664,7 +1779,22 @@ export class ShushanArena {
           float topFade = smoothstep(1.0, 0.86, vUv.y);
           float alpha = pow(edge, 1.45) * (silk * 0.46 + splash) * topFade;
           if (alpha < 0.02) discard;
-          vec3 col = mix(vec3(0.40, 0.84, 0.90), vec3(0.88, 0.98, 1.0), smoothstep(0.55, 0.95, silk + splash));
+          vec3 cLow = vec3(0.40, 0.84, 0.90);
+          vec3 cHigh = vec3(0.88, 0.98, 1.0);
+          if (uWaterMode > 0.5 && uWaterMode < 1.5) {
+            cLow = vec3(0.88, 0.48, 0.58);
+            cHigh = vec3(1.0, 0.86, 0.84);
+          } else if (uWaterMode >= 1.5 && uWaterMode < 2.5) {
+            cLow = vec3(0.44, 0.28, 0.78);
+            cHigh = vec3(0.82, 0.72, 1.0);
+          } else if (uWaterMode >= 2.5 && uWaterMode < 3.5) {
+            cLow = vec3(0.95, 0.22, 0.04);
+            cHigh = vec3(1.0, 0.78, 0.22);
+          } else if (uWaterMode >= 3.5 && uWaterMode < 4.5) {
+            cLow = vec3(0.26, 0.78, 1.0);
+            cHigh = vec3(0.96, 0.94, 0.72);
+          }
+          vec3 col = mix(cLow, cHigh, smoothstep(0.55, 0.95, silk + splash));
           gl_FragColor = vec4(col, alpha);
         }
       `,
@@ -1676,6 +1806,7 @@ export class ShushanArena {
       blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
+        uWaterMode: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -1686,6 +1817,7 @@ export class ShushanArena {
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
+        uniform float uWaterMode;
         varying vec2 vUv;
         void main() {
           float r = length(vUv);
@@ -1695,7 +1827,12 @@ export class ShushanArena {
           float fade = smoothstep(1.0, 0.35, r);
           float alpha = (core + ring1 * 0.45 * fade) * fade;
           if (alpha < 0.02) discard;
-          gl_FragColor = vec4(vec3(0.66, 0.94, 0.98), alpha * 0.72);
+          vec3 foamCol = vec3(0.66, 0.94, 0.98);
+          if (uWaterMode > 0.5 && uWaterMode < 1.5) foamCol = vec3(1.0, 0.78, 0.80);
+          else if (uWaterMode >= 1.5 && uWaterMode < 2.5) foamCol = vec3(0.72, 0.58, 1.0);
+          else if (uWaterMode >= 2.5 && uWaterMode < 3.5) foamCol = vec3(1.0, 0.52, 0.14);
+          else if (uWaterMode >= 3.5 && uWaterMode < 4.5) foamCol = vec3(0.58, 0.92, 1.0);
+          gl_FragColor = vec4(foamCol, alpha * 0.72);
         }
       `,
     });
@@ -1813,7 +1950,8 @@ export class ShushanArena {
     leafInst.instanceMatrix.needsUpdate = true;
     culmInst.frustumCulled = false;
     leafInst.frustumCulled = false;
-    this.corridorGroup.add(culmInst, leafInst);
+    this.bambooGrovesGroup.add(culmInst, leafInst);
+    this.corridorGroup.add(this.bambooGrovesGroup);
   }
 
   private createGuideChevronMaterial(): THREE.ShaderMaterial {
@@ -1986,6 +2124,7 @@ export class ShushanArena {
       roughness: 0.34,
       metalness: 0.1,
     });
+    this.slabMat = slabMat;
     const slabGeo = new THREE.CylinderGeometry(1.0, 1.12, 0.14, 7);
     const slabSpots: Array<[number, number, number, number, number]> = [
       [-1.7, centerZ + 5.6, 1.45, 0.95, 0.2],
@@ -2010,12 +2149,13 @@ export class ShushanArena {
       target.add(slab);
     }
 
-    // Shimmering ankle-deep flowing crystal water overlay (y = 0.035m)
+    // Shimmering ankle-deep flowing crystal water overlay (y = 0.035m, supports biome modes)
     this.shallowWaterMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       uniforms: {
         uTime: { value: 0 },
+        uWaterMode: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -2029,6 +2169,7 @@ export class ShushanArena {
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
+        uniform float uWaterMode;
         varying vec2 vUv;
         varying vec3 vWorld;
 
@@ -2051,7 +2192,22 @@ export class ShushanArena {
           float caustic = smoothstep(0.56, 0.88, r1 * 0.55 + r2 * 0.45);
           float edgeX = smoothstep(0.0, 0.10, vUv.x) * smoothstep(1.0, 0.90, vUv.x);
           float edgeZ = smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
-          vec3 col = mix(vec3(0.16, 0.58, 0.64), vec3(0.68, 0.96, 0.96), caustic * 0.72);
+          vec3 baseC = vec3(0.16, 0.58, 0.64);
+          vec3 hiC = vec3(0.68, 0.96, 0.96);
+          if (uWaterMode > 0.5 && uWaterMode < 1.5) {
+            baseC = vec3(0.56, 0.28, 0.38);
+            hiC = vec3(1.0, 0.82, 0.78);
+          } else if (uWaterMode >= 1.5 && uWaterMode < 2.5) {
+            baseC = vec3(0.24, 0.14, 0.48);
+            hiC = vec3(0.74, 0.58, 1.0);
+          } else if (uWaterMode >= 2.5 && uWaterMode < 3.5) {
+            baseC = vec3(0.64, 0.14, 0.03);
+            hiC = vec3(1.0, 0.68, 0.18);
+          } else if (uWaterMode >= 3.5 && uWaterMode < 4.5) {
+            baseC = vec3(0.14, 0.56, 0.84);
+            hiC = vec3(0.92, 0.96, 0.82);
+          }
+          vec3 col = mix(baseC, hiC, caustic * 0.72);
           float alpha = (0.30 + caustic * 0.28) * edgeX * edgeZ;
           if (alpha < 0.02) discard;
           gl_FragColor = vec4(col, alpha);
@@ -2075,6 +2231,7 @@ export class ShushanArena {
       roughness: 0.78,
       flatShading: true,
     });
+    this.bankMat = bankMat;
     for (const sx of [-5.85, 5.85]) {
       for (let k = 0; k < 8; k++) {
         const bz = centerZ + 6.2 - k * 1.75;
@@ -2152,6 +2309,7 @@ export class ShushanArena {
       roughness: 0.68,
       metalness: 0.1,
     });
+    this.lowCurbMat = lowCurbMat;
     const lowCurbGeo = new THREE.BoxGeometry(0.46, 0.34, 13.8);
     const archCrownGeo = new THREE.BoxGeometry(0.50, 0.42, 5.2);
     const endBollardGeo = new THREE.BoxGeometry(0.58, 0.44, 0.58);
@@ -2535,11 +2693,932 @@ export class ShushanArena {
     target.add(grassMesh);
   }
 
+  private buildBiomeProps(
+    carvedTex: THREE.CanvasTexture,
+    lacquerTex: THREE.CanvasTexture,
+  ): void {
+    const campWoodTex = createCampWoodTexture();
+
+    this.biomePropsGroup.add(
+      this.bambooArenaGroup,
+      this.peachShrineGroup,
+      this.swordGraveyardGroup,
+      this.lavaAbyssGroup,
+      this.celestialSanctumGroup,
+      this.campPropsGroup,
+    );
+    this.peachShrineGroup.add(this.peachCorridorSubGroup);
+    this.swordGraveyardGroup.add(this.swordCorridorSubGroup);
+    this.lavaAbyssGroup.add(this.lavaCorridorSubGroup);
+    this.celestialSanctumGroup.add(this.celestialCorridorSubGroup);
+
+    // --- 1. Bamboo Canyon Arena Rim Clusters (8 outer clusters outside curb r >= 19.8m) ---
+    const bStalkMat = new THREE.MeshStandardMaterial({ color: '#276846', roughness: 0.72 });
+    const bLeafMat = new THREE.MeshStandardMaterial({ color: '#2d7a4f', roughness: 0.82 });
+    const bRockMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#3b4e52', roughness: 0.9, flatShading: true });
+    const bStalkGeo = new THREE.CylinderGeometry(0.08, 0.12, 6.2, 6);
+    const bLeafGeo = new THREE.ConeGeometry(0.95, 2.0, 5);
+    const bMoundGeo = new THREE.DodecahedronGeometry(1.1, 1);
+
+    const bambooRimSpots: Array<[number, number]> = [
+      [-13.8, -14.8], [13.8, -14.8],
+      [-19.8, -6.5], [19.8, -6.5],
+      [-19.8, 5.2], [19.8, 5.2],
+      [-14.2, 14.5], [14.2, 14.5],
+    ];
+    for (const [bx, bz] of bambooRimSpots) {
+      const clump = new THREE.Group();
+      clump.position.set(bx, -0.2, bz);
+      const mound = new THREE.Mesh(bMoundGeo, bRockMat);
+      mound.scale.set(1.25, 0.55, 1.15);
+      clump.add(mound);
+      for (let s = 0; s < 3; s++) {
+        const ang = s * 2.1 + bx * 0.1;
+        const ox = Math.cos(ang) * 0.38;
+        const oz = Math.sin(ang) * 0.38;
+        const stalk = new THREE.Mesh(bStalkGeo, bStalkMat);
+        stalk.position.set(ox, 3.0, oz);
+        stalk.rotation.z = (s - 1) * 0.08;
+        clump.add(stalk);
+        const leaf = new THREE.Mesh(bLeafGeo, bLeafMat);
+        leaf.position.set(ox, 5.8, oz);
+        clump.add(leaf);
+      }
+      this.bambooArenaGroup.add(clump);
+    }
+
+    // --- 2. Peach Shrine (10 Blooming 3D Pink Peach Blossom Trees, |x| >= 13.2m) ---
+    const peachBarkMat = new THREE.MeshStandardMaterial({
+      map: campWoodTex,
+      color: '#4c322c',
+      roughness: 0.9,
+      transparent: true,
+      opacity: 1,
+    });
+    const peachBlossomMat = new THREE.MeshStandardMaterial({
+      color: '#ff96bc',
+      emissive: new THREE.Color('#5a1d34'),
+      emissiveIntensity: 0.38,
+      roughness: 0.72,
+      transparent: true,
+      opacity: 1,
+    });
+    const peachBlossomLightMat = new THREE.MeshStandardMaterial({
+      color: '#ffc6dc',
+      emissive: new THREE.Color('#6a2740'),
+      emissiveIntensity: 0.42,
+      roughness: 0.68,
+      transparent: true,
+      opacity: 1,
+    });
+    const pTrunkGeo = new THREE.CylinderGeometry(0.24, 0.42, 3.2, 7);
+    const pBranchGeo = new THREE.CylinderGeometry(0.12, 0.22, 2.2, 6);
+    const pCanopyGeo = new THREE.DodecahedronGeometry(1.15, 1);
+    const pBankGeo = new THREE.DodecahedronGeometry(1.6, 1);
+
+    const buildPeachTree = (x: number, y: number, z: number, sc: number, withRiverRock: boolean, registerOccludable: boolean): THREE.Group => {
+      const tree = new THREE.Group();
+      tree.position.set(x, y, z);
+      tree.scale.setScalar(sc);
+      tree.rotation.y = (x * 0.7 + z * 0.3) % (Math.PI * 2);
+
+      const tBarkMat = registerOccludable ? peachBarkMat.clone() : peachBarkMat;
+      const tBlossomMat = registerOccludable ? peachBlossomMat.clone() : peachBlossomMat;
+      const tBlossomLightMat = registerOccludable ? peachBlossomLightMat.clone() : peachBlossomLightMat;
+
+      if (withRiverRock) {
+        const rock = new THREE.Mesh(pBankGeo, bRockMat);
+        rock.scale.set(1.5, 1.35, 1.4);
+        rock.position.y = -0.85;
+        rock.receiveShadow = true;
+        tree.add(rock);
+      }
+
+      const trunk = new THREE.Mesh(pTrunkGeo, tBarkMat);
+      trunk.position.y = 1.5;
+      trunk.rotation.z = 0.14;
+      trunk.castShadow = true;
+      tree.add(trunk);
+
+      const branch1 = new THREE.Mesh(pBranchGeo, tBarkMat);
+      branch1.position.set(-0.55, 3.2, 0.2);
+      branch1.rotation.z = 0.55;
+      const branch2 = new THREE.Mesh(pBranchGeo, tBarkMat);
+      branch2.position.set(0.55, 3.1, -0.2);
+      branch2.rotation.z = -0.52;
+      tree.add(branch1, branch2);
+
+      const clusters: Array<[number, number, number, number, boolean]> = [
+        [-1.05, 4.1, 0.3, 1.35, false],
+        [0.95, 3.95, -0.25, 1.25, true],
+        [0.0, 4.75, 0.1, 1.48, false],
+        [-0.35, 3.55, -0.75, 1.05, true],
+        [0.45, 4.35, 0.75, 1.12, true],
+      ];
+      for (const [cx, cy, cz, cs, isLight] of clusters) {
+        const puff = new THREE.Mesh(pCanopyGeo, isLight ? tBlossomLightMat : tBlossomMat);
+        puff.scale.set(cs * 1.15, cs * 0.72, cs * 1.05);
+        puff.position.set(cx, cy, cz);
+        puff.castShadow = true;
+        tree.add(puff);
+      }
+
+      if (registerOccludable) {
+        this.occludables.push({
+          position: new THREE.Vector3(x, y + 3.2, z),
+          radius: 2.4 * sc,
+          materials: [tBarkMat, tBlossomMat, tBlossomLightMat],
+          currentOpacity: 1,
+        });
+      }
+      return tree;
+    };
+
+    const peachZone0Spots: Array<[number, number, number]> = [
+      [-13.8, -13.2, 1.15],
+      [13.8, -13.2, 1.18],
+      [-18.2, -5.2, 1.08],
+      [18.2, -5.2, 1.12],
+      [-17.8, 5.2, 1.06],
+      [17.8, 5.2, 1.1],
+    ];
+    for (const [px, pz, sc] of peachZone0Spots) {
+      this.peachShrineGroup.add(buildPeachTree(px, -0.1, pz, sc, false, true));
+    }
+    const peachCorridorSpots: Array<[number, number, number, number, boolean]> = [
+      [-13.4, -0.15, -21.5, 1.24, true],
+      [13.4, -0.15, -23.5, 1.22, true],
+      [-17.6, -0.1, -45.0, 1.18, false],
+      [17.6, -0.1, -63.5, 1.26, true],
+    ];
+    for (const [px, py, pz, sc, hasRock] of peachCorridorSpots) {
+      this.peachCorridorSubGroup.add(buildPeachTree(px, py, pz, sc, hasRock, false));
+    }
+
+    // --- 3. Sword Graveyard (12 Colossal Giant Greatswords & Mossy Demon Tombstones, |x| >= 12.4m) ---
+    const rustedBladeMat = new THREE.MeshStandardMaterial({
+      color: '#5a6070',
+      roughness: 0.56,
+      metalness: 0.72,
+      flatShading: true,
+    });
+    const darkBronzeGuardMat = new THREE.MeshStandardMaterial({
+      color: '#6b5335',
+      roughness: 0.62,
+      metalness: 0.68,
+    });
+    const tombstoneMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#4a4e5e',
+      roughness: 0.92,
+      metalness: 0.05,
+    });
+    const swordBladeGeo = new THREE.BoxGeometry(0.68, 5.8, 0.14);
+    const swordTipGeo = new THREE.ConeGeometry(0.42, 1.1, 4);
+    const swordGuardGeo = new THREE.BoxGeometry(1.85, 0.24, 0.34);
+    const swordHiltGeo = new THREE.CylinderGeometry(0.12, 0.15, 1.35, 6);
+    const tombGeo = new THREE.BoxGeometry(1.35, 2.35, 0.42);
+    const tombCapGeo = new THREE.CylinderGeometry(0.68, 0.68, 0.42, 6);
+    const crystalGeo = new THREE.OctahedronGeometry(0.22, 0);
+
+    const buildGraveyardMonument = (x: number, y: number, z: number, sc: number, tiltZ: number, withRock: boolean, phase: number): THREE.Group => {
+      const mon = new THREE.Group();
+      mon.position.set(x, y, z);
+      mon.scale.setScalar(sc);
+
+      if (withRock) {
+        const rock = new THREE.Mesh(pBankGeo, tombstoneMat);
+        rock.scale.set(1.5, 1.35, 1.45);
+        rock.position.y = -0.85;
+        mon.add(rock);
+      }
+
+      const sword = new THREE.Group();
+      sword.rotation.set(0.12 * Math.sin(phase), phase * 0.7, tiltZ);
+      const blade = new THREE.Mesh(swordBladeGeo, rustedBladeMat);
+      blade.position.y = 2.2;
+      blade.castShadow = true;
+      const tip = new THREE.Mesh(swordTipGeo, rustedBladeMat);
+      tip.rotation.set(Math.PI, Math.PI / 4, 0);
+      tip.position.y = -0.5;
+      const guard = new THREE.Mesh(swordGuardGeo, darkBronzeGuardMat);
+      guard.position.y = 5.1;
+      const hilt = new THREE.Mesh(swordHiltGeo, darkBronzeGuardMat);
+      hilt.position.y = 5.85;
+      const runeMat = new THREE.MeshStandardMaterial({
+        color: '#9e68ff',
+        emissive: new THREE.Color('#6a34d8'),
+        emissiveIntensity: 0.95,
+        roughness: 0.3,
+      });
+      this.graveyardCrystals.push({ mat: runeMat, phase });
+      const gem = new THREE.Mesh(crystalGeo, runeMat);
+      gem.position.set(0, 5.1, 0.18);
+      sword.add(blade, tip, guard, hilt, gem);
+      mon.add(sword);
+
+      // Mossy Demon Tombstone flanking the colossal sword
+      const tomb = new THREE.Group();
+      tomb.position.set(Math.sign(x) * 1.15, 0, 0.85);
+      tomb.rotation.set(-0.08, -Math.sign(x) * 0.35, Math.sign(x) * 0.06);
+      const slab = new THREE.Mesh(tombGeo, tombstoneMat);
+      slab.position.y = 1.05;
+      slab.castShadow = true;
+      const cap = new THREE.Mesh(tombCapGeo, tombstoneMat);
+      cap.rotation.x = Math.PI / 2;
+      cap.position.y = 2.2;
+      tomb.add(slab, cap);
+      mon.add(tomb);
+
+      return mon;
+    };
+
+    const swordZone0Spots: Array<[number, number, number, number]> = [
+      [-13.8, -13.0, 1.05, 0.22],
+      [13.8, -13.0, 1.08, -0.24],
+      [-18.0, -4.5, 0.98, 0.18],
+      [18.0, -4.5, 1.02, -0.20],
+      [-17.4, 5.8, 0.95, 0.26],
+      [17.4, 5.8, 0.96, -0.25],
+    ];
+    swordZone0Spots.forEach(([sx, sz, sc, tilt], idx) => {
+      this.swordGraveyardGroup.add(buildGraveyardMonument(sx, -0.1, sz, sc, tilt, false, idx * 1.1));
+    });
+    const swordCorridorSpots: Array<[number, number, number, number, number, boolean]> = [
+      [-13.0, -0.2, -20.5, 1.16, 0.28, true],
+      [13.0, -0.2, -24.0, 1.14, -0.26, true],
+      [-17.6, -0.1, -43.5, 1.12, 0.21, false],
+      [17.6, -0.1, -46.5, 1.15, -0.22, false],
+      [-13.6, -0.2, -62.5, 1.2, 0.25, true],
+      [13.6, -0.2, -65.5, 1.18, -0.27, true],
+    ];
+    swordCorridorSpots.forEach(([sx, sy, sz, sc, tilt, hasRock], idx) => {
+      this.swordCorridorSubGroup.add(buildGraveyardMonument(sx, sy, sz, sc, tilt, hasRock, (idx + 6) * 1.1));
+    });
+
+    // --- 4. Lava Abyss (12 Glowing Volcanic Magma Vents along Canyon Rims) ---
+    const basaltVentMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#22181a',
+      roughness: 0.94,
+      flatShading: true,
+    });
+    const magmaCoreMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.95, 0.65, 0.14),
+    });
+    const magmaPlumeMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.65, 0.42, 0.08),
+      transparent: true,
+      opacity: 0.56,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ventConeGeo = new THREE.ConeGeometry(1.45, 2.2, 7, 1, true);
+    const ventCoreGeo = new THREE.SphereGeometry(0.65, 8, 6);
+    const plumeGeo = new THREE.ConeGeometry(0.55, 2.8, 6);
+
+    const buildMagmaVent = (x: number, y: number, z: number, sc: number, phase: number): THREE.Group => {
+      const vent = new THREE.Group();
+      vent.position.set(x, y, z);
+      vent.scale.setScalar(sc);
+      const cone = new THREE.Mesh(ventConeGeo, basaltVentMat);
+      cone.position.y = 0.85;
+      cone.castShadow = true;
+      const core = new THREE.Mesh(ventCoreGeo, magmaCoreMat);
+      core.scale.set(1.1, 0.5, 1.1);
+      core.position.y = 1.35;
+      const plume = new THREE.Mesh(plumeGeo, magmaPlumeMat);
+      plume.position.y = 2.4;
+      vent.add(cone, core, plume);
+      this.magmaVentPlumes.push({ mesh: plume, baseY: 2.4, phase });
+      return vent;
+    };
+
+    const lavaZone0Spots: Array<[number, number, number]> = [
+      [-14.2, -13.2, 1.05],
+      [14.2, -13.2, 1.05],
+      [-18.2, -4.8, 0.95],
+      [18.2, -4.8, 0.98],
+      [-17.4, 6.2, 0.95],
+      [17.4, 6.2, 0.96],
+    ];
+    lavaZone0Spots.forEach(([lx, lz, sc], idx) => {
+      this.lavaAbyssGroup.add(buildMagmaVent(lx, -0.1, lz, sc, idx * 0.9));
+    });
+    const lavaCorridorSpots: Array<[number, number, number, number]> = [
+      [-14.2, -1.2, -21.0, 1.25],
+      [14.2, -1.2, -23.5, 1.22],
+      [-17.8, -0.1, -44.0, 1.12],
+      [17.8, -0.1, -46.0, 1.14],
+      [-14.6, -1.2, -62.5, 1.28],
+      [14.6, -1.2, -65.0, 1.26],
+    ];
+    lavaCorridorSpots.forEach(([lx, ly, lz, sc], idx) => {
+      this.lavaCorridorSubGroup.add(buildMagmaVent(lx, ly, lz, sc, (idx + 6) * 0.9));
+    });
+
+    // --- 5. Celestial Sanctum (12 Golden-Jade Floating Immortal Cloud Pillars) ---
+    const whiteJadeMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#dceef6',
+      emissive: new THREE.Color('#18364a'),
+      emissiveIntensity: 0.25,
+      roughness: 0.42,
+      metalness: 0.14,
+    });
+    const sanctumGoldMat = new THREE.MeshStandardMaterial({
+      color: '#ebc76e',
+      emissive: new THREE.Color('#5a3c0c'),
+      emissiveIntensity: 0.42,
+      roughness: 0.3,
+      metalness: 0.78,
+    });
+    const astralCrystalMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.55, 1.65, 1.95),
+    });
+    const cloudMat = new THREE.MeshStandardMaterial({
+      color: '#e6f6ff',
+      emissive: new THREE.Color('#285e78'),
+      emissiveIntensity: 0.35,
+      roughness: 0.65,
+    });
+
+    const cColGeo = new THREE.CylinderGeometry(0.45, 0.56, 5.2, 6);
+    const cRingGeo = new THREE.TorusGeometry(0.78, 0.07, 8, 24);
+    const cCloudGeo = new THREE.DodecahedronGeometry(0.95, 1);
+
+    const buildCloudPillar = (x: number, y: number, z: number, sc: number, phase: number): THREE.Group => {
+      const grp = new THREE.Group();
+      grp.position.set(x, y, z);
+      grp.scale.setScalar(sc);
+
+      const col = new THREE.Mesh(cColGeo, whiteJadeMat);
+      col.position.y = 2.6;
+      col.castShadow = true;
+      const collarLow = new THREE.Mesh(cRingGeo, sanctumGoldMat);
+      collarLow.rotation.x = Math.PI / 2;
+      collarLow.position.y = 0.8;
+      const collarHigh = new THREE.Mesh(cRingGeo, sanctumGoldMat);
+      collarHigh.rotation.x = Math.PI / 2;
+      collarHigh.position.y = 4.6;
+      const finial = new THREE.Mesh(crystalGeo, astralCrystalMat);
+      finial.scale.set(1.4, 2.1, 1.4);
+      finial.position.y = 5.85;
+      const halo = new THREE.Mesh(cRingGeo, sanctumGoldMat);
+      halo.position.y = 5.85;
+
+      // Swirling golden-jade cloud collar pads around pillar base
+      for (let c = 0; c < 3; c++) {
+        const ca = c * 2.1 + phase;
+        const puff = new THREE.Mesh(cCloudGeo, cloudMat);
+        puff.scale.set(1.2, 0.42, 0.9);
+        puff.position.set(Math.cos(ca) * 0.85, 0.35 + c * 0.14, Math.sin(ca) * 0.85);
+        grp.add(puff);
+      }
+
+      grp.add(col, collarLow, collarHigh, finial, halo);
+      this.cloudPillars.push({ group: grp, baseY: y, phase, halo });
+      return grp;
+    };
+
+    const celZone0Spots: Array<[number, number, number]> = [
+      [-13.8, -13.2, 1.0],
+      [13.8, -13.2, 1.0],
+      [-18.0, -4.6, 0.95],
+      [18.0, -4.6, 0.95],
+      [-17.4, 5.6, 0.92],
+      [17.4, 5.6, 0.92],
+    ];
+    celZone0Spots.forEach(([cx, cz, sc], idx) => {
+      this.celestialSanctumGroup.add(buildCloudPillar(cx, 0.45, cz, sc, idx * 1.05));
+    });
+    const celCorridorSpots: Array<[number, number, number, number]> = [
+      [-14.2, 0.6, -21.5, 1.1],
+      [14.2, 0.6, -23.5, 1.1],
+      [-17.6, 0.5, -44.0, 1.08],
+      [17.6, 0.5, -44.0, 1.08],
+      [-14.6, 0.6, -63.0, 1.15],
+      [14.6, 0.6, -63.0, 1.15],
+    ];
+    celCorridorSpots.forEach(([cx, cy, cz, sc], idx) => {
+      this.celestialCorridorSubGroup.add(buildCloudPillar(cx, cy, cz, sc, (idx + 6) * 1.05));
+    });
+
+    // --- 6. Haven Camp (云来剑庐) Cozy Walkable Sanctuary in Zone 0 ---
+    const woodMat = new THREE.MeshStandardMaterial({ map: campWoodTex, color: '#8f6246', roughness: 0.78 });
+    const darkWoodMat = new THREE.MeshStandardMaterial({ map: lacquerTex, color: '#4c2620', roughness: 0.62 });
+    const teaStoneMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#9ab0bc', roughness: 0.72 });
+    const jadeVesselMat = new THREE.MeshStandardMaterial({ color: '#62c4b4', roughness: 0.28, metalness: 0.12 });
+    const jarClayMat = new THREE.MeshStandardMaterial({ color: '#7a452d', roughness: 0.64 });
+    const redSealMat = new THREE.MeshStandardMaterial({ color: '#b83232', roughness: 0.7 });
+    const cushionMat = new THREE.MeshStandardMaterial({ color: '#c48636', roughness: 0.85 });
+    const cushionRimMat = new THREE.MeshStandardMaterial({ color: '#8d2a2a', roughness: 0.82 });
+
+    // 6a. Campfire (篝火) at (4.2, 0, 1.8)
+    const fireGroup = new THREE.Group();
+    fireGroup.position.set(4.2, 0, 1.8);
+    const stoneRingGeo = new THREE.DodecahedronGeometry(0.22, 1);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const st = new THREE.Mesh(stoneRingGeo, teaStoneMat);
+      st.scale.set(1.1, 0.65, 0.9);
+      st.position.set(Math.cos(a) * 0.68, 0.1, Math.sin(a) * 0.68);
+      st.castShadow = true;
+      fireGroup.add(st);
+    }
+    const emberBed = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.52, 0.08, 12),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 0.42, 0.08) }),
+    );
+    emberBed.position.y = 0.05;
+    fireGroup.add(emberBed);
+    const logGeo = new THREE.CylinderGeometry(0.08, 0.1, 1.05, 6);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.3;
+      const log = new THREE.Mesh(logGeo, woodMat);
+      log.position.set(Math.cos(a) * 0.22, 0.22, Math.sin(a) * 0.22);
+      log.rotation.set(0.95, a, 0.15);
+      log.castShadow = true;
+      fireGroup.add(log);
+    }
+    const flameSpecs: Array<[number, number, number, string]> = [
+      [0.24, 0.85, 0.45, '#ff5a14'],
+      [0.17, 0.68, 0.38, '#ff9828'],
+      [0.10, 0.48, 0.30, '#ffe478'],
+    ];
+    for (const [rad, h, fy, hex] of flameSpecs) {
+      const fl = new THREE.Mesh(
+        new THREE.ConeGeometry(rad, h, 7),
+        new THREE.MeshBasicMaterial({
+          color: hex,
+          transparent: true,
+          opacity: 0.86,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      fl.position.y = fy;
+      fl.userData.baseY = fy;
+      fireGroup.add(fl);
+      this.campFlames.push(fl);
+    }
+    this.campFireLight = new THREE.PointLight('#ff9442', 14.0, 16.0, 1.8);
+    this.campFireLight.position.set(0, 1.15, 0);
+    fireGroup.add(this.campFireLight);
+    this.campPropsGroup.add(fireGroup);
+    this.campObstacles.push({ x: 4.2, z: 1.8, r: 0.85 });
+
+    // 6b. Carved Stone Tea Table + Wine Jars (石桌茶具 · 酒坛) at (5.4, 0, -0.4)
+    const teaGroup = new THREE.Group();
+    teaGroup.position.set(5.4, 0, -0.4);
+    const tblBase = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 0.66, 8), teaStoneMat);
+    tblBase.position.y = 0.33;
+    tblBase.castShadow = true;
+    const tblTop = new THREE.Mesh(new THREE.CylinderGeometry(0.76, 0.72, 0.12, 14), teaStoneMat);
+    tblTop.position.y = 0.7;
+    tblTop.castShadow = true;
+    tblTop.receiveShadow = true;
+    teaGroup.add(tblBase, tblTop);
+
+    // Celadon teapot + 2 cups on table
+    const teapot = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), jadeVesselMat);
+    teapot.scale.set(1.1, 0.85, 1.1);
+    teapot.position.set(-0.08, 0.86, 0.04);
+    teaGroup.add(teapot);
+    for (const [cx, cz] of [[0.22, 0.16], [0.18, -0.22]]) {
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.042, 0.07, 8), jadeVesselMat);
+      cup.position.set(cx, 0.8, cz);
+      teaGroup.add(cup);
+    }
+    // Two glazed clay wine jars (酒坛) beside/on table
+    for (const [jx, jy, jz, sc] of [[0.42, 0.18, 0.68, 1.0], [-0.34, 0.90, -0.26, 0.62]]) {
+      const jar = new THREE.Mesh(new THREE.SphereGeometry(0.22 * sc, 10, 8), jarClayMat);
+      jar.scale.set(0.95, 1.25, 0.95);
+      jar.position.set(jx, jy, jz);
+      jar.castShadow = true;
+      const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.11 * sc, 0.12 * sc, 0.08 * sc, 8), redSealMat);
+      seal.position.set(jx, jy + 0.25 * sc, jz);
+      teaGroup.add(jar, seal);
+    }
+    // Two carved stone stools
+    for (const [sx, sz] of [[-0.95, -0.55], [0.95, -0.35]]) {
+      const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.28, 0.44, 8), teaStoneMat);
+      stool.position.set(sx, 0.22, sz);
+      stool.castShadow = true;
+      teaGroup.add(stool);
+    }
+    this.campPropsGroup.add(teaGroup);
+    this.campObstacles.push({ x: 5.4, z: -0.4, r: 0.92 });
+
+    // 6c. Meditation Lotus Cushion (打坐蒲团) + Sword Rack (玄木剑架) at (-4.8, 0, 1.5)
+    const medGroup = new THREE.Group();
+    medGroup.position.set(-4.8, 0, 1.5);
+    const matBase = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.92, 0.05, 18), cushionRimMat);
+    matBase.position.set(0.55, 0.025, 0.35);
+    const cushion = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.64, 0.14, 16), cushionMat);
+    cushion.position.set(0.55, 0.09, 0.35);
+    const auraRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.92, 1.06, 28),
+      new THREE.MeshBasicMaterial({
+        color: '#52e8d4',
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    auraRing.rotation.x = -Math.PI / 2;
+    auraRing.position.set(0.55, 0.03, 0.35);
+    medGroup.add(matBase, cushion, auraRing);
+
+    // Carved Wooden Sword Rack holding 3 spirit swords
+    const rack = new THREE.Group();
+    rack.position.set(-0.45, 0, -0.35);
+    rack.rotation.y = 0.42;
+    const legGeo = new THREE.BoxGeometry(0.12, 1.25, 0.14);
+    for (const rx of [-0.62, 0.62]) {
+      const leg = new THREE.Mesh(legGeo, darkWoodMat);
+      leg.position.set(rx, 0.625, 0);
+      leg.castShadow = true;
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.56), darkWoodMat);
+      foot.position.set(rx, 0.06, 0);
+      rack.add(leg, foot);
+    }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.12, 0.12), darkWoodMat);
+    bar.position.y = 0.28;
+    rack.add(bar);
+    const bladeSilverMat = new THREE.MeshStandardMaterial({
+      color: '#bfe8f4',
+      emissive: new THREE.Color('#205a72'),
+      emissiveIntensity: 0.4,
+      roughness: 0.25,
+      metalness: 0.85,
+    });
+    for (let s = 0; s < 3; s++) {
+      const sy = 0.54 + s * 0.28;
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.055, 0.025), bladeSilverMat);
+      blade.position.set(0.08, sy, 0.06);
+      const gd = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), sanctumGoldMat);
+      gd.position.set(-0.56, sy, 0.06);
+      rack.add(blade, gd);
+    }
+    medGroup.add(rack);
+    this.campPropsGroup.add(medGroup);
+    this.campObstacles.push({ x: -5.2, z: 1.2, r: 0.84 });
+
+    // 6d. Warm Corner Peach Blossom Tree & Hanging Lantern at (-8.8, 0, -7.2)
+    const campTree = buildPeachTree(-8.8, -0.05, -7.2, 1.15, false, true);
+    const lanternHang = new THREE.Mesh(
+      new THREE.SphereGeometry(0.24, 10, 8),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.85, 1.05, 0.42) }),
+    );
+    lanternHang.scale.set(0.85, 1.25, 0.85);
+    lanternHang.position.set(1.2, 2.7, 0.35);
+    campTree.add(lanternHang);
+    this.campLanternLight = new THREE.PointLight('#ffb066', 9.5, 14.0, 1.8);
+    this.campLanternLight.position.set(1.2, 2.6, 0.35);
+    campTree.add(this.campLanternLight);
+    this.campPropsGroup.add(campTree);
+    this.campObstacles.push({ x: -8.8, z: -7.2, r: 0.65 });
+
+    // 6e. Cozy Herbal / Spirit Scroll Rack + Lantern Post at (8.4, 0, -6.8)
+    const shelfGroup = new THREE.Group();
+    shelfGroup.position.set(8.4, 0, -6.8);
+    shelfGroup.rotation.y = -0.55;
+    for (const sx of [-0.55, 0.55]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.9, 0.1), darkWoodMat);
+      post.position.set(sx, 0.95, 0);
+      post.castShadow = true;
+      shelfGroup.add(post);
+    }
+    for (const sy of [0.55, 1.15, 1.75]) {
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 0.42), woodMat);
+      plank.position.y = sy;
+      plank.castShadow = true;
+      shelfGroup.add(plank);
+    }
+    const gourdShelf = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), sanctumGoldMat);
+    gourdShelf.position.set(-0.24, 1.32, 0);
+    const scrollJar = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.34, 8), jadeVesselMat);
+    scrollJar.position.set(0.25, 0.76, 0);
+    const shelfLantern = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.18, 1),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.7, 1.0, 0.45) }),
+    );
+    shelfLantern.position.set(0, 2.02, 0);
+    shelfGroup.add(gourdShelf, scrollJar, shelfLantern);
+    this.campPropsGroup.add(shelfGroup);
+    this.campObstacles.push({ x: 8.4, z: -6.8, r: 0.72 });
+
+    // 6f. Warm Tea Brazier & Bamboo Screen at (-8.2, 0, 6.4)
+    const screenGroup = new THREE.Group();
+    screenGroup.position.set(-8.2, 0, 6.4);
+    screenGroup.rotation.y = 0.62;
+    const screenFrame = new THREE.Mesh(new THREE.BoxGeometry(1.75, 2.1, 0.1), darkWoodMat);
+    screenFrame.position.y = 1.05;
+    screenFrame.castShadow = true;
+    const screenPanel = new THREE.Mesh(new THREE.BoxGeometry(1.52, 1.82, 0.12), teaStoneMat);
+    screenPanel.position.y = 1.05;
+    screenGroup.add(screenFrame, screenPanel);
+    this.campPropsGroup.add(screenGroup);
+    this.campObstacles.push({ x: -8.2, z: 6.4, r: 0.75 });
+  }
+
+  private buildHealingShrine(carvedTex: THREE.CanvasTexture): void {
+    const shrine = this.shrineGroup;
+    shrine.position.copy(this.healingShrinePos);
+
+    const jadeStoneMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#a8d8d6',
+      emissive: new THREE.Color('#13423d'),
+      emissiveIntensity: 0.35,
+      roughness: 0.42,
+      metalness: 0.12,
+    });
+    const lotusMat = new THREE.MeshStandardMaterial({
+      color: '#5ef2d8',
+      emissive: new THREE.Color('#168a76'),
+      emissiveIntensity: 0.65,
+      roughness: 0.32,
+      metalness: 0.18,
+    });
+    const springWaterMat = new THREE.MeshBasicMaterial({
+      color: '#46ffd8',
+      transparent: true,
+      opacity: 0.78,
+    });
+    this.shrineOrbMat = new THREE.MeshStandardMaterial({
+      color: '#88ffe6',
+      emissive: new THREE.Color('#2effcb'),
+      emissiveIntensity: 1.5,
+      roughness: 0.18,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.95,
+    });
+
+    const basinBase = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.34, 8), jadeStoneMat);
+    basinBase.position.y = 0.17;
+    basinBase.castShadow = true;
+    basinBase.receiveShadow = true;
+    const basinRim = new THREE.Mesh(new THREE.TorusGeometry(0.76, 0.1, 8, 16), jadeStoneMat);
+    basinRim.rotation.x = Math.PI / 2;
+    basinRim.position.y = 0.38;
+    const springWater = new THREE.Mesh(new THREE.CircleGeometry(0.72, 16), springWaterMat);
+    springWater.rotation.x = -Math.PI / 2;
+    springWater.position.y = 0.36;
+    shrine.add(basinBase, basinRim, springWater);
+
+    // Sculpted 8-petal jade lotus cradle
+    const petalGeo = new THREE.ConeGeometry(0.22, 0.56, 4);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const petal = new THREE.Mesh(petalGeo, lotusMat);
+      petal.position.set(Math.cos(a) * 0.48, 0.52, Math.sin(a) * 0.48);
+      petal.rotation.set(Math.sin(a) * 0.52, -a, -Math.cos(a) * 0.52);
+      shrine.add(petal);
+    }
+
+    // Floating Jade Spirit Orb + Ring + PointLight
+    this.shrineOrb = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 1), this.shrineOrbMat);
+    this.shrineOrb.position.y = 1.48;
+    this.shrineRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.48, 0.035, 8, 24),
+      new THREE.MeshBasicMaterial({ color: '#78ffe8', transparent: true, opacity: 0.72 }),
+    );
+    this.shrineRing.position.y = 1.48;
+    this.shrineLight = new THREE.PointLight('#3effd8', 8.5, 11.0, 1.8);
+    this.shrineLight.position.set(0, 1.55, 0);
+
+    shrine.add(this.shrineOrb, this.shrineRing, this.shrineLight);
+    this.corridorGroup.add(shrine);
+  }
+
+  getBiome(): WorldBiome {
+    return this.currentBiome;
+  }
+
+  setBiome(biome: WorldBiome): void {
+    this.currentBiome = biome;
+    this.applyBiomeVisuals();
+    this.syncLayoutObstacles();
+  }
+
+  getHealingShrinePos(): THREE.Vector3 {
+    return this.healingShrinePos.clone();
+  }
+
+  setHealingShrineUsed(used: boolean): void {
+    this.healingShrineUsed = used;
+    if (!this.shrineOrbMat || !this.shrineOrb || !this.shrineLight) return;
+    if (used) {
+      this.shrineOrbMat.emissiveIntensity = 0.14;
+      this.shrineOrbMat.opacity = 0.34;
+      this.shrineOrb.scale.setScalar(0.55);
+      this.shrineRing.visible = false;
+      this.shrineLight.intensity = 0.8;
+    } else {
+      this.shrineOrbMat.emissiveIntensity = 1.5;
+      this.shrineOrbMat.opacity = 0.95;
+      this.shrineOrb.scale.setScalar(1.0);
+      this.shrineRing.visible = true;
+      this.shrineLight.intensity = 8.5;
+    }
+  }
+
+  private applyBiomeVisuals(): void {
+    const b = this.currentBiome;
+
+    // 1. Toggle biome decoration groups via .visible (ZERO runtime disposal churn!)
+    const isCorridor = this.layout === 'corridor';
+    this.bambooArenaGroup.visible = b === 'bamboo_canyon';
+    this.bambooGrovesGroup.visible = b === 'bamboo_canyon';
+    this.peachShrineGroup.visible = b === 'peach_shrine';
+    this.peachCorridorSubGroup.visible = isCorridor;
+    this.swordGraveyardGroup.visible = b === 'sword_graveyard';
+    this.swordCorridorSubGroup.visible = isCorridor;
+    this.lavaAbyssGroup.visible = b === 'lava_abyss';
+    this.lavaCorridorSubGroup.visible = isCorridor;
+    this.celestialSanctumGroup.visible = b === 'celestial_sanctum';
+    this.celestialCorridorSubGroup.visible = isCorridor;
+    this.campPropsGroup.visible = b === 'haven_camp';
+
+    // Zone 1 Healing Spring Shrine visible only in corridor mode (maxZone >= 1) and NOT haven_camp
+    this.shrineGroup.visible = isCorridor && this.maxZone >= 1 && b !== 'haven_camp';
+
+    // 2. Water / Magma / Astral River shader mode uniform
+    const waterMode =
+      b === 'peach_shrine'
+        ? 1.0
+        : b === 'sword_graveyard'
+          ? 2.0
+          : b === 'lava_abyss'
+            ? 3.0
+            : b === 'celestial_sanctum'
+              ? 4.0
+              : b === 'haven_camp'
+                ? 5.0
+                : 0.0;
+    if (this.riverMat) this.riverMat.uniforms.uWaterMode.value = waterMode;
+    if (this.shallowWaterMat) this.shallowWaterMat.uniforms.uWaterMode.value = waterMode;
+    if (this.waterfallMat) this.waterfallMat.uniforms.uWaterMode.value = waterMode;
+    if (this.plungeFoamMat) this.plungeFoamMat.uniforms.uWaterMode.value = waterMode;
+
+    // 3. Biome-specific stone, cliff, sky, mist, and particle palettes
+    const ch = this.lastStageNum <= 5 ? 1 : this.lastStageNum <= 10 ? 2 : this.lastStageNum <= 15 ? 3 : 4;
+    const stageSkyTint = ch === 4 ? '#c46c86' : ch === 3 ? '#d88b68' : ch === 2 ? '#a88ce0' : '#ffffff';
+    const stageFloorHex = ch === 4 ? '#927488' : ch === 3 ? '#ab8879' : ch === 2 ? '#8e86b2' : '#9fb2c7';
+
+    const palette: Record<WorldBiome, {
+      floor: string;
+      cliff: string;
+      trim: string;
+      canyonCliff: string;
+      cliffCrest: string;
+      streamBed: string;
+      slab: string;
+      bridgeDeck: string;
+      skyTint: string;
+      skyAdd: string;
+      mist: string;
+      fogMountain: string;
+      petal: string;
+      orb: string;
+    }> = {
+      bamboo_canyon: {
+        floor: stageFloorHex,
+        cliff: '#1b2430',
+        trim: '#8493a6',
+        canyonCliff: '#6b8896',
+        cliffCrest: '#2c4a48',
+        streamBed: '#5a868d',
+        slab: '#4e6c73',
+        bridgeDeck: '#7f9aa8',
+        skyTint: stageSkyTint,
+        skyAdd: '#000000',
+        mist: '#ffffff',
+        fogMountain: '#132334',
+        petal: '#ffe0eb',
+        orb: '#e0ffea',
+      },
+      peach_shrine: {
+        floor: '#bca6b8',
+        cliff: '#281d2c',
+        trim: '#a48d9e',
+        canyonCliff: '#827386',
+        cliffCrest: '#4f3a4a',
+        streamBed: '#6d5e6b',
+        slab: '#70606f',
+        bridgeDeck: '#9e889b',
+        skyTint: '#f4bfd2',
+        skyAdd: '#2c0e1c',
+        mist: '#f8aec8',
+        fogMountain: '#2d1828',
+        petal: '#ffb4d0',
+        orb: '#ffd8b0',
+      },
+      sword_graveyard: {
+        floor: '#7f7d9c',
+        cliff: '#151522',
+        trim: '#6e6d88',
+        canyonCliff: '#52566e',
+        cliffCrest: '#2a2e3e',
+        streamBed: '#3c3c54',
+        slab: '#404258',
+        bridgeDeck: '#686b86',
+        skyTint: '#aa96d8',
+        skyAdd: '#130b24',
+        mist: '#9482c4',
+        fogMountain: '#17132a',
+        petal: '#b8a8dc',
+        orb: '#b488ff',
+      },
+      lava_abyss: {
+        floor: '#48383d',
+        cliff: '#120b0d',
+        trim: '#4a383c',
+        canyonCliff: '#362629',
+        cliffCrest: '#261414',
+        streamBed: '#2d1e20',
+        slab: '#221a1d',
+        bridgeDeck: '#4a3639',
+        skyTint: '#e27c5e',
+        skyAdd: '#3c1004',
+        mist: '#d8663c',
+        fogMountain: '#2c100a',
+        petal: '#ff7b2a',
+        orb: '#ffc44d',
+      },
+      celestial_sanctum: {
+        floor: '#dceef6',
+        cliff: '#20384e',
+        trim: '#c8e0ec',
+        canyonCliff: '#84a6be',
+        cliffCrest: '#628aa6',
+        streamBed: '#82b6cc',
+        slab: '#b6d8e6',
+        bridgeDeck: '#cce4f0',
+        skyTint: '#ccecff',
+        skyAdd: '#0e283c',
+        mist: '#9ee6ff',
+        fogMountain: '#16324a',
+        petal: '#dff6ff',
+        orb: '#ffe88a',
+      },
+      haven_camp: {
+        floor: '#a8b0bc',
+        cliff: '#1f2632',
+        trim: '#8f94a0',
+        canyonCliff: '#6b8896',
+        cliffCrest: '#344c4a',
+        streamBed: '#5a868d',
+        slab: '#566d74',
+        bridgeDeck: '#859aa6',
+        skyTint: '#f2d4c2',
+        skyAdd: '#1d110a',
+        mist: '#f2cfa8',
+        fogMountain: '#221c28',
+        petal: '#ffc8da',
+        orb: '#ffd47e',
+      },
+    };
+
+    const p = palette[b];
+    if (this.floorMat) this.floorMat.color.set(p.floor);
+    if (this.cliffMat) this.cliffMat.color.set(p.cliff);
+    if (this.trimMat) this.trimMat.color.set(p.trim);
+    if (this.canyonCliffMat) this.canyonCliffMat.color.set(p.canyonCliff);
+    if (this.cliffCrestMat) this.cliffCrestMat.color.set(p.cliffCrest);
+    if (this.streamBedMat) this.streamBedMat.color.set(p.streamBed);
+    if (this.slabMat) this.slabMat.color.set(p.slab);
+    if (this.bankMat) this.bankMat.color.set(p.slab);
+    if (this.lowCurbMat) this.lowCurbMat.color.set(p.trim);
+    if (this.bridgeDeckMat) this.bridgeDeckMat.color.set(p.bridgeDeck);
+    if (this.mistMat) this.mistMat.color.set(p.mist);
+    if (this.petalMat?.uniforms.uPetalTint) {
+      (this.petalMat.uniforms.uPetalTint.value as THREE.Color).set(p.petal);
+    }
+    if (this.fireflyMat?.uniforms.uOrbTint) {
+      (this.fireflyMat.uniforms.uOrbTint.value as THREE.Color).set(p.orb);
+    }
+    if (this.mountainMat?.uniforms.uFogColor) {
+      (this.mountainMat.uniforms.uFogColor.value as THREE.Color).set(p.fogMountain);
+    }
+    const skyUniforms = (this.skyDome.material as THREE.ShaderMaterial).uniforms;
+    if (skyUniforms?.uSkyTint) (skyUniforms.uSkyTint.value as THREE.Color).set(p.skyTint);
+    if (skyUniforms?.uSkyAdd) (skyUniforms.uSkyAdd.value as THREE.Color).set(p.skyAdd);
+  }
+
   private syncLayoutObstacles(): void {
     this.circleObstacles.length = 0;
     this.capsuleObstacles.length = 0;
 
     for (const o of this.zone0Obstacles) this.circleObstacles.push(o);
+    if (this.currentBiome === 'haven_camp') {
+      for (const o of this.campObstacles) this.circleObstacles.push(o);
+    }
 
     if (this.layout === 'arena') {
       for (const c of this.arenaArchwayCapsules) this.capsuleObstacles.push(c);
@@ -2548,6 +3627,13 @@ export class ShushanArena {
 
     if (this.maxZone >= 1) {
       for (const o of this.zone1Obstacles) this.circleObstacles.push(o);
+      if (this.currentBiome !== 'haven_camp') {
+        this.circleObstacles.push({
+          x: this.healingShrinePos.x,
+          z: this.healingShrinePos.z,
+          r: 0.65,
+        });
+      }
     }
     if (this.maxZone >= 2) {
       for (const o of this.zone2Obstacles) this.circleObstacles.push(o);
@@ -2600,6 +3686,7 @@ export class ShushanArena {
       b.curtain.visible = true;
     }
 
+    this.applyBiomeVisuals();
     this.syncLayoutObstacles();
   }
 
@@ -2650,17 +3737,39 @@ export class ShushanArena {
     return false;
   }
 
+  private getActiveBiomePropCount(): number {
+    const isCorridor = this.layout === 'corridor';
+    switch (this.currentBiome) {
+      case 'bamboo_canyon':
+        return this.bambooArenaGroup.children.length + (isCorridor ? 160 : 0);
+      case 'peach_shrine':
+        return (this.peachShrineGroup.children.length - 1) + (isCorridor ? this.peachCorridorSubGroup.children.length : 0);
+      case 'sword_graveyard':
+        return (this.swordGraveyardGroup.children.length - 1) + (isCorridor ? this.swordCorridorSubGroup.children.length : 0);
+      case 'lava_abyss':
+        return (this.lavaAbyssGroup.children.length - 1) + (isCorridor ? this.lavaCorridorSubGroup.children.length : 0);
+      case 'celestial_sanctum':
+        return (this.celestialSanctumGroup.children.length - 1) + (isCorridor ? this.celestialCorridorSubGroup.children.length : 0);
+      case 'haven_camp':
+        return this.campPropsGroup.children.length;
+    }
+  }
+
   getSightlineStats(): {
     centerBeamCount: number;
     occludableCount: number;
     waterMeshCount: number;
     canyonCliffCount: number;
+    biome: WorldBiome;
+    activeBiomeProps: number;
   } {
     return {
       centerBeamCount: this.moonbeams.filter((m) => Math.abs(m.position.x) < 18).length,
       occludableCount: this.occludables.length,
       waterMeshCount: this.waterMeshes.length,
       canyonCliffCount: this.canyonCliffs.length,
+      biome: this.currentBiome,
+      activeBiomeProps: this.getActiveBiomePropCount(),
     };
   }
 
@@ -2876,6 +3985,54 @@ export class ShushanArena {
       const flick = 1 + 0.12 * Math.sin(elapsed * 7.3 + l.phase) + 0.06 * Math.sin(elapsed * 13.7 + l.phase);
       l.light.intensity = l.baseIntensity * flick;
       l.flame.scale.setScalar(0.92 + 0.12 * Math.sin(elapsed * 9 + l.phase));
+    }
+
+    if (this.shrineGroup.visible && this.shrineOrb) {
+      const bob = this.healingShrineUsed ? 0.04 : 0.12;
+      this.shrineOrb.position.y = 1.48 + Math.sin(elapsed * 2.4) * bob;
+      this.shrineOrb.rotation.y = elapsed * 1.2;
+      if (this.shrineRing.visible) {
+        this.shrineRing.position.y = this.shrineOrb.position.y;
+        this.shrineRing.rotation.x = Math.PI / 2 + Math.sin(elapsed * 1.7) * 0.25;
+        this.shrineRing.rotation.z = elapsed * 0.85;
+      }
+      if (!this.healingShrineUsed) {
+        this.shrineLight.intensity = 8.0 + Math.sin(elapsed * 3.1) * 1.4;
+      }
+    }
+
+    if (this.currentBiome === 'haven_camp') {
+      if (this.campFireLight) {
+        const flick = 1 + 0.16 * Math.sin(elapsed * 9.5) + 0.08 * Math.sin(elapsed * 17.3);
+        this.campFireLight.intensity = 14.0 * flick;
+      }
+      for (let i = 0; i < this.campFlames.length; i++) {
+        const fl = this.campFlames[i];
+        const baseY = fl.userData.baseY as number;
+        const s = 0.88 + 0.22 * Math.sin(elapsed * (10.5 + i * 2.4) + i);
+        fl.scale.set(0.92 + 0.1 * Math.cos(elapsed * 8.0 + i), s, 0.92 + 0.1 * Math.sin(elapsed * 7.5 + i));
+        fl.position.y = baseY + (s - 1.0) * 0.18;
+        fl.rotation.z = Math.sin(elapsed * 6.5 + i * 1.4) * 0.12;
+      }
+      if (this.campLanternLight) {
+        this.campLanternLight.intensity = 9.5 + Math.sin(elapsed * 4.2) * 0.8;
+      }
+    } else if (this.currentBiome === 'lava_abyss') {
+      for (const vp of this.magmaVentPlumes) {
+        const pulse = 0.86 + 0.24 * Math.sin(elapsed * 3.4 + vp.phase);
+        vp.mesh.scale.set(0.92 + 0.12 * Math.cos(elapsed * 2.7 + vp.phase), pulse, 0.92);
+        vp.mesh.position.y = vp.baseY + (pulse - 1.0) * 0.45;
+      }
+    } else if (this.currentBiome === 'celestial_sanctum') {
+      for (const cp of this.cloudPillars) {
+        cp.group.position.y = cp.baseY + Math.sin(elapsed * 0.95 + cp.phase) * 0.34;
+        cp.halo.rotation.y = elapsed * 0.9 + cp.phase;
+        cp.halo.rotation.x = Math.sin(elapsed * 0.7 + cp.phase) * 0.25;
+      }
+    } else if (this.currentBiome === 'sword_graveyard') {
+      for (const gc of this.graveyardCrystals) {
+        gc.mat.emissiveIntensity = 0.75 + 0.35 * Math.sin(elapsed * 2.2 + gc.phase);
+      }
     }
 
     for (const m of this.mistPlanes) {

@@ -414,6 +414,7 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
       uHasPanorama: { value: 0 },
       uMoonDir: { value: new THREE.Vector3(-0.35, 0.32, -0.88).normalize() },
       uSkyTint: { value: new THREE.Color('#ffffff') },
+      uSkyAdd: { value: new THREE.Color('#000000') },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -430,6 +431,7 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
       uniform float uHasPanorama;
       uniform vec3 uMoonDir;
       uniform vec3 uSkyTint;
+      uniform vec3 uSkyAdd;
       varying vec3 vDir;
       varying vec2 vUv;
 
@@ -484,7 +486,7 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
           col += vec3(0.40, 0.63, 0.78) * moonHalo * 0.26;
         }
 
-        gl_FragColor = vec4(col * uSkyTint, 1.0);
+        gl_FragColor = vec4(col * uSkyTint + uSkyAdd * smoothstep(0.65, -0.18, d.y), 1.0);
       }
     `,
   });
@@ -694,4 +696,40 @@ export function createStreamStoneMaps(): {
     bumpMap: wrap(bumpC, false),
     roughnessMap: wrap(roughC, false),
   };
+}
+
+/**
+ * Warm aged cedar/bamboo wood grain texture for camp furniture, logs, and sword racks.
+ */
+export function createCampWoodTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d')!;
+
+  ctx.fillStyle = '#4e3121';
+  ctx.fillRect(0, 0, size, size);
+
+  for (let y = 0; y < size; y += 3) {
+    const h = hash2(y, 4.3);
+    const r = Math.floor(68 + h * 26);
+    const g = Math.floor(42 + h * 18);
+    const b = Math.floor(26 + h * 12);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, y, size, 3);
+  }
+  for (let i = 0; i < 420; i++) {
+    const px = hash2(i, 3.1) * size;
+    const py = hash2(i, 8.7) * size;
+    const len = 10 + hash2(i, 5.5) * 26;
+    ctx.fillStyle = hash2(i, 2.2) > 0.5 ? 'rgba(28, 15, 9, 0.28)' : 'rgba(138, 92, 60, 0.16)';
+    ctx.fillRect(px, py, len, 1.5);
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }

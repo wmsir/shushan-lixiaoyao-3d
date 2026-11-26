@@ -28,7 +28,7 @@
         <div class="title-card">
           <div class="title-kicker">
             <span>SHUSHAN DEMON-LOCK COURT · 20 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.56</span>
+            <span id="app-version-badge" class="version-pill">v1.57</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
@@ -53,6 +53,7 @@
           <!-- Primary Campaign Entry Buttons -->
           <div class="title-cta-row">
             <button id="btn-start" class="xianxia-btn primary" type="button">仗剑出征 · 第 1 关</button>
+            <button id="btn-open-camp" class="xianxia-btn camp-btn" type="button">云来剑庐 · 休息养成</button>
             <button id="btn-open-dungeon" class="xianxia-btn dungeon-btn" type="button">
               秘境打宝
               <span id="dungeon-bounty-dot" class="bounty-dot" aria-hidden="true"></span>
@@ -191,6 +192,7 @@
             <div id="dlg-intel" class="dlg-intel"></div>
           </div>
           <div id="dlg-lines" class="dlg-lines"></div>
+          <div id="dlg-choices" class="dlg-choices"></div>
           <div class="dlg-footer">
             <span class="dlg-tip">阅毕战前秘报，点击确认即刻入阵对决</span>
             <button id="btn-dialogue-confirm" class="xianxia-btn primary dlg-confirm-btn" type="button">确定 · 拔剑开战</button>
@@ -327,6 +329,50 @@
         </div>
       </section>
 
+      <!-- Walkable 3D Rest & Cultivation Camp HUD (云来剑庐) -->
+      <section id="camp-hud" aria-live="polite">
+        <div id="camp-top-bar" class="camp-top-bar">
+          <div class="camp-top-info">
+            <span class="camp-sanctuary-badge">云来剑庐 · 休憩练剑</span>
+            <span id="camp-realm-pill" class="realm-badge">引气入体 · 凡心</span>
+            <span id="camp-jade-pill" class="jade-badge">◆ 90 灵石</span>
+            <span id="camp-meal-badge" class="camp-meal-badge"></span>
+            <span id="camp-toast" class="shop-toast camp-toast" role="status" aria-live="polite"></span>
+          </div>
+          <div class="camp-top-actions">
+            <button id="btn-camp-title" class="util-btn" type="button">大厅</button>
+            <button id="btn-camp-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
+            <button id="btn-camp-depart" class="xianxia-btn primary camp-depart-btn" type="button">启程 · 第 1 集</button>
+          </div>
+        </div>
+
+        <aside id="camp-panel" class="camp-panel">
+          <div class="camp-panel-head">
+            <div class="camp-panel-tabs" role="tablist" aria-label="剑庐养成">
+              <button id="tab-camp-cultivate" class="camp-tab active" type="button" data-camp-tab="cultivate">吐纳修炼</button>
+              <button id="tab-camp-meal" class="camp-tab" type="button" data-camp-tab="meal">篝火煮酒</button>
+            </div>
+            <button id="btn-camp-collapse" class="camp-collapse-btn" type="button" aria-expanded="true" title="收起/展开面板">▾</button>
+          </div>
+
+          <div id="camp-tab-cultivate-body" class="camp-tab-body active">
+            <div class="camp-cultivate-cur">
+              <div class="camp-realm-row">
+                <strong id="camp-realm-name">引气入体 · 凡心</strong>
+                <span id="camp-realm-lv" class="camp-lv-tag">Lv.0</span>
+              </div>
+              <div id="camp-realm-bonuses" class="camp-realm-bonuses">气血+0 · 剑伤+0% · 回气+0%</div>
+            </div>
+            <div id="camp-realm-next-box" class="camp-realm-next"></div>
+            <button id="btn-camp-cultivate" class="xianxia-btn primary camp-cultivate-btn" type="button">突破修为 ◆60</button>
+          </div>
+
+          <div id="camp-tab-meal-body" class="camp-tab-body">
+            <div id="camp-meal-list" class="camp-meal-list"></div>
+          </div>
+        </aside>
+      </section>
+
       <!-- Honor-of-Kings Style Tactile Bronze-Jade Touch & Mobile Action Wheel -->
       <div id="touch-controls" aria-hidden="true">
         <div id="touch-stick-zone">
@@ -376,7 +422,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.56</span>
+            <span id="pause-version-badge" class="version-pill">v1.57</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
@@ -396,6 +442,7 @@
           <div class="result-top-bar">
             <span id="result-stage-tag" class="result-stage-tag">剑台试炼</span>
             <div class="result-top-links">
+              <button id="btn-result-camp" class="result-mini-link camp" type="button">回剑庐</button>
               <button id="btn-result-map" class="result-mini-link" type="button">剑录</button>
               <button id="btn-result-title" class="result-mini-link" type="button">大厅</button>
             </div>

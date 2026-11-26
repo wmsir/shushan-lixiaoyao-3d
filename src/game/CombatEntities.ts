@@ -134,6 +134,7 @@ export interface EnemyEntity {
   shakeTimer: number;
   deathTimer: number;
   swordMarkTimer?: number;
+  isDummy?: boolean;
 
   telegraph: TelegraphHandle | null;
   telegraphPos: THREE.Vector3;
@@ -428,6 +429,24 @@ export function createEnemy(
     hpBarGroup,
     hpFillMesh,
   };
+}
+
+/** Creates an indestructible wooden mechanism practice dummy (`蜀山木人 · 机关剑桩`) for the camp. */
+export function createPracticeDummy(
+  id: number,
+  spawnPos: THREE.Vector3,
+  rng: () => number,
+): EnemyEntity {
+  const dummy = createEnemy(id, 'elite', spawnPos, rng, {
+    name: '蜀山木人 · 机关剑桩',
+    hpMult: 2000 / ENEMY_BASE_STATS.elite.hp,
+  });
+  dummy.hp = 2000;
+  dummy.maxHp = 2000;
+  dummy.isDummy = true;
+  dummy.aiState = 'orbit';
+  dummy.hpBarGroup.visible = true;
+  return dummy;
 }
 
 /** Builds a sculpted forged-steel 3D Flying Spirit Sword projectile for Li Xiaoyao's 御剑术 [Q]. */
