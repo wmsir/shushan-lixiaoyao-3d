@@ -82,9 +82,10 @@ jobs:
 
       - name: Collect & rename APK deliverables
         run: |
+          APP_VER=$(node -e "const s=require('fs').readFileSync('src/version.ts','utf8');const m=s.match(/APP_VERSION\s*=\s*'([^']+)'/);console.log(m?m[1]:'1.53');")
           mkdir -p apk-out
-          cp android/app/build/outputs/apk/release/app-release.apk apk-out/lixiaoyao-3d-release.apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk apk-out/lixiaoyao-3d-debug.apk
+          cp android/app/build/outputs/apk/release/app-release.apk "apk-out/lixiaoyao-3d-v${APP_VER}-release.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "apk-out/lixiaoyao-3d-v${APP_VER}-debug.apk"
           ls -lh apk-out
 
       - name: Upload APK Artifacts
@@ -160,12 +161,14 @@ jobs:
             echo "ERROR: App.app not found at $APP_PATH"
             exit 1
           fi
+          APP_VER=$(node -e "const s=require('fs').readFileSync('src/version.ts','utf8');const m=s.match(/APP_VERSION\s*=\s*'([^']+)'/);console.log(m?m[1]:'1.53');")
+          IPA_FILE="ipa-out/li-xiaoyao-shushan-3d-v${APP_VER}-unsigned.ipa"
           mkdir -p ipa-out Payload
           cp -R "$APP_PATH" Payload/App.app
-          zip -qry ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa Payload
+          zip -qry "$IPA_FILE" Payload
           rm -rf Payload
-          unzip -tq ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa
-          ls -lh ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa
+          unzip -tq "$IPA_FILE"
+          ls -lh "$IPA_FILE"
 
       - name: Upload iOS IPA Artifact
         uses: actions/upload-artifact@v4
@@ -242,12 +245,14 @@ jobs:
             echo "ERROR: App.app not found at $APP_PATH"
             exit 1
           fi
+          APP_VER=$(node -e "const s=require('fs').readFileSync('src/version.ts','utf8');const m=s.match(/APP_VERSION\s*=\s*'([^']+)'/);console.log(m?m[1]:'1.53');")
+          IPA_FILE="ipa-out/li-xiaoyao-shushan-3d-v${APP_VER}-unsigned.ipa"
           mkdir -p ipa-out Payload
           cp -R "$APP_PATH" Payload/App.app
-          zip -qry ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa Payload
+          zip -qry "$IPA_FILE" Payload
           rm -rf Payload
-          unzip -tq ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa
-          ls -lh ipa-out/li-xiaoyao-shushan-3d-unsigned.ipa
+          unzip -tq "$IPA_FILE"
+          ls -lh "$IPA_FILE"
 
       - name: Upload iOS IPA Artifact
         uses: actions/upload-artifact@v4
@@ -282,10 +287,11 @@ jobs:
         id: meta
         run: |
           ls -lh release-assets
-          test -s release-assets/lixiaoyao-3d-release.apk
-          test -s release-assets/lixiaoyao-3d-debug.apk
-          test -s release-assets/li-xiaoyao-shushan-3d-unsigned.ipa
-          APP_VER=$(node -e "const s=require('fs').readFileSync('src/version.ts','utf8');const m=s.match(/APP_VERSION\\s*=\\s*'([^']+)'/);console.log(m?m[1]:'1.51');")
+          APP_VER=$(node -e "const s=require('fs').readFileSync('src/version.ts','utf8');const m=s.match(/APP_VERSION\s*=\s*'([^']+)'/);console.log(m?m[1]:'1.53');")
+          echo "ver=${APP_VER}" >> "$GITHUB_OUTPUT"
+          test -s "release-assets/lixiaoyao-3d-v${APP_VER}-release.apk"
+          test -s "release-assets/lixiaoyao-3d-v${APP_VER}-debug.apk"
+          test -s "release-assets/li-xiaoyao-shushan-3d-v${APP_VER}-unsigned.ipa"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           elif git ls-remote --tags origin "refs/tags/v${APP_VER}" | grep -q "refs/tags/v${APP_VER}"; then
@@ -303,11 +309,11 @@ jobs:
           body: |
             ### 仙剑 · 锁妖剑台 ${{ steps.meta.outputs.tag }} — 写实 3D 二十关商业战役版（双端自动发版）
             - **藏宝阁装备、剑炉淬炼与侠客皮肤**：灵石经济体系上线，支持购买/强化五大仙剑、四大战甲、四大法宝与五款 3D 实时换装皮肤（即时生效模型材质与战斗属性）
-            - **战前剧情对白与重铸交互对打**：入关先现剧情对白（点击「确定 · 拔剑开战」后开打）、四段剑招+剑气飞波、极限闪避瞬影斩、红字「危」不可格挡预警与移动端自适应通关结算
+            - **战前剧情对白与重铸交互对打**：入关先现剧情对白（点击「确定 · 拔剑开战」后开打）、四段剑招+剑气飞波、极限闪避瞬影斩、3D 真人剪影残影、男主角仙剑配音与移动端自适应通关结算
             - **四章二十关完整战役与跨端联机**：支持 20 关全关卡跨端双人组队（Co-op）与 1v1 Solo 单挑切磋（`wss://fwpt.cn/lixiaoyao/ws`）
 
             #### 安装说明
-            - **Android 手机**：直接下载 `lixiaoyao-3d-release.apk` 安装即可。
-            - **iPhone (iOS)**：下载 `li-xiaoyao-shushan-3d-unsigned.ipa`，在电脑端用 **Sideloadly / AltStore / 爱思助手** 登录免费 Apple ID 侧载安装（巨魔 TrollStore 可直接安装）。
+            - **Android 手机**：直接下载 `lixiaoyao-3d-v${{ steps.meta.outputs.ver }}-release.apk` 安装即可。
+            - **iPhone (iOS)**：下载 `li-xiaoyao-shushan-3d-v${{ steps.meta.outputs.ver }}-unsigned.ipa`，在电脑端用 **Sideloadly / AltStore / 爱思助手** 登录免费 Apple ID 侧载安装（巨魔 TrollStore 可直接安装）。
           files: |
             release-assets/*

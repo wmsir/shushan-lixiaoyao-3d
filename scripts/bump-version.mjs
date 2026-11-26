@@ -39,4 +39,10 @@ pbx = pbx
   .replace(/MARKETING_VERSION\s*=\s*[^;]+;/g, `MARKETING_VERSION = ${nextVersion};`);
 fs.writeFileSync(pbxPath, pbx, 'utf8');
 
+const htmlPath = path.join(root, 'index.html');
+if (fs.existsSync(htmlPath)) {
+  const html = fs.readFileSync(htmlPath, 'utf8').replaceAll(`v${match[1]}`, `v${nextVersion}`);
+  fs.writeFileSync(htmlPath, html, 'utf8');
+}
+
 console.log(`Version bumped: ${match[1]} -> ${nextVersion} (code ${nextInt})`);
