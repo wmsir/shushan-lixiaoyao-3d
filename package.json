@@ -14,6 +14,7 @@
     "cap:sync:ios": "npm run build && npx cap sync ios",
     "deploy:fwpt": "node scripts/deploy-fwpt.mjs",
     "version:bump": "node scripts/bump-version.mjs",
+    "release:ci": "node scripts/trigger-release.mjs",
     "test": "playwright test",
     "verify:visual": "playwright test tests/visual.spec.ts",
     "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs"

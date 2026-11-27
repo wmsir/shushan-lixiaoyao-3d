@@ -12,7 +12,7 @@ trigger: always_on
    - 执行 `git status --short` 确认无多余临时文件。
    - 自动 `git add -A`、`git commit -m "..."`（清晰概括本次改动与版本号），并执行 `git push origin main`。
    - **禁止**随 `main` 一并推送本地 `v*` tag：因为 [.github/workflows/build-android-apk.yml](.github/workflows/build-android-apk.yml) 已监听 `push` 到 `main` 并会自动编译 Android APK（Release + Debug）与 iOS Unsigned IPA、自动创建对应 `v${APP_VERSION}` tag 并发布最新 GitHub Release；若同时推 tag 会触发重复流水线。
-3. **验证 CI 触发状态并附上链接**
-   - `git push origin main` 完成后，等待约 5 秒并通过 GitHub 公开 API 查询最新 Actions 运行状态：
-     `https://api.github.com/repos/wmsir/shushan-lixiaoyao-3d/actions/runs?per_page=3`
-   - 在最终回复中明确汇报：已自动提交推送的版本号、Commit SHA、GitHub Actions 流水线链接（`html_url` 与状态）以及 Release 下载页 `https://github.com/wmsir/shushan-lixiaoyao-3d/releases`。
+3. **自动触发与验证 GitHub Release 流水线**
+   - `git push origin main` 完成后，立即执行 `npm run release:ci`（调用 [scripts/trigger-release.mjs](scripts/trigger-release.mjs)）：若 5 秒内未检测到 `push` 自动创建的 Actions 任务，则自动通过已登录的 `gh` CLI 补发 `gh workflow run build-android-apk.yml --ref main` 并回传新流水线状态。
+   - 若 `gh` 尚未登录导致补发失败，先告知用户执行 `gh auth login`，切勿静默跳过发版。
+   - 在最终回复中明确汇报：已自动提交推送的版本号、Commit SHA、GitHub Actions 流水线链接（`htmlUrl` 与状态）以及 Release 下载页 `https://github.com/wmsir/shushan-lixiaoyao-3d/releases`。
