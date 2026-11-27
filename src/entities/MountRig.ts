@@ -162,10 +162,10 @@ export class MountRig {
     saddleCloth.rotation.y = Math.PI / 2;
     saddleCloth.position.set(0, 0.05, -0.02);
 
-    const clothTrim = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.37, 0.64, 18, 1, true, -1.98, 3.96), goldMat);
+    const clothTrim = new THREE.Mesh(new THREE.CylinderGeometry(0.364, 0.378, 0.09, 18, 1, true, -1.96, 3.92), goldMat);
     clothTrim.rotation.z = Math.PI / 2;
     clothTrim.rotation.y = Math.PI / 2;
-    clothTrim.position.set(0, 0.038, -0.02);
+    clothTrim.position.set(0, -0.22, -0.02);
 
     const saddleSeat = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.24, 6, 12), leatherMat);
     saddleSeat.rotation.x = Math.PI / 2;
@@ -390,6 +390,9 @@ export class MountRig {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 2,
+      polygonOffsetUnits: 2,
     });
     const jadeMat = new THREE.MeshPhysicalMaterial({
       color: '#5cf5e6',
@@ -442,8 +445,8 @@ export class MountRig {
 
     // Translucent cyan sword-qi aura tracing the blade silhouette
     const auraMesh = new THREE.Mesh(bladeGeo, edgeGlowMat);
-    auraMesh.scale.set(1.16, 1.35, 1.03);
-    auraMesh.position.set(0, -0.016, -0.63);
+    auraMesh.scale.set(1.18, 0.52, 1.035);
+    auraMesh.position.set(0, -0.008, -0.63);
 
     // Raised gilded central ridge spine (剑脊) + 7-Star Big Dipper inlaid runes (北斗七星)
     const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.036, 2.24, 4), spineGoldMat);

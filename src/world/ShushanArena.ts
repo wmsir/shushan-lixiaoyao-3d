@@ -3538,7 +3538,7 @@ export class ShushanArena {
   private buildOpenWorld(carvedTex: THREE.CanvasTexture, lacquerTex: THREE.CanvasTexture): void {
     const ow = this.openWorldGroup;
 
-    // 1. Vast 128x128 Kyushu Earth Plane
+    // 1. Vast 132x132 Kyushu Earth Plane (cleanly below terraceMesh & regional patches)
     const groundMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
       color: '#2d3b42',
@@ -3547,56 +3547,75 @@ export class ShushanArena {
     });
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(132, 132), groundMat);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.18;
+    ground.position.y = -0.26;
     ground.receiveShadow = true;
     ow.add(ground);
 
-    // 2. Four diagonal stone avenues radiating from central Shushan Terrace
+    // 2. Four diagonal stone avenues starting cleanly outside the central 17.4m Shushan Terrace
     const roadMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
       color: '#6b7e8c',
       roughness: 0.84,
       metalness: 0.06,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
-    const roadGeo = new THREE.BoxGeometry(4.2, 0.12, 46);
+    const roadGeo = new THREE.BoxGeometry(4.2, 0.1, 28);
     for (const ang of [Math.PI * 0.25, -Math.PI * 0.25, Math.PI * 0.75, -Math.PI * 0.75]) {
       const road = new THREE.Mesh(roadGeo, roadMat);
       road.rotation.y = ang;
-      road.position.set(Math.sin(ang) * 28, -0.14, Math.cos(ang) * 28);
+      road.position.set(Math.sin(ang) * 31.8, -0.11, Math.cos(ang) * 31.8);
       road.receiveShadow = true;
       ow.add(road);
     }
 
-    // 3. Regional Landmark Patches (NE Peach Forest, NW Sword Graveyard, SW Lava Rift, SE Celestial Sanctum)
+    // 3. Regional Landmark Patches (cleanly layered above ground & below roads without coplanar Z-fighting)
     const peachPatch = new THREE.Mesh(
       new THREE.CircleGeometry(18, 24),
-      new THREE.MeshStandardMaterial({ color: '#39463e', roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({
+        color: '#39463e',
+        roughness: 0.9,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
     );
     peachPatch.rotation.x = -Math.PI / 2;
-    peachPatch.position.set(32, -0.14, -30);
+    peachPatch.position.set(32, -0.17, -30);
     ow.add(peachPatch);
 
     const gravePatch = new THREE.Mesh(
       new THREE.CircleGeometry(18, 24),
-      new THREE.MeshStandardMaterial({ color: '#2b283c', roughness: 0.92 }),
+      new THREE.MeshStandardMaterial({
+        color: '#2b283c',
+        roughness: 0.92,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
     );
     gravePatch.rotation.x = -Math.PI / 2;
-    gravePatch.position.set(-34, -0.14, -30);
+    gravePatch.position.set(-34, -0.17, -30);
     ow.add(gravePatch);
 
-    const lavaPoolMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(1.45, 0.34, 0.08),
-      transparent: true,
-      opacity: 0.85,
+    const lavaPoolMat = new THREE.MeshStandardMaterial({
+      color: '#b82c0a',
+      emissive: new THREE.Color('#e8440e'),
+      emissiveIntensity: 0.95,
+      roughness: 0.45,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
     const lavaPatch = new THREE.Mesh(new THREE.CircleGeometry(14.5, 24), lavaPoolMat);
     lavaPatch.rotation.x = -Math.PI / 2;
-    lavaPatch.position.set(-30, -0.12, 29);
+    lavaPatch.position.set(-30, -0.15, 29);
     const lavaBossPlatform = new THREE.Mesh(
-      new THREE.CylinderGeometry(6.2, 7.0, 0.36, 16),
+      new THREE.CylinderGeometry(6.2, 7.0, 0.34, 16),
       new THREE.MeshStandardMaterial({ map: carvedTex, color: '#3a2b2d', roughness: 0.85 }),
     );
-    lavaBossPlatform.position.set(-34, -0.04, 32);
+    lavaBossPlatform.position.set(-34, -0.02, 32);
     lavaBossPlatform.receiveShadow = true;
     ow.add(lavaPatch, lavaBossPlatform);
 
@@ -3608,10 +3627,13 @@ export class ShushanArena {
         emissive: new THREE.Color('#14304a'),
         emissiveIntensity: 0.35,
         roughness: 0.56,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       }),
     );
     starPatch.rotation.x = -Math.PI / 2;
-    starPatch.position.set(34, -0.13, 30);
+    starPatch.position.set(34, -0.17, 30);
     ow.add(starPatch);
 
     // 4. Regional Scenic Landmarks (Peach Trees, Buried Giant Swords, Basalt Spires, Cloud Pillars)

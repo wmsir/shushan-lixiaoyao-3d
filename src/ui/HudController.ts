@@ -72,6 +72,7 @@ export interface HudTacticalState {
   worldChests?: Array<{ x: number; z: number; opened: boolean }>;
   worldOrbs?: Array<{ x: number; z: number; collected: boolean }>;
   worldEventPos?: { x: number; z: number } | null;
+  worldGuideTarget?: { x: number; z: number; label: string; kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss' } | null;
   biome?: WorldBiome;
   heroX: number;
   heroZ: number;
@@ -99,6 +100,8 @@ export interface HudCallbacks {
   onWorldInteract?: () => void;
   onWorldTeleport?: (waypointId: string) => void;
   onWorldRespawnBosses?: () => void;
+  onWorldCycleGuide?: () => void;
+  onWorldToggleAutoNav?: () => void;
   onCampInteract?: () => void;
   onLeaveCampToEpisode: (stageId: number) => void;
   onCampCultivate: () => { ok: boolean; level: number; reason: string };
@@ -346,6 +349,12 @@ export class HudController {
   private readonly worldTpList = this.q('#world-tp-list');
   private readonly worldInteractBtn = this.q('#btn-world-interact');
   private readonly worldInteractLabel = this.q('#world-interact-label');
+  private readonly worldGuideCard = this.q('#world-guide-card');
+  private readonly worldGuideGoal = this.q('#world-guide-goal');
+  private readonly worldGuideDir = this.q('#world-guide-dir');
+  private readonly worldGuideHowto = this.q('#world-guide-howto');
+  private readonly worldGuideToggleBtn = this.q('#btn-world-guide-toggle');
+  private readonly worldAutoNavBtn = this.q('#btn-world-auto-nav');
   private worldToastTimer: number | null = null;
 
   private readonly mapRealmPill = this.q('#map-realm-pill');
@@ -443,6 +452,13 @@ export class HudController {
     this.q('#btn-world-camp').addEventListener('click', () => this.callbacks.onEnterCamp());
     this.q('#btn-world-title').addEventListener('click', () => this.callbacks.onBackToTitle());
     this.worldInteractBtn.addEventListener('click', () => this.callbacks.onWorldInteract?.());
+    this.worldGuideToggleBtn.addEventListener('click', () => {
+      const collapsed = this.worldGuideCard.classList.toggle('collapsed');
+      this.worldGuideToggleBtn.textContent = collapsed ? '▸' : '▾';
+      this.worldGuideToggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    });
+    this.q('#btn-world-next-goal').addEventListener('click', () => this.callbacks.onWorldCycleGuide?.());
+    this.worldAutoNavBtn.addEventListener('click', () => this.callbacks.onWorldToggleAutoNav?.());
     this.q('#btn-open-dungeon').addEventListener('click', () => this.openDungeon());
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
     this.q('#btn-open-shop').addEventListener('click', () => this.openShop());
@@ -1888,6 +1904,14 @@ export class HudController {
     this.worldProgressPill.textContent = `锚点 ${waypoints}/4 · 宝箱 ${chests}/6 · 灵瞳 ${orbs}/6 · 首领 ${bosses}/4`;
   }
 
+  setWorldGuide(title: string, dirText: string, howto: string, autoNavActive: boolean): void {
+    this.worldGuideGoal.textContent = title;
+    this.worldGuideDir.textContent = dirText;
+    this.worldGuideHowto.textContent = howto;
+    this.worldAutoNavBtn.classList.toggle('active', autoNavActive);
+    this.worldAutoNavBtn.textContent = autoNavActive ? '停止寻路' : '自动寻路';
+  }
+
   setWorldInteractPrompt(label: string | null): void {
     if (!label) {
       this.worldInteractBtn.classList.remove('visible');
@@ -2019,6 +2043,30 @@ export class HudController {
       ctx.beginPath();
       ctx.arc(ex, ey, 3.2, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Tracked Objective Dashed Guide Line + Pulsing Target Reticle
+    if (tactical.worldGuideTarget) {
+      const hx = toX(tactical.heroX);
+      const hy = toY(tactical.heroZ);
+      const tx = toX(tactical.worldGuideTarget.x);
+      const ty = toY(tactical.worldGuideTarget.z);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(123, 248, 234, 0.85)';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const ringR = 5.5 + Math.sin(performance.now() * 0.008) * 1.6;
+      ctx.strokeStyle = '#ffe384';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(tx, ty, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     this.drawMinimapEntities(ctx, tactical.dots, toX, toY, performance.now());

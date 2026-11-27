@@ -136,7 +136,7 @@ function toPoseName(raw: string): PoseName {
 
 export class Game {
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.2, 240);
+  private readonly camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.6, 240);
   private readonly pipeline: RenderPipeline;
   private readonly input: GameInput;
   private readonly audio: AudioEngine;
@@ -201,6 +201,9 @@ export class Game {
   private worldEventTimer = 38;
   private worldEventEnemyId: number | null = null;
   private worldEventExpireTimer = 0;
+  private readonly worldGuideArrow = new THREE.Group();
+  private worldGuideCategory: 'auto' | 'waypoint' | 'chest' | 'orb' | 'boss' = 'auto';
+  private worldAutoNav = false;
 
   private frame = 0;
   private elapsed = 0;
@@ -272,6 +275,34 @@ export class Game {
     this.scene.add(this.hero.rig.root);
     this.scene.add(this.mountRig.root);
     this.applyCurrentLoadoutVisuals();
+
+    // 3D Open-World Ground Compass Guide Arrow (points along +Z toward active target)
+    const arrowGoldMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(2.1, 1.75, 0.55),
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const arrowCyanMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.45, 2.2, 2.15),
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const arrowTip = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.52, 4), arrowGoldMat);
+    arrowTip.rotation.x = Math.PI / 2;
+    arrowTip.rotation.y = Math.PI / 4;
+    arrowTip.scale.set(1.15, 1.0, 0.28);
+    arrowTip.position.set(0, 0, 0.28);
+    const arrowShaft = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.34), arrowCyanMat);
+    arrowShaft.position.set(0, 0, -0.08);
+    const arrowBase = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.35, 16), arrowCyanMat);
+    arrowBase.rotation.x = -Math.PI / 2;
+    this.worldGuideArrow.add(arrowTip, arrowShaft, arrowBase);
+    this.worldGuideArrow.visible = false;
+    this.scene.add(this.worldGuideArrow);
 
     this.mp = new MultiplayerClient({
       onStatus: (text, connected) => {
@@ -376,6 +407,12 @@ export class Game {
       },
       onWorldRespawnBosses: () => {
         this.respawnAllWorldBosses();
+      },
+      onWorldCycleGuide: () => {
+        this.cycleWorldGuideCategory();
+      },
+      onWorldToggleAutoNav: () => {
+        this.toggleWorldAutoNav();
       },
       onCampInteract: () => {
         this.triggerCampHotspotInteract();
@@ -612,6 +649,7 @@ export class Game {
     moonKey.shadow.camera.top = sc;
     moonKey.shadow.camera.bottom = -sc;
     moonKey.shadow.bias = -0.0005;
+    moonKey.shadow.normalBias = 0.04;
     this.scene.add(moonKey);
     this.scene.add(moonKey.target);
     this.moonKeyLight = moonKey;
@@ -693,6 +731,16 @@ export class Game {
     );
   }
 
+  private syncMoonKeyLightToHero(): void {
+    if (!this.moonKeyLight) return;
+    const texel = 44 / 2048;
+    const sx = Math.round(this.hero.pos.x / texel) * texel;
+    const sz = Math.round(this.hero.pos.z / texel) * texel;
+    this.moonKeyLight.position.set(sx - 15, 24, sz - 18);
+    this.moonKeyLight.target.position.set(sx, 0, sz);
+    this.moonKeyLight.target.updateMatrixWorld();
+  }
+
   private applyBiomeAtmosphere(biome: WorldBiome, chDef?: ChapterDef): void {
     if (biome === 'haven_camp') {
       this.scene.background = new THREE.Color('#191522');
@@ -751,6 +799,8 @@ export class Game {
 
   private enterTitleMode(): void {
     this.setMountMode('none', true);
+    this.worldGuideArrow.visible = false;
+    this.worldAutoNav = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
     this.activeWorldInteract = null;
@@ -785,6 +835,8 @@ export class Game {
 
   private enterShowcaseMode(): void {
     this.setMountMode('none', true);
+    this.worldGuideArrow.visible = false;
+    this.worldAutoNav = false;
     this.clearCombatEntities();
     this.setCampNpcsVisible(false);
     this.corridorMode = false;
@@ -810,6 +862,8 @@ export class Game {
   enterCampMode(): void {
     this.audio.unlock();
     this.setMountMode('none', true);
+    this.worldGuideArrow.visible = false;
+    this.worldAutoNav = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
     this.activeWorldInteract = null;
@@ -1136,6 +1190,180 @@ export class Game {
 
     const prog = this.saveStore.getWorldProgress();
     this.hud.setWorldStatus(region.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
+
+    const guide = this.resolveWorldGuideTarget();
+    if (guide) {
+      const dx = guide.x - h.pos.x;
+      const dz = guide.z - h.pos.z;
+      const dist = Math.hypot(dx, dz);
+      const dirText = this.formatWorldDirection(dx, dz);
+      const gy = Math.atan2(dx, dz);
+      this.worldGuideArrow.visible = dist > 3.2;
+      if (this.worldGuideArrow.visible) {
+        this.worldGuideArrow.position.set(
+          h.pos.x + Math.sin(gy) * 1.85,
+          0.24 + Math.sin(this.elapsed * 4.5) * 0.04,
+          h.pos.z + Math.cos(gy) * 1.85,
+        );
+        this.worldGuideArrow.rotation.y = gy;
+      }
+
+      if (this.worldAutoNav) {
+        if (dist <= 2.6 || h.state === 'dead') {
+          this.worldAutoNav = false;
+          this.rmbMoveTarget = null;
+          if (dist <= 2.6) {
+            this.hud.showWorldToast(`已抵达【${guide.label}】附近！`, true);
+          }
+        } else {
+          if (guide.kind === 'orb' && dist <= 9.5 && this.mountMode !== 'sword' && (h.state === 'idle' || h.state === 'run')) {
+            this.setMountMode('sword');
+          } else if (dist > 14 && this.mountMode === 'none' && (h.state === 'idle' || h.state === 'run')) {
+            this.setMountMode('horse');
+          }
+          if (!this.rmbMoveTarget) this.rmbMoveTarget = new THREE.Vector3(guide.x, 0, guide.z);
+          else this.rmbMoveTarget.set(guide.x, 0, guide.z);
+        }
+      }
+
+      this.hud.setWorldGuide(
+        guide.label,
+        `${dirText} · 约 ${Math.round(dist)} 米 · ${guide.actionHint}`,
+        '玩法：点亮4锚点开传送 · 开6宝箱/御剑采6灵瞳永久加血 · 斩4首领与宝妖爆神兵',
+        this.worldAutoNav,
+      );
+    } else {
+      this.worldGuideArrow.visible = false;
+      this.worldAutoNav = false;
+      this.hud.setWorldGuide(
+        '九州探索圆满 · 挑战四方首领',
+        '可点右上「重召首领」或进剑庐/闯关继续历练',
+        '玩法：四方野外首领约45秒自动刷新，掉落高阶神兵与海量灵石',
+        false,
+      );
+    }
+  }
+
+  private formatWorldDirection(dx: number, dz: number): string {
+    const deg = (Math.atan2(dx, -dz) * 180) / Math.PI;
+    const norm = (deg + 360) % 360;
+    const dirs = ['↑ 正北', '↗ 东北', '→ 正东', '↘ 东南', '↓ 正南', '↙ 西南', '← 正西', '↖ 西北'];
+    return dirs[Math.round(norm / 45) % 8];
+  }
+
+  private resolveWorldGuideTarget(): {
+    x: number;
+    z: number;
+    label: string;
+    actionHint: string;
+    kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss';
+  } | null {
+    const h = this.hero.pos;
+    const pickNearest = <T extends { x: number; z: number }>(arr: T[]): T | null => {
+      let best: T | null = null;
+      let bestD = Infinity;
+      for (const item of arr) {
+        const d = Math.hypot(item.x - h.x, item.z - h.z);
+        if (d < bestD) {
+          bestD = d;
+          best = item;
+        }
+      }
+      return best;
+    };
+
+    if (this.worldGuideCategory === 'auto' && this.worldEventEnemyId !== null) {
+      const goblin = this.enemies.find((e) => e.id === this.worldEventEnemyId && e.aiState !== 'dead');
+      if (goblin) {
+        return {
+          x: goblin.pos.x,
+          z: goblin.pos.z,
+          label: '奇遇 · 追击赤金宝妖',
+          actionHint: '左键/J 斩杀必爆神兵',
+          kind: 'event',
+        };
+      }
+    }
+
+    const order: Array<'waypoint' | 'chest' | 'orb' | 'boss'> =
+      this.worldGuideCategory === 'auto'
+        ? ['waypoint', 'chest', 'orb', 'boss']
+        : [this.worldGuideCategory];
+
+    for (const cat of order) {
+      if (cat === 'waypoint') {
+        const unlit = WORLD_WAYPOINTS.filter((w) => !this.saveStore.isWorldWaypointLit(w.id));
+        const wp = pickNearest(unlit);
+        if (wp) {
+          return { x: wp.x, z: wp.z, label: `点亮锚点 · ${wp.name}`, actionHint: '靠近按 G 激活传送', kind: 'waypoint' };
+        }
+      } else if (cat === 'chest') {
+        const unopened = WORLD_CHESTS.filter((c) => !this.saveStore.isWorldChestOpened(c.id));
+        const ch = pickNearest(unopened);
+        if (ch) {
+          return { x: ch.x, z: ch.z, label: `开启宝箱 · ${ch.name}`, actionHint: '靠近按 G 领神兵', kind: 'chest' };
+        }
+      } else if (cat === 'orb') {
+        const uncol = WORLD_SPIRIT_ORBS.filter((o) => !this.saveStore.isWorldOrbCollected(o.id));
+        const orb = pickNearest(uncol);
+        if (orb) {
+          return { x: orb.x, z: orb.z, label: `御剑采瞳 · ${orb.name}`, actionHint: '按 B 御剑靠近自动吸收', kind: 'orb' };
+        }
+      } else if (cat === 'boss') {
+        const liveBosses = this.enemies
+          .filter((e) => e.kind === 'boss' && e.worldBossId && e.aiState !== 'dead')
+          .map((e) => ({ x: e.pos.x, z: e.pos.z, name: e.name }));
+        const b = pickNearest(liveBosses);
+        if (b) {
+          return { x: b.x, z: b.z, label: `征讨首领 · ${b.name}`, actionHint: '击杀必掉极品神兵', kind: 'boss' };
+        }
+      }
+    }
+
+    const fallbackBoss = this.enemies.find((e) => e.kind === 'boss' && e.worldBossId && e.aiState !== 'dead');
+    if (fallbackBoss) {
+      return {
+        x: fallbackBoss.pos.x,
+        z: fallbackBoss.pos.z,
+        label: `征讨首领 · ${fallbackBoss.name}`,
+        actionHint: '击杀必掉极品神兵',
+        kind: 'boss',
+      };
+    }
+    return null;
+  }
+
+  private cycleWorldGuideCategory(): void {
+    const seq: Array<'auto' | 'waypoint' | 'chest' | 'orb' | 'boss'> = ['auto', 'waypoint', 'chest', 'orb', 'boss'];
+    const labels: Record<'auto' | 'waypoint' | 'chest' | 'orb' | 'boss', string> = {
+      auto: '智能推荐',
+      waypoint: '传送锚点',
+      chest: '野外宝箱',
+      orb: '空中灵瞳',
+      boss: '四方首领',
+    };
+    const nextIdx = (seq.indexOf(this.worldGuideCategory) + 1) % seq.length;
+    this.worldGuideCategory = seq[nextIdx];
+    this.worldAutoNav = false;
+    this.rmbMoveTarget = null;
+    this.hud.showWorldToast(`指引切换为【${labels[this.worldGuideCategory]}】`, true);
+  }
+
+  private toggleWorldAutoNav(): void {
+    if (this.mode !== 'world') return;
+    this.worldAutoNav = !this.worldAutoNav;
+    if (!this.worldAutoNav) {
+      this.rmbMoveTarget = null;
+      this.hud.showWorldToast('已停止自动寻路', true);
+    } else {
+      const g = this.resolveWorldGuideTarget();
+      if (!g) {
+        this.worldAutoNav = false;
+        this.hud.showWorldToast('暂无可寻路的未完成目标', false);
+        return;
+      }
+      this.hud.showWorldToast(`正在自动寻路前往【${g.label}】`, true);
+    }
   }
 
   private collectWorldOrb(orbId: string): boolean {
@@ -1590,6 +1818,8 @@ export class Game {
     showDialogue = false,
   ): void {
     this.setMountMode('none', true);
+    this.worldGuideArrow.visible = false;
+    this.worldAutoNav = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
     this.activeWorldInteract = null;
@@ -2105,11 +2335,7 @@ export class Game {
             ? boss.pos
             : null;
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, focusPos, this.input.mouseNdc);
-      if (this.moonKeyLight) {
-        this.moonKeyLight.position.set(this.hero.pos.x - 15, 24, this.hero.pos.z - 18);
-        this.moonKeyLight.target.position.copy(this.hero.pos);
-        this.moonKeyLight.target.updateMatrixWorld();
-      }
+      this.syncMoonKeyLightToHero();
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
       const threat = this.updateTargetRingAndThreat(rawDt);
       this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer, threat, this.buildTacticalState());
@@ -2135,11 +2361,7 @@ export class Game {
       this.arena.update(dt, this.elapsed, this.hero.pos);
       const boss = this.findNearestBossInRange(22);
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, boss?.pos ?? null, this.input.mouseNdc);
-      if (this.moonKeyLight) {
-        this.moonKeyLight.position.set(this.hero.pos.x - 15, 24, this.hero.pos.z - 18);
-        this.moonKeyLight.target.position.copy(this.hero.pos);
-        this.moonKeyLight.target.updateMatrixWorld();
-      }
+      this.syncMoonKeyLightToHero();
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
       const threat = this.updateTargetRingAndThreat(rawDt);
       this.hud.update(this.hero, this.getObjectiveLabel(), boss, null, threat, this.buildTacticalState());
@@ -2153,11 +2375,7 @@ export class Game {
       this.vfx.update(dt, this.elapsed, this.hero.pos, undefined, undefined, this.camera.position);
       this.arena.update(dt, this.elapsed, this.hero.pos);
       this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, null, this.input.mouseNdc);
-      if (this.moonKeyLight) {
-        this.moonKeyLight.position.set(this.hero.pos.x - 15, 24, this.hero.pos.z - 18);
-        this.moonKeyLight.target.position.copy(this.hero.pos);
-        this.moonKeyLight.target.updateMatrixWorld();
-      }
+      this.syncMoonKeyLightToHero();
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
       const threat = this.updateTargetRingAndThreat(rawDt);
       this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, threat, this.buildTacticalState());
@@ -2357,7 +2575,9 @@ export class Game {
     this.input.getMoveVector(this.moveVec);
     if (Math.hypot(this.moveVec.x, this.moveVec.z) > 0.08) {
       this.rmbMoveTarget = null;
+      this.worldAutoNav = false;
     } else if (this.input.lolMouseMode && (this.input.consumeRmbClick() || this.input.rmbHeld)) {
+      this.worldAutoNav = false;
       this.raycaster.setFromCamera(
         new THREE.Vector2(this.input.mouseNdc.x, this.input.mouseNdc.y),
         this.camera,
@@ -6007,8 +6227,10 @@ export class Game {
         mountMode: this.mountMode,
         heroY: Number(this.hero.rig.root.position.y.toFixed(3)),
         heroMaxHp: this.hero.maxHp,
+        canvasResizeSteady: !this.pipeline.resize(false),
         arenaLayout: this.arena.getLayout(),
         worldRegion: this.mode === 'world' ? getWorldRegionAt(this.hero.pos.x, this.hero.pos.z).name : '',
+        worldGuide: this.mode === 'world' ? this.resolveWorldGuideTarget() : null,
         bossArchetypes: this.enemies
           .filter((e) => e.kind === 'boss' && e.aiState !== 'dead')
           .map((b) => b.bossArchetype ?? 'default'),
@@ -6099,6 +6321,16 @@ export class Game {
           this.respawnAllWorldBosses();
           this.pipeline.render();
           this.publishDiagnostics();
+          return true;
+        }
+        if (action === 'worldCycleGuide') {
+          this.cycleWorldGuideCategory();
+          this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action === 'worldToggleAutoNav') {
+          this.toggleWorldAutoNav();
+          this.stepFrame(0.05, true);
           return true;
         }
         if (action.startsWith('switchBiome:')) {
@@ -6372,6 +6604,12 @@ export class Game {
         ? (() => {
             const ev = this.enemies.find((x) => x.id === this.worldEventEnemyId && x.aiState !== 'dead');
             return ev ? { x: ev.pos.x, z: ev.pos.z } : null;
+          })()
+        : null,
+      worldGuideTarget: isWorld
+        ? (() => {
+            const g = this.resolveWorldGuideTarget();
+            return g ? { x: g.x, z: g.z, label: g.label, kind: g.kind } : null;
           })()
         : null,
       biome: this.arena.getBiome(),

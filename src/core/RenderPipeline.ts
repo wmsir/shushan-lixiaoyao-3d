@@ -23,6 +23,8 @@ export class RenderPipeline {
   private adaptCooldown = 0;
   private bloomEnabled = true;
   private lastAppliedDpr = 0;
+  private lastClientWidth = 0;
+  private lastClientHeight = 0;
   private disposed = false;
   private lastSceneCalls = 0;
   private lastSceneTriangles = 0;
@@ -90,13 +92,13 @@ export class RenderPipeline {
       this.adaptCooldown -= clampedDt;
       return;
     }
-    if (this.emaDt > 0.021 && this.adaptiveDprScale > 0.72) {
-      this.adaptiveDprScale = Math.max(0.72, Number((this.adaptiveDprScale - 0.12).toFixed(2)));
-      this.adaptCooldown = 1.6;
+    if (this.emaDt > 0.028 && this.adaptiveDprScale > 0.72) {
+      this.adaptiveDprScale = Math.max(0.72, Number((this.adaptiveDprScale - 0.1).toFixed(2)));
+      this.adaptCooldown = 6.0;
       this.resize(true);
-    } else if (this.emaDt < 0.0172 && this.adaptiveDprScale < 1.0) {
-      this.adaptiveDprScale = Math.min(1.0, Number((this.adaptiveDprScale + 0.06).toFixed(2)));
-      this.adaptCooldown = 2.4;
+    } else if (this.emaDt < 0.015 && this.adaptiveDprScale < 1.0) {
+      this.adaptiveDprScale = Math.min(1.0, Number((this.adaptiveDprScale + 0.05).toFixed(2)));
+      this.adaptCooldown = 6.0;
       this.resize(true);
     }
   }
@@ -116,19 +118,20 @@ export class RenderPipeline {
     const baseDpr = Math.min(window.devicePixelRatio || 1, effectiveMaxDpr, budgetDpr);
     const dpr = Math.max(0.75, Math.min(hardCap, baseDpr * this.adaptiveDprScale));
 
-    const bw = Math.floor(width * dpr);
-    const bh = Math.floor(height * dpr);
     const needsResize =
-      force || canvas.width !== bw || canvas.height !== bh || Math.abs(this.lastAppliedDpr - dpr) > 1e-4;
+      force ||
+      width !== this.lastClientWidth ||
+      height !== this.lastClientHeight ||
+      Math.abs(this.lastAppliedDpr - dpr) > 0.015;
 
     if (needsResize) {
       this.renderer.setPixelRatio(dpr);
       this.renderer.setSize(width, height, false);
       this.composer.setSize(width, height);
-      if (Math.abs(this.lastAppliedDpr - dpr) > 1e-4) {
-        this.composer.setPixelRatio(dpr);
-        this.lastAppliedDpr = dpr;
-      }
+      this.composer.setPixelRatio(dpr);
+      this.lastAppliedDpr = dpr;
+      this.lastClientWidth = width;
+      this.lastClientHeight = height;
       this.camera.aspect = width / height;
       this.camera.fov = width / height < 0.85 ? 50 : 40;
       this.camera.updateProjectionMatrix();

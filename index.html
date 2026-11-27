@@ -28,7 +28,7 @@
         <div class="title-card">
           <div class="title-kicker">
             <span>SHUSHAN DEMON-LOCK COURT · 20 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.60</span>
+            <span id="app-version-badge" class="version-pill">v1.61</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
@@ -364,6 +364,21 @@
           <div class="world-tp-head">九州传送锚点 · 点击瞬移</div>
           <div id="world-tp-list" class="world-tp-list"></div>
         </aside>
+        <aside id="world-guide-card" class="world-guide-card">
+          <div class="world-guide-head">
+            <span class="world-guide-badge">九州游历指引</span>
+            <button id="btn-world-guide-toggle" class="camp-collapse-btn" type="button" aria-expanded="true" title="收起/展开指引">▾</button>
+          </div>
+          <div id="world-guide-body" class="world-guide-body">
+            <div id="world-guide-goal" class="world-guide-goal">点亮锚点 · 桃源仙驿锚点</div>
+            <div id="world-guide-dir" class="world-guide-dir">↗ 东北方向 · 约 30 米 · V骑马 / B御剑</div>
+            <div id="world-guide-howto" class="world-guide-howto">玩法：点亮4锚点开传送 · 开6宝箱/御剑采6灵瞳永久加血 · 斩4首领与宝妖爆神兵</div>
+            <div class="world-guide-actions">
+              <button id="btn-world-next-goal" class="util-btn" type="button">换个目标</button>
+              <button id="btn-world-auto-nav" class="util-btn world-autonav-btn" type="button">自动寻路</button>
+            </div>
+          </div>
+        </aside>
         <button id="btn-world-interact" class="camp-interact-btn world-interact-btn" type="button">
           <span class="camp-interact-key">G</span>
           <span id="world-interact-label">点亮传送锚点</span>
@@ -470,7 +485,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.60</span>
+            <span id="pause-version-badge" class="version-pill">v1.61</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
