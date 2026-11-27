@@ -146,6 +146,7 @@ export interface CampaignSaveData {
   activeMealId: string | null;
   worldWaypoints?: string[];
   worldChests?: string[];
+  worldOrbs?: string[];
   worldBossKills?: Record<string, number>;
 }
 
@@ -1888,6 +1889,9 @@ export class CampaignSaveStore {
             worldChests: Array.isArray(parsed.worldChests)
               ? parsed.worldChests.filter((id): id is string => typeof id === 'string')
               : [],
+            worldOrbs: Array.isArray(parsed.worldOrbs)
+              ? parsed.worldOrbs.filter((id): id is string => typeof id === 'string')
+              : [],
             worldBossKills:
               parsed.worldBossKills && typeof parsed.worldBossKills === 'object'
                 ? (parsed.worldBossKills as Record<string, number>)
@@ -1915,6 +1919,7 @@ export class CampaignSaveStore {
       activeMealId: null,
       worldWaypoints: [],
       worldChests: [],
+      worldOrbs: [],
       worldBossKills: {},
     };
   }
@@ -2310,16 +2315,33 @@ export class CampaignSaveStore {
     return true;
   }
 
+  isWorldOrbCollected(id: string): boolean {
+    return (this.data.worldOrbs ?? []).includes(id);
+  }
+
+  collectWorldOrb(id: string): boolean {
+    if (!this.data.worldOrbs) this.data.worldOrbs = [];
+    if (this.data.worldOrbs.includes(id)) return false;
+    this.data.worldOrbs.push(id);
+    this.persist();
+    return true;
+  }
+
+  getWorldOrbHpBonus(): number {
+    return (this.data.worldOrbs ?? []).length * 10;
+  }
+
   recordWorldBossKill(bossId: string): void {
     if (!this.data.worldBossKills) this.data.worldBossKills = {};
     this.data.worldBossKills[bossId] = (this.data.worldBossKills[bossId] ?? 0) + 1;
     this.persist();
   }
 
-  getWorldProgress(): { waypoints: number; chests: number; bosses: number } {
+  getWorldProgress(): { waypoints: number; chests: number; bosses: number; orbs: number } {
     const waypoints = (this.data.worldWaypoints ?? []).length;
     const chests = (this.data.worldChests ?? []).length;
     const bosses = Object.keys(this.data.worldBossKills ?? {}).length;
-    return { waypoints, chests, bosses };
+    const orbs = (this.data.worldOrbs ?? []).length;
+    return { waypoints, chests, bosses, orbs };
   }
 }

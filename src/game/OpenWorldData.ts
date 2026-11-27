@@ -271,3 +271,22 @@ export const WORLD_BOSS_SPAWNS: WorldBossDef[] = [
     respawnSec: 52,
   },
 ];
+
+export interface WorldSpiritOrbDef {
+  id: string;
+  name: string;
+  regionName: string;
+  x: number;
+  y: number;
+  z: number;
+  jade: number;
+}
+
+export const WORLD_SPIRIT_ORBS: WorldSpiritOrbDef[] = [
+  { id: 'orb_center', name: '云台清霄灵瞳', regionName: '蜀山云台', x: 0, y: 2.4, z: -13, jade: 65 },
+  { id: 'orb_peach', name: '桃林霞光灵瞳', regionName: '翠竹桃源林', x: 30, y: 2.6, z: -24, jade: 65 },
+  { id: 'orb_grave', name: '剑冢孤鸣灵瞳', regionName: '古剑残碑原', x: -30, y: 2.6, z: -24, jade: 65 },
+  { id: 'orb_lava', name: '熔谷浴火灵瞳', regionName: '赤焰熔岩谷', x: -30, y: 2.8, z: 24, jade: 75 },
+  { id: 'orb_star', name: '星穹天枢灵瞳', regionName: '星穹天坛遗迹', x: 30, y: 2.8, z: 24, jade: 75 },
+  { id: 'orb_south', name: '南疆凌虚灵瞳', regionName: '蜀山云台', x: 0, y: 2.6, z: 42, jade: 80 },
+];

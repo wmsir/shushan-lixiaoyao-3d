@@ -19,7 +19,7 @@ import {
   createStreamStoneMaps,
 } from './Materials';
 import skyUrl from '../assets/shushan-sky.jpg';
-import { WORLD_BOUND, WORLD_CHESTS, WORLD_WAYPOINTS } from '../game/OpenWorldData';
+import { WORLD_BOUND, WORLD_CHESTS, WORLD_SPIRIT_ORBS, WORLD_WAYPOINTS } from '../game/OpenWorldData';
 
 export type ArenaLayout = 'corridor' | 'arena' | 'pillars' | 'islands' | 'openworld';
 
@@ -156,6 +156,10 @@ export class ShushanArena {
   private readonly chestVisuals = new Map<
     string,
     { lid: THREE.Mesh; glow: THREE.Mesh; mat: THREE.MeshBasicMaterial; opened: boolean }
+  >();
+  private readonly spiritOrbVisuals = new Map<
+    string,
+    { group: THREE.Group; core: THREE.Mesh; ring: THREE.Mesh; baseY: number; collected: boolean }
   >();
   private terraceMesh!: THREE.Mesh;
   private cliffMesh!: THREE.Mesh;
@@ -3711,6 +3715,45 @@ export class ShushanArena {
       this.chestVisuals.set(ch.id, { lid, glow, mat: glowMat, opened: false });
       this.openWorldObstacles.push({ x: ch.x, z: ch.z, r: 0.72 });
     }
+
+    // 7. Six Aerial Sky Spirit Orbs (九州灵瞳 · 需御剑采集)
+    const orbCoreMat = new THREE.MeshStandardMaterial({
+      color: '#5cf5e6',
+      emissive: new THREE.Color('#2bd8d0'),
+      emissiveIntensity: 1.55,
+      roughness: 0.16,
+      metalness: 0.65,
+    });
+    const orbRingMat = new THREE.MeshBasicMaterial({
+      color: '#ffe384',
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const orbBeamMat = new THREE.MeshBasicMaterial({
+      color: '#56ffea',
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    for (const orb of WORLD_SPIRIT_ORBS) {
+      const og = new THREE.Group();
+      og.position.set(orb.x, 0, orb.z);
+      const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), orbCoreMat);
+      core.position.y = orb.y;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.72, 24), orbRingMat);
+      ring.position.y = orb.y;
+      ring.rotation.x = Math.PI / 2;
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.24, orb.y + 1.2, 8, 1, true), orbBeamMat);
+      beam.position.y = (orb.y + 1.2) * 0.5;
+      og.add(core, ring, beam);
+      ow.add(og);
+      this.spiritOrbVisuals.set(orb.id, { group: og, core, ring, baseY: orb.y, collected: false });
+    }
   }
 
   getBiome(): WorldBiome {
@@ -3760,6 +3803,13 @@ export class ShushanArena {
     ch.lid.position.y = opened ? 0.8 : 0.66;
     ch.lid.position.z = opened ? -0.28 : 0;
     ch.glow.visible = !opened;
+  }
+
+  setSpiritOrbCollected(id: string, collected: boolean): void {
+    const orb = this.spiritOrbVisuals.get(id);
+    if (!orb) return;
+    orb.collected = collected;
+    orb.group.visible = !collected;
   }
 
   isInWorldLava(pos: THREE.Vector3): boolean {
@@ -4401,6 +4451,13 @@ export class ShushanArena {
         if (!ch.opened) {
           ch.mat.opacity = 0.45 + Math.sin(elapsed * 3.2) * 0.14;
         }
+      }
+      for (const orb of this.spiritOrbVisuals.values()) {
+        if (orb.collected) continue;
+        orb.core.position.y = orb.baseY + Math.sin(elapsed * 2.8) * 0.22;
+        orb.core.rotation.y = elapsed * 2.0;
+        orb.ring.position.y = orb.core.position.y;
+        orb.ring.rotation.z = elapsed * 1.4;
       }
     }
 

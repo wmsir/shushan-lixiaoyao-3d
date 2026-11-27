@@ -70,6 +70,8 @@ export interface HudTacticalState {
   mountMode?: MountMode;
   worldWaypoints?: Array<{ x: number; z: number; lit: boolean }>;
   worldChests?: Array<{ x: number; z: number; opened: boolean }>;
+  worldOrbs?: Array<{ x: number; z: number; collected: boolean }>;
+  worldEventPos?: { x: number; z: number } | null;
   biome?: WorldBiome;
   heroX: number;
   heroZ: number;
@@ -1881,9 +1883,9 @@ export class HudController {
     this.drawMinimapHeroArrow(ctx, toX(tactical.heroX), toY(tactical.heroZ), tactical.heroYaw);
   }
 
-  setWorldStatus(regionName: string, waypoints: number, chests: number, bosses: number): void {
+  setWorldStatus(regionName: string, waypoints: number, chests: number, bosses: number, orbs = 0): void {
     this.worldRegionName.textContent = regionName;
-    this.worldProgressPill.textContent = `锚点 ${waypoints}/4 · 宝箱 ${chests}/6 · 首领 ${bosses}/4`;
+    this.worldProgressPill.textContent = `锚点 ${waypoints}/4 · 宝箱 ${chests}/6 · 灵瞳 ${orbs}/6 · 首领 ${bosses}/4`;
   }
 
   setWorldInteractPrompt(label: string | null): void {
@@ -1986,6 +1988,37 @@ export class HudController {
       if (ch.opened) continue;
       ctx.fillStyle = '#ffd866';
       ctx.fillRect(toX(ch.x) - 2, toY(ch.z) - 2, 4, 4);
+    }
+
+    // Aerial Sky Spirit Orbs
+    for (const orb of tactical.worldOrbs ?? []) {
+      if (orb.collected) continue;
+      const ox2 = toX(orb.x);
+      const oy2 = toY(orb.z);
+      ctx.fillStyle = '#7bf8ea';
+      ctx.beginPath();
+      ctx.moveTo(ox2, oy2 - 3);
+      ctx.lineTo(ox2 + 3, oy2);
+      ctx.lineTo(ox2, oy2 + 3);
+      ctx.lineTo(ox2 - 3, oy2);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Treasure Goblin World Event Beacon
+    if (tactical.worldEventPos) {
+      const ex = toX(tactical.worldEventPos.x);
+      const ey = toY(tactical.worldEventPos.z);
+      const pulse = 5 + Math.sin(performance.now() * 0.01) * 1.8;
+      ctx.strokeStyle = '#ffdf78';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(ex, ey, pulse, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#ffcf48';
+      ctx.beginPath();
+      ctx.arc(ex, ey, 3.2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     this.drawMinimapEntities(ctx, tactical.dots, toX, toY, performance.now());

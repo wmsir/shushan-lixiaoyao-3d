@@ -79,7 +79,9 @@ export type PoseName =
   | 'enemyWindup'
   | 'enemySlash'
   | 'bossIntro'
-  | 'bossSlam';
+  | 'bossSlam'
+  | 'mountHorse'
+  | 'mountSword';
 
 interface PoseFrame {
   t: number;
@@ -2204,6 +2206,31 @@ export class CharacterRig {
       swordDir = [0.1, lerp(-0.85, 0.65, u), 0.5];
       rFoot = [-0.26, 0, -0.14];
       lFoot = [0.26, 0, 0.22];
+    } else if (pose === 'mountHorse') {
+      const gallop = moveSpeed > 0.4 ? Math.sin(elapsed * 8.5) * 0.04 : 0;
+      pelY = -0.36 + gallop * 0.4;
+      pelZ = -0.04;
+      tPitch = moveSpeed > 0.4 ? 0.16 + gallop : 0.05;
+      tYaw = 0;
+      tRoll = 0;
+      hYaw = Math.sin(elapsed * 1.1) * 0.05;
+      rHand = [-0.36, 0.94, 0.14];
+      lHand = [0.16, 0.96, 0.44];
+      swordDir = [-0.24, -0.45, 0.85];
+      rFoot = [-0.36, 0.02, 0.12];
+      lFoot = [0.36, 0.02, 0.12];
+    } else if (pose === 'mountSword') {
+      const sway = Math.sin(elapsed * 2.8) * 0.025;
+      pelY = -0.08;
+      tPitch = moveSpeed > 0.4 ? 0.12 : 0.04;
+      tYaw = -0.44;
+      tRoll = sway * 0.5;
+      hYaw = 0.44;
+      lHand = [0.22, 1.32 + sway, 0.44];
+      rHand = [-0.38, 1.12 - sway, -0.24];
+      swordDir = [-0.42, 0.35, -0.84];
+      rFoot = [-0.09, 0.02, -0.34];
+      lFoot = [0.09, 0.02, 0.34];
     } else if (pose === 'dead') {
       const u = easeOutQuart(clamp(t, 0, 1));
       pelY = lerp(-0.08, -0.82, u);

@@ -7,8 +7,8 @@ android {
         applicationId "cn.fwpt.lixiaoyao"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 159
-        versionName "1.59"
+        versionCode 160
+        versionName "1.60"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -28,6 +28,12 @@ android {
         }
     }
     buildTypes {
+        debug {
+            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (ksPath != null && !ksPath.isEmpty() && file(ksPath).exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
         release {
             def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
             if (ksPath != null && !ksPath.isEmpty() && file(ksPath).exists()) {

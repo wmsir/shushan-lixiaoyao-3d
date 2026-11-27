@@ -77,6 +77,7 @@ import {
   WORLD_CHESTS,
   WORLD_MOB_CAMPS,
   WORLD_SPAWN_POS,
+  WORLD_SPIRIT_ORBS,
   WORLD_WAYPOINTS,
   type WorldBossDef,
   type WorldMobCampDef,
@@ -125,6 +126,8 @@ const VALID_POSES = new Set<PoseName>([
   'enemySlash',
   'bossIntro',
   'bossSlam',
+  'mountHorse',
+  'mountSword',
 ]);
 
 function toPoseName(raw: string): PoseName {
@@ -189,11 +192,15 @@ export class Game {
   private mountMode: MountMode = 'none';
   private mountDashTimer = 0;
   private mountWindTimer = 0;
+  private readonly mountTrampleHitIds = new Set<number>();
   private worldMobTimers = new Map<string, number>();
   private worldBossTimers = new Map<string, number>();
   private worldLastRegionId = '';
   private activeWorldInteract: { kind: 'waypoint' | 'chest'; id: string; label: string } | null = null;
   private worldLavaBurnTimer = 0;
+  private worldEventTimer = 38;
+  private worldEventEnemyId: number | null = null;
+  private worldEventExpireTimer = 0;
 
   private frame = 0;
   private elapsed = 0;
@@ -693,6 +700,12 @@ export class Game {
     } else if (biome === 'peach_shrine') {
       this.scene.background = new THREE.Color('#161124');
       this.scene.fog = new THREE.FogExp2('#21172f', 0.0128);
+    } else if (biome === 'sword_graveyard') {
+      this.scene.background = new THREE.Color('#100d1f');
+      this.scene.fog = new THREE.FogExp2('#18132d', 0.0132);
+    } else if (biome === 'lava_abyss') {
+      this.scene.background = new THREE.Color('#1d0c0c');
+      this.scene.fog = new THREE.FogExp2('#2c1210', 0.013);
     } else if (biome === 'celestial_sanctum') {
       this.scene.background = new THREE.Color('#0a1224');
       this.scene.fog = new THREE.FogExp2('#101c36', 0.0124);
@@ -717,6 +730,7 @@ export class Game {
       loadout.maxHpBonus +
       this.blessings.maxHpBonus +
       cultivation.hpBonus +
+      this.saveStore.getWorldOrbHpBonus() +
       this.activeMealBuff.hpBonus +
       this.episodeChoiceBuff.hpBonus;
     h.maxHp = nextMaxHp;
@@ -916,9 +930,12 @@ export class Game {
     this.healingShrineCollected = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
-    this.worldLastRegionId = 'central_terrace';
+    this.worldLastRegionId = 'center';
     this.activeWorldInteract = null;
     this.worldLavaBurnTimer = 0;
+    this.worldEventTimer = 38;
+    this.worldEventEnemyId = null;
+    this.worldEventExpireTimer = 0;
 
     this.arena.setArenaLayout('openworld', 0);
     this.arena.setBiome('bamboo_canyon');
@@ -931,6 +948,9 @@ export class Game {
     }
     for (const ch of WORLD_CHESTS) {
       this.arena.setChestOpened(ch.id, this.saveStore.isWorldChestOpened(ch.id));
+    }
+    for (const orb of WORLD_SPIRIT_ORBS) {
+      this.arena.setSpiritOrbCollected(orb.id, this.saveStore.isWorldOrbCollected(orb.id));
     }
 
     this.resetHero(new THREE.Vector3(WORLD_SPAWN_POS.x, 0, WORLD_SPAWN_POS.z), Math.PI);
@@ -952,7 +972,7 @@ export class Game {
     this.hud.renderWorldTeleportList();
     const prog = this.saveStore.getWorldProgress();
     const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
-    this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses);
+    this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
     this.hud.setWorldInteractPrompt(null);
     this.audio.setMood('skirmish');
     this.cameraRig.snapTo(this.hero.pos);
@@ -1005,7 +1025,44 @@ export class Game {
     const region = getWorldRegionAt(h.pos.x, h.pos.z);
     if (region.id !== this.worldLastRegionId) {
       this.worldLastRegionId = region.id;
+      this.applyBiomeAtmosphere(region.biome);
       this.hud.showWorldToast(`踏入【${region.name}】· ${region.subtitle}`, true);
+    }
+
+    const nearWorldBoss = this.findNearestBossInRange(22);
+    this.audio.setMood(nearWorldBoss ? 'boss1' : 'skirmish');
+
+    if (this.worldEventEnemyId !== null) {
+      const goblin = this.enemies.find((e) => e.id === this.worldEventEnemyId && e.aiState !== 'dead');
+      if (!goblin) {
+        this.worldEventEnemyId = null;
+        this.worldEventTimer = 46;
+      } else {
+        this.worldEventExpireTimer -= dt;
+        if (this.worldEventExpireTimer <= 0) {
+          this.vfx.spawnShockRing(goblin.pos, new THREE.Color(2.2, 1.8, 0.5), 0.3, 3.0, 0.4);
+          this.scene.remove(goblin.rig.root);
+          const idx = this.enemies.indexOf(goblin);
+          if (idx >= 0) this.enemies.splice(idx, 1);
+          this.worldEventEnemyId = null;
+          this.worldEventTimer = 46;
+          this.hud.showWorldToast('赤金宝妖遁入虚空，奇遇暂歇。', false);
+        }
+      }
+    } else {
+      this.worldEventTimer -= dt;
+      if (this.worldEventTimer <= 0) {
+        this.spawnWorldTreasureEvent();
+      }
+    }
+
+    if (this.mountMode === 'sword' && h.state !== 'dead') {
+      for (const orb of WORLD_SPIRIT_ORBS) {
+        if (this.saveStore.isWorldOrbCollected(orb.id)) continue;
+        if (Math.hypot(h.pos.x - orb.x, h.pos.z - orb.z) <= 3.0) {
+          this.collectWorldOrb(orb.id);
+        }
+      }
     }
 
     for (const [campId, remain] of Array.from(this.worldMobTimers.entries())) {
@@ -1078,7 +1135,66 @@ export class Game {
     this.hud.setWorldInteractPrompt(nextPrompt?.label ?? null);
 
     const prog = this.saveStore.getWorldProgress();
-    this.hud.setWorldStatus(region.name, prog.waypoints, prog.chests, prog.bosses);
+    this.hud.setWorldStatus(region.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
+  }
+
+  private collectWorldOrb(orbId: string): boolean {
+    const orb = WORLD_SPIRIT_ORBS.find((o) => o.id === orbId);
+    if (!orb || this.saveStore.isWorldOrbCollected(orb.id)) return false;
+    this.saveStore.collectWorldOrb(orb.id);
+    this.saveStore.addJade(orb.jade);
+    this.arena.setSpiritOrbCollected(orb.id, true);
+    this.syncLiveHeroCapsFromLoadout();
+    const oPos = new THREE.Vector3(orb.x, orb.y, orb.z);
+    this.vfx.spawnShockRing(new THREE.Vector3(orb.x, 0.2, orb.z), new THREE.Color(0.45, 2.35, 2.2), 0.35, 3.6, 0.45);
+    this.vfx.spawnHealVortex(this.hero.pos);
+    this.audio.playDropChime('spirit');
+    triggerHaptic('medium');
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    this.hud.showWorldToast(`吸收【${orb.name}】：永久气血 +10，+${orb.jade} 灵石！`, true);
+    this.spawnWorldCallout('灵瞳 +10气血!', oPos, 'heal');
+    return true;
+  }
+
+  private spawnWorldTreasureEvent(): number | null {
+    if (this.mode !== 'world') return null;
+    if (this.worldEventEnemyId !== null) {
+      const existing = this.enemies.find((x) => x.id === this.worldEventEnemyId && x.aiState !== 'dead');
+      if (existing) return existing.id;
+    }
+    const candidates = [
+      { x: 18, z: -18, label: '翠竹桃源林' },
+      { x: -18, z: -18, label: '古剑残碑原' },
+      { x: -16, z: 18, label: '赤焰熔岩谷' },
+      { x: 18, z: 18, label: '星穹天坛遗迹' },
+    ];
+    const spot = candidates[Math.floor(this.rng() * candidates.length)];
+    const e = this.spawnEnemy('elite', spot.x, spot.z, undefined, {
+      name: '赤金宝妖 · 携宝仙童',
+      hpMult: 1.15,
+      dmgMult: 0.8,
+      speedMult: 1.38,
+      scaleMult: 0.92,
+      affix: 'swift',
+    });
+    e.homePos = new THREE.Vector3(spot.x, 0, spot.z);
+    e.worldBossId = 'event_goblin';
+    e.aggroRadius = 18;
+    e.leashRadius = 26;
+    e.aiState = 'orbit';
+    e.attackCooldown = 1.6;
+    this.worldEventEnemyId = e.id;
+    this.worldEventExpireTimer = 34;
+    this.worldEventTimer = 46;
+    this.vfx.spawnBaguaArray({
+      pos: e.pos.clone(),
+      radius: 3.4,
+      color: new THREE.Color(2.4, 1.9, 0.45),
+      duration: 1.6,
+    });
+    this.audio.playDropChime('spirit');
+    this.hud.showWorldToast(`传奇奇遇：【赤金宝妖】现身【${spot.label}】，速斩必掉神兵！`, true);
+    return e.id;
   }
 
   private triggerWorldInteract(forced?: { kind: 'waypoint' | 'chest'; id: string }): boolean {
@@ -1175,7 +1291,8 @@ export class Game {
     const prog = this.saveStore.getWorldProgress();
     const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
     this.worldLastRegionId = reg.id;
-    this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses);
+    this.applyBiomeAtmosphere(reg.biome);
+    this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
     return true;
   }
 
@@ -1635,6 +1752,7 @@ export class Game {
       loadout.maxHpBonus +
       this.blessings.maxHpBonus +
       cultivation.hpBonus +
+      this.saveStore.getWorldOrbHpBonus() +
       this.activeMealBuff.hpBonus +
       this.episodeChoiceBuff.hpBonus;
     h.maxGourds = 2 + loadout.gourdBonus + this.blessings.extraGourds + this.episodeChoiceBuff.extraGourd;
@@ -2392,7 +2510,19 @@ export class Game {
         h.rig.root.position.set(h.pos.x, mPose.heroY, h.pos.z);
         h.rig.root.rotation.x = mPose.heroPitch;
         h.rig.setSwordGlow(this.mountMode === 'sword' ? 1.8 : 0.85);
-        h.rig.applyPose(this.mountMode === 'sword' ? 'combatIdle' : 'idle', 0, this.elapsed, dt, 0);
+        h.rig.applyPose(this.mountMode === 'sword' ? 'mountSword' : 'mountHorse', 0, this.elapsed, dt, h.vel.length());
+        if (this.mountMode === 'horse' && this.mountDashTimer > 0) {
+          const trampleDmg = Math.round(24 * this.getHeroDamageScale());
+          for (const e of this.enemies) {
+            if (e.aiState === 'dead' || this.mountTrampleHitIds.has(e.id)) continue;
+            if (Math.hypot(e.pos.x - h.pos.x, e.pos.z - h.pos.z) <= 2.3 + e.radius) {
+              this.mountTrampleHitIds.add(e.id);
+              const pushYaw = Math.atan2(e.pos.x - h.pos.x, e.pos.z - h.pos.z);
+              this.applyHeroAttackToEnemy(e, trampleDmg, true, pushYaw, 30, false, 'horseTrample');
+              this.spawnWorldCallout('铁骑踏撞!', e.pos, 'info');
+            }
+          }
+        }
         if (this.mountMode === 'sword' && moving) {
           this.mountWindTimer -= dt;
           if (this.mountWindTimer <= 0) {
@@ -2511,7 +2641,63 @@ export class Game {
 
   private startHeroAttack(step: number): void {
     const h = this.hero;
-    if (this.mountMode !== 'none') this.setMountMode('none', true);
+    const prevMount = this.mountMode;
+    if (prevMount !== 'none') {
+      this.setMountMode('none', true);
+      const isSwordPlunge = prevMount === 'sword';
+      const aoeRadius = isSwordPlunge ? 5.0 : 4.2;
+      const dmgMult = isSwordPlunge ? 1.85 : 1.65;
+      const poiseAmt = isSwordPlunge ? 60 : 45;
+      const skillName = isSwordPlunge ? 'swordPlunge' : 'horseSlam';
+      const baseDmg = Math.round(44 * dmgMult * this.getHeroDamageScale());
+      const aimYaw = this.getAimYaw();
+      const tgt = this.findCombatTarget(8.5, aimYaw);
+      h.yaw = tgt ? Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z) : aimYaw;
+      h.state = 'attack';
+      h.comboStep = 4;
+      h.stateTime = 0;
+      h.stateDuration = 0.52;
+      h.comboWindowTimer = 0.72;
+      h.attackHasHit.clear();
+      h.attackVfxFired = true;
+      h.magnetTargetId = null;
+      h.magnetSlideRemain = 0;
+      h.dodgeInvuln = Math.max(h.dodgeInvuln, 0.24);
+      h.rig.setWeaponDrawn(true);
+      h.rig.setSwordGlow(2.4);
+      h.rig.root.position.set(h.pos.x, 0, h.pos.z);
+      h.rig.root.rotation.set(0, h.yaw, 0);
+
+      if (isSwordPlunge) {
+        h.spirit = Math.min(h.maxSpirit, h.spirit + 30);
+        this.vfx.spawnBaguaArray({
+          pos: new THREE.Vector3(h.pos.x, 0.08, h.pos.z),
+          radius: 4.8,
+          color: new THREE.Color(0.45, 2.35, 2.2),
+          duration: 1.1,
+        });
+        this.vfx.spawnShockRing(h.pos, new THREE.Color(0.55, 2.35, 2.3), 0.55, 5.2, 0.48);
+        this.spawnWorldCallout('天外飞仙 · 御剑坠斩!', h.pos, 'parry');
+        this.audio.playSkillE();
+      } else {
+        this.vfx.spawnShockRing(h.pos, new THREE.Color(2.35, 1.55, 0.45), 0.45, 4.4, 0.45);
+        this.vfx.spawnGroundCrater(h.pos, 2.4, new THREE.Color(2.2, 1.25, 0.35), 2.5);
+        this.spawnWorldCallout('铁骑破阵斩!', h.pos, 'parry');
+        this.audio.playSwordSwing(3);
+      }
+      this.cameraRig.addShake(0.42);
+      triggerHaptic('heavy');
+      this.recordComboSigil('A');
+
+      for (const e of this.enemies) {
+        if (e.aiState === 'dead') continue;
+        if (Math.hypot(e.pos.x - h.pos.x, e.pos.z - h.pos.z) <= aoeRadius + e.radius) {
+          const hitYaw = Math.atan2(e.pos.x - h.pos.x, e.pos.z - h.pos.z);
+          this.applyHeroAttackToEnemy(e, baseDmg, true, hitYaw, poiseAmt, true, skillName);
+        }
+      }
+      return;
+    }
     const isShadowStrike = h.dodgeEmpowered || h.shadowStrikeTimer > 0;
     this.shadowAttackActive = isShadowStrike;
     this.q2AttackActive = false;
@@ -2725,6 +2911,7 @@ export class Game {
     if (this.mountMode !== 'none') {
       h.stamina = Math.max(0, h.stamina - 16);
       this.mountDashTimer = 0.45;
+      this.mountTrampleHitIds.clear();
       h.dodgeInvuln = 0.22;
       this.audio.playDodge(this.mountMode === 'sword');
       this.vfx.spawnShockRing(
@@ -2949,8 +3136,28 @@ export class Game {
 
   private startSkillQ(): void {
     const h = this.hero;
-    if (this.mountMode !== 'none') this.setMountMode('none', true);
     const loadout = this.getLoadoutStats();
+    if (this.mountMode === 'sword') {
+      h.spirit -= 20;
+      h.cdQ = 3.5 * this.blessings.cdMult * loadout.cdMult;
+      const aimYaw = this.getAimYaw();
+      const tgt = this.findCombatTarget(20, aimYaw);
+      h.yaw = tgt ? Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z) : aimYaw;
+      h.rig.root.rotation.y = h.yaw;
+      const origin = h.pos.clone().add(new THREE.Vector3(0, 0.85, 0));
+      for (const offset of [-0.22, 0, 0.22]) {
+        this.spawnFlyingSwordProjectile(origin, h.yaw + offset, true, offset === 0);
+      }
+      this.recordComboSigil('Q');
+      this.audio.playSkillQ();
+      this.triggerHeroVoice('skillQ');
+      this.hud.triggerSkillPulse('Q');
+      this.spawnWorldCallout('御剑连星!', h.pos.clone().add(new THREE.Vector3(0, 1.5, 0)), 'info');
+      triggerHaptic('medium');
+      this.mp.sendAction('skillQ', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
+      return;
+    }
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     h.spirit -= 20;
     h.cdQ = 3.5 * this.blessings.cdMult * loadout.cdMult;
     h.state = 'skillQ';
@@ -3699,7 +3906,21 @@ export class Game {
             this.hud.showWorldToast(`清剿据点【${camp.name}】：+${camp.jadeReward} 灵石！`, true);
           }
         }
-        if (e.worldBossId) {
+        if (e.worldBossId === 'event_goblin') {
+          this.worldEventEnemyId = null;
+          this.worldEventTimer = 46;
+          this.saveStore.addJade(180);
+          const item = rollEquipmentDrop({
+            tier: 3,
+            guaranteedMinRarity: 'epic',
+            pityTriggered: this.saveStore.advancePityAndCheck(),
+            source: '九州奇遇·赤金宝妖',
+            rng: this.rng,
+          });
+          this.vfx.spawnGearDrop(e.pos, item, this.rng);
+          this.audio.playGearDropChime(item.rarity);
+          this.hud.showWorldToast(`斩杀【${e.name}】！爆出 +180 灵石与极品神兵！`, true);
+        } else if (e.worldBossId) {
           const wb = WORLD_BOSS_SPAWNS.find((b) => b.id === e.worldBossId);
           if (wb) {
             this.saveStore.recordWorldBossKill(wb.id);
@@ -3720,7 +3941,7 @@ export class Game {
             this.hud.showWorldToast(`斩杀野外首领【${wb.name}】！+${wb.jadeReward} 灵石与神兵掉落！`, true);
             const prog = this.saveStore.getWorldProgress();
             const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
-            this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses);
+            this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
           }
         }
         return;
@@ -5785,6 +6006,7 @@ export class Game {
         zone: this.arena.getZoneIndexAtZ(this.hero.pos.z),
         mountMode: this.mountMode,
         heroY: Number(this.hero.rig.root.position.y.toFixed(3)),
+        heroMaxHp: this.hero.maxHp,
         arenaLayout: this.arena.getLayout(),
         worldRegion: this.mode === 'world' ? getWorldRegionAt(this.hero.pos.x, this.hero.pos.z).name : '',
         bossArchetypes: this.enemies
@@ -5832,6 +6054,21 @@ export class Game {
         }
         if (action === 'worldInteract') {
           const ok = this.triggerWorldInteract();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action === 'spawnWorldEvent') {
+          const id = this.spawnWorldTreasureEvent();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return id !== null;
+        }
+        if (action === 'collectNearestOrb') {
+          if (this.mode !== 'world') return false;
+          const orb = WORLD_SPIRIT_ORBS.find((o) => !this.saveStore.isWorldOrbCollected(o.id)) ?? WORLD_SPIRIT_ORBS[0];
+          if (!orb) return false;
+          const ok = this.collectWorldOrb(orb.id);
           this.pipeline.render();
           this.publishDiagnostics();
           return ok;
@@ -6038,6 +6275,7 @@ export class Game {
         const mountsAndOpenWorldOk =
           WORLD_WAYPOINTS.length === 4 &&
           WORLD_CHESTS.length === 6 &&
+          WORLD_SPIRIT_ORBS.length === 6 &&
           WORLD_BOSS_SPAWNS.length === 4 &&
           WORLD_MOB_CAMPS.length === 4 &&
           bossArchetypes.size >= 4 &&
@@ -6071,7 +6309,7 @@ export class Game {
           },
           mountsAndOpenWorldValid: {
             pass: mountsAndOpenWorldOk,
-            detail: `wp=${WORLD_WAYPOINTS.length}, chests=${WORLD_CHESTS.length}, wb=${WORLD_BOSS_SPAWNS.length}, archetypes=${bossArchetypes.size}`,
+            detail: `wp=${WORLD_WAYPOINTS.length}, chests=${WORLD_CHESTS.length}, orbs=${WORLD_SPIRIT_ORBS.length}, wb=${WORLD_BOSS_SPAWNS.length}, archetypes=${bossArchetypes.size}`,
           },
         };
       },
@@ -6123,6 +6361,19 @@ export class Game {
             opened: this.saveStore.isWorldChestOpened(ch.id),
           }))
         : undefined,
+      worldOrbs: isWorld
+        ? WORLD_SPIRIT_ORBS.map((o) => ({
+            x: o.x,
+            z: o.z,
+            collected: this.saveStore.isWorldOrbCollected(o.id),
+          }))
+        : undefined,
+      worldEventPos: isWorld && this.worldEventEnemyId !== null
+        ? (() => {
+            const ev = this.enemies.find((x) => x.id === this.worldEventEnemyId && x.aiState !== 'dead');
+            return ev ? { x: ev.pos.x, z: ev.pos.z } : null;
+          })()
+        : null,
       biome: this.arena.getBiome(),
       heroX: h.pos.x,
       heroZ: h.pos.z,

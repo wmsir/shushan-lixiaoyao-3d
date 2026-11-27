@@ -64,18 +64,10 @@ jobs:
             echo "ANDROID_KEYSTORE_PASSWORD=${KEYSTORE_PASS}" >> "$GITHUB_ENV"
             echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
             echo "ANDROID_KEY_PASSWORD=${KEY_PASS}" >> "$GITHUB_ENV"
+            keytool -list -keystore "$KS_FILE" -storepass "$KEYSTORE_PASS" | grep -i -E "Alias|SHA256" || true
           else
-            keytool -genkeypair -v \
-              -keystore "$KS_FILE" \
-              -storepass "lixiaoyao2026" \
-              -keypass "lixiaoyao2026" \
-              -alias "lixiaoyao" \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Shushan Court, OU=Game, O=FWPT, L=Shanghai, ST=SH, C=CN"
-            echo "ANDROID_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
-            echo "ANDROID_KEYSTORE_PASSWORD=lixiaoyao2026" >> "$GITHUB_ENV"
-            echo "ANDROID_KEY_ALIAS=lixiaoyao" >> "$GITHUB_ENV"
-            echo "ANDROID_KEY_PASSWORD=lixiaoyao2026" >> "$GITHUB_ENV"
+            echo "::error::Missing ANDROID_KEYSTORE_BASE64 secret! Refusing to generate ephemeral keystore that breaks overwrite installs."
+            exit 1
           fi
 
       - name: Compile Release & Debug APKs via Gradle
