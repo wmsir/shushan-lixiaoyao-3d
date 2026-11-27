@@ -28,7 +28,7 @@
         <div class="title-card">
           <div class="title-kicker">
             <span>SHUSHAN DEMON-LOCK COURT · 20 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.57</span>
+            <span id="app-version-badge" class="version-pill">v1.59</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
@@ -53,6 +53,7 @@
           <!-- Primary Campaign Entry Buttons -->
           <div class="title-cta-row">
             <button id="btn-start" class="xianxia-btn primary" type="button">仗剑出征 · 第 1 关</button>
+            <button id="btn-open-world" class="xianxia-btn world-btn" type="button">九州仙域 · 大世界</button>
             <button id="btn-open-camp" class="xianxia-btn camp-btn" type="button">云来剑庐 · 休息养成</button>
             <button id="btn-open-dungeon" class="xianxia-btn dungeon-btn" type="button">
               秘境打宝
@@ -194,7 +195,7 @@
           <div id="dlg-lines" class="dlg-lines"></div>
           <div id="dlg-choices" class="dlg-choices"></div>
           <div class="dlg-footer">
-            <span class="dlg-tip">阅毕战前秘报，点击确认即刻入阵对决</span>
+            <span id="dlg-tip" class="dlg-tip">阅毕战前秘报，点击确认即刻入阵对决</span>
             <button id="btn-dialogue-confirm" class="xianxia-btn primary dlg-confirm-btn" type="button">确定 · 拔剑开战</button>
           </div>
         </div>
@@ -327,6 +328,46 @@
             <span class="skill-name">灵葫酒</span>
           </button>
         </div>
+
+        <!-- Dual-Mode Mount & Sword-Flight Quick Bar -->
+        <div id="mount-bar" class="mount-bar">
+          <button id="btn-mount-horse" class="mount-btn" type="button" title="跨乘踏雪赤兔驹 (快捷键 V)">
+            <span class="mount-icon">🐎</span>
+            <span class="mount-lbl">骑马</span>
+            <span class="mount-key">V</span>
+          </button>
+          <button id="btn-mount-sword" class="mount-btn sword" type="button" title="踏剑凌空飞行 (快捷键 B)">
+            <span class="mount-icon">⚔</span>
+            <span class="mount-lbl">御剑</span>
+            <span class="mount-key">B</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Open World Kyushu HUD (九州仙域 · 原神×传奇探索打宝) -->
+      <section id="world-hud" aria-live="polite">
+        <div class="world-top-bar">
+          <div class="world-top-info">
+            <span id="world-region-name" class="world-region-badge">蜀山云台 · 九州枢纽</span>
+            <span id="world-progress-pill" class="world-progress-pill">锚点 0/4 · 宝箱 0/6 · 首领 0/4</span>
+            <span id="world-toast" class="shop-toast world-toast" role="status" aria-live="polite"></span>
+          </div>
+          <div class="world-top-actions">
+            <button id="btn-world-tp" class="util-btn world-tp-toggle" type="button">锚点传送</button>
+            <button id="btn-world-respawn" class="util-btn" type="button">重召首领</button>
+            <button id="btn-world-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
+            <button id="btn-world-camp" class="util-btn" type="button">剑庐</button>
+            <button id="btn-world-title" class="util-btn" type="button">大厅</button>
+          </div>
+        </div>
+        <aside id="world-tp-drawer" class="world-tp-drawer">
+          <div class="world-tp-head">九州传送锚点 · 点击瞬移</div>
+          <div id="world-tp-list" class="world-tp-list"></div>
+        </aside>
+        <button id="btn-world-interact" class="camp-interact-btn world-interact-btn" type="button">
+          <span class="camp-interact-key">G</span>
+          <span id="world-interact-label">点亮传送锚点</span>
+        </button>
       </section>
 
       <!-- Walkable 3D Rest & Cultivation Camp HUD (云来剑庐) -->
@@ -341,6 +382,7 @@
           </div>
           <div class="camp-top-actions">
             <button id="btn-camp-title" class="util-btn" type="button">大厅</button>
+            <button id="btn-camp-world" class="util-btn camp-shop-btn" type="button">漫游九州</button>
             <button id="btn-camp-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
             <button id="btn-camp-depart" class="xianxia-btn primary camp-depart-btn" type="button">启程 · 第 1 集</button>
           </div>
@@ -371,6 +413,12 @@
             <div id="camp-meal-list" class="camp-meal-list"></div>
           </div>
         </aside>
+
+        <div id="camp-npc-labels" class="camp-npc-labels" aria-hidden="true"></div>
+        <button id="btn-camp-interact" class="camp-interact-btn" type="button">
+          <span class="camp-interact-key">G</span>
+          <span id="camp-interact-label">与酒剑仙论剑</span>
+        </button>
       </section>
 
       <!-- Honor-of-Kings Style Tactile Bronze-Jade Touch & Mobile Action Wheel -->
@@ -422,7 +470,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.57</span>
+            <span id="pause-version-badge" class="version-pill">v1.59</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
@@ -442,6 +490,7 @@
           <div class="result-top-bar">
             <span id="result-stage-tag" class="result-stage-tag">剑台试炼</span>
             <div class="result-top-links">
+              <button id="btn-result-epilogue" class="result-mini-link camp" type="button" style="display:none">终章剧情</button>
               <button id="btn-result-camp" class="result-mini-link camp" type="button">回剑庐</button>
               <button id="btn-result-map" class="result-mini-link" type="button">剑录</button>
               <button id="btn-result-title" class="result-mini-link" type="button">大厅</button>
@@ -449,6 +498,7 @@
           </div>
           <div class="result-header">
             <h2 id="result-title" class="result-title win">降 妖 凯 旋</h2>
+            <p id="result-story-line" class="result-story-line"></p>
             <div class="result-badges-row">
               <div id="result-stars-row" class="result-stars-row"></div>
               <span id="result-jade-gain" class="jade-badge">+0 灵石</span>

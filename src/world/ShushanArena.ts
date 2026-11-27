@@ -19,8 +19,9 @@ import {
   createStreamStoneMaps,
 } from './Materials';
 import skyUrl from '../assets/shushan-sky.jpg';
+import { WORLD_BOUND, WORLD_CHESTS, WORLD_WAYPOINTS } from '../game/OpenWorldData';
 
-export type ArenaLayout = 'corridor' | 'arena';
+export type ArenaLayout = 'corridor' | 'arena' | 'pillars' | 'islands' | 'openworld';
 
 export type WorldBiome =
   | 'bamboo_canyon'
@@ -64,7 +65,7 @@ export class ShushanArena {
   readonly group = new THREE.Group();
   readonly circleObstacles: CircleObstacle[] = [];
   readonly capsuleObstacles: CapsuleObstacle[] = [];
-  readonly playableRadius = 17.4;
+  playableRadius = 17.4;
 
   private readonly skyDome: THREE.Mesh;
   private readonly baguaMat: THREE.ShaderMaterial;
@@ -134,6 +135,32 @@ export class ShushanArena {
   private shrineLight!: THREE.PointLight;
   private shrineOrbMat!: THREE.MeshStandardMaterial;
 
+  // Pillars, Islands & Open-World Layouts
+  private readonly pillarsLayoutGroup = new THREE.Group();
+  private readonly pillarsObstacles: CircleObstacle[] = [];
+  private readonly islandsLayoutGroup = new THREE.Group();
+  private readonly islandCrystals: Array<{
+    pos: THREE.Vector3;
+    orb: THREE.Mesh;
+    ring: THREE.Mesh;
+    mat: THREE.MeshStandardMaterial;
+    light: THREE.PointLight;
+    used: boolean;
+  }> = [];
+  private readonly openWorldGroup = new THREE.Group();
+  private readonly openWorldObstacles: CircleObstacle[] = [];
+  private readonly waypointVisuals = new Map<
+    string,
+    { orb: THREE.Mesh; beam: THREE.Mesh; mat: THREE.MeshBasicMaterial; lit: boolean }
+  >();
+  private readonly chestVisuals = new Map<
+    string,
+    { lid: THREE.Mesh; glow: THREE.Mesh; mat: THREE.MeshBasicMaterial; opened: boolean }
+  >();
+  private terraceMesh!: THREE.Mesh;
+  private cliffMesh!: THREE.Mesh;
+  private backdropAnchorX = 0;
+
   private campFireLight?: THREE.PointLight;
   private readonly campFlames: THREE.Mesh[] = [];
   private campLanternLight?: THREE.PointLight;
@@ -189,6 +216,7 @@ export class ShushanArena {
     const terrace = new THREE.Mesh(new THREE.CylinderGeometry(19.6, 20.8, 1.4, 32), this.floorMat);
     terrace.position.y = -0.7;
     terrace.receiveShadow = true;
+    this.terraceMesh = terrace;
     this.group.add(terrace);
 
     this.cliffMat = new THREE.MeshStandardMaterial({ color: '#1b2430', roughness: 0.96, metalness: 0.02 });
@@ -197,6 +225,7 @@ export class ShushanArena {
       this.cliffMat,
     );
     cliff.position.y = -12.3;
+    this.cliffMesh = cliff;
     this.group.add(cliff);
 
     const trimMat = new THREE.MeshStandardMaterial({
@@ -375,6 +404,15 @@ export class ShushanArena {
     this.group.add(this.biomePropsGroup);
     this.buildBiomeProps(carvedTex, lacquerTex);
     this.buildHealingShrine(carvedTex);
+
+    // 14. Pillars, Islands & Seamless 112x112 Open World (九州仙域)
+    this.pillarsLayoutGroup.visible = false;
+    this.islandsLayoutGroup.visible = false;
+    this.openWorldGroup.visible = false;
+    this.group.add(this.pillarsLayoutGroup, this.islandsLayoutGroup, this.openWorldGroup);
+    this.buildSpecialStageLayouts(carvedTex);
+    this.buildOpenWorld(carvedTex, lacquerTex);
+
     this.applyBiomeVisuals();
     this.syncLayoutObstacles();
   }
@@ -3396,8 +3434,339 @@ export class ShushanArena {
     this.corridorGroup.add(shrine);
   }
 
+  private buildSpecialStageLayouts(carvedTex: THREE.CanvasTexture): void {
+    const stoneMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#6e8296',
+      roughness: 0.72,
+      metalness: 0.14,
+      transparent: true,
+      opacity: 1,
+    });
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: '#d8b460',
+      emissive: new THREE.Color('#4a320a'),
+      emissiveIntensity: 0.36,
+      roughness: 0.34,
+      metalness: 0.78,
+      transparent: true,
+      opacity: 1,
+    });
+
+    // 1) Pillars layout: 4 carved dragon stone pillars that physically block enemy orbs/projectiles!
+    const colGeo = new THREE.CylinderGeometry(0.95, 1.12, 6.2, 12);
+    const plinthGeo = new THREE.CylinderGeometry(1.32, 1.44, 0.55, 8);
+    const ringGeo = new THREE.TorusGeometry(1.12, 0.08, 8, 20);
+    const pillarSpots: Array<[number, number]> = [
+      [-7.4, -7.4],
+      [7.4, -7.4],
+      [-7.4, 7.4],
+      [7.4, 7.4],
+    ];
+    for (const [px, pz] of pillarSpots) {
+      const pGrp = new THREE.Group();
+      pGrp.position.set(px, 0, pz);
+      const plinth = new THREE.Mesh(plinthGeo, stoneMat);
+      plinth.position.y = 0.275;
+      plinth.castShadow = true;
+      plinth.receiveShadow = true;
+      const col = new THREE.Mesh(colGeo, stoneMat);
+      col.position.y = 3.35;
+      col.castShadow = true;
+      const collar = new THREE.Mesh(ringGeo, goldMat);
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = 5.4;
+      pGrp.add(plinth, col, collar);
+      this.pillarsLayoutGroup.add(pGrp);
+      this.pillarsObstacles.push({ x: px, z: pz, r: 1.25 });
+      this.occludables.push({
+        position: new THREE.Vector3(px, 2.4, pz),
+        radius: 1.45,
+        materials: [stoneMat, goldMat],
+        currentOpacity: 1,
+      });
+    }
+
+    // 2) Islands layout: twin resonant Spirit Crystals (剑意灵晶) that trigger sword-intent burst on contact
+    const crystalSpots: Array<[number, number]> = [
+      [-9.2, -2.4],
+      [9.2, -2.4],
+    ];
+    const crystalGeo = new THREE.OctahedronGeometry(0.55, 0);
+    const pedGeo = new THREE.CylinderGeometry(0.82, 1.02, 0.42, 8);
+    for (const [cx, cz] of crystalSpots) {
+      const cGrp = new THREE.Group();
+      cGrp.position.set(cx, 0, cz);
+      const ped = new THREE.Mesh(pedGeo, stoneMat);
+      ped.position.y = 0.21;
+      ped.castShadow = true;
+      const mat = new THREE.MeshStandardMaterial({
+        color: '#88f8f0',
+        emissive: new THREE.Color('#28d8d0'),
+        emissiveIntensity: 1.4,
+        roughness: 0.16,
+        metalness: 0.22,
+        transparent: true,
+        opacity: 0.94,
+      });
+      const orb = new THREE.Mesh(crystalGeo, mat);
+      orb.position.y = 1.48;
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.75, 0.04, 8, 22),
+        new THREE.MeshBasicMaterial({ color: '#8cfcf2', transparent: true, opacity: 0.72 }),
+      );
+      ring.position.y = 1.48;
+      const light = new THREE.PointLight('#48f2e4', 8.0, 12.0, 1.8);
+      light.position.y = 1.6;
+      cGrp.add(ped, orb, ring, light);
+      this.islandsLayoutGroup.add(cGrp);
+      this.islandCrystals.push({
+        pos: new THREE.Vector3(cx, 0, cz),
+        orb,
+        ring,
+        mat,
+        light,
+        used: false,
+      });
+    }
+  }
+
+  private buildOpenWorld(carvedTex: THREE.CanvasTexture, lacquerTex: THREE.CanvasTexture): void {
+    const ow = this.openWorldGroup;
+
+    // 1. Vast 128x128 Kyushu Earth Plane
+    const groundMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#2d3b42',
+      roughness: 0.92,
+      metalness: 0.04,
+    });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(132, 132), groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.18;
+    ground.receiveShadow = true;
+    ow.add(ground);
+
+    // 2. Four diagonal stone avenues radiating from central Shushan Terrace
+    const roadMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#6b7e8c',
+      roughness: 0.84,
+      metalness: 0.06,
+    });
+    const roadGeo = new THREE.BoxGeometry(4.2, 0.12, 46);
+    for (const ang of [Math.PI * 0.25, -Math.PI * 0.25, Math.PI * 0.75, -Math.PI * 0.75]) {
+      const road = new THREE.Mesh(roadGeo, roadMat);
+      road.rotation.y = ang;
+      road.position.set(Math.sin(ang) * 28, -0.14, Math.cos(ang) * 28);
+      road.receiveShadow = true;
+      ow.add(road);
+    }
+
+    // 3. Regional Landmark Patches (NE Peach Forest, NW Sword Graveyard, SW Lava Rift, SE Celestial Sanctum)
+    const peachPatch = new THREE.Mesh(
+      new THREE.CircleGeometry(18, 24),
+      new THREE.MeshStandardMaterial({ color: '#39463e', roughness: 0.9 }),
+    );
+    peachPatch.rotation.x = -Math.PI / 2;
+    peachPatch.position.set(32, -0.14, -30);
+    ow.add(peachPatch);
+
+    const gravePatch = new THREE.Mesh(
+      new THREE.CircleGeometry(18, 24),
+      new THREE.MeshStandardMaterial({ color: '#2b283c', roughness: 0.92 }),
+    );
+    gravePatch.rotation.x = -Math.PI / 2;
+    gravePatch.position.set(-34, -0.14, -30);
+    ow.add(gravePatch);
+
+    const lavaPoolMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.45, 0.34, 0.08),
+      transparent: true,
+      opacity: 0.85,
+    });
+    const lavaPatch = new THREE.Mesh(new THREE.CircleGeometry(14.5, 24), lavaPoolMat);
+    lavaPatch.rotation.x = -Math.PI / 2;
+    lavaPatch.position.set(-30, -0.12, 29);
+    const lavaBossPlatform = new THREE.Mesh(
+      new THREE.CylinderGeometry(6.2, 7.0, 0.36, 16),
+      new THREE.MeshStandardMaterial({ map: carvedTex, color: '#3a2b2d', roughness: 0.85 }),
+    );
+    lavaBossPlatform.position.set(-34, -0.04, 32);
+    lavaBossPlatform.receiveShadow = true;
+    ow.add(lavaPatch, lavaBossPlatform);
+
+    const starPatch = new THREE.Mesh(
+      new THREE.CircleGeometry(17, 24),
+      new THREE.MeshStandardMaterial({
+        map: carvedTex,
+        color: '#6b8ea6',
+        emissive: new THREE.Color('#14304a'),
+        emissiveIntensity: 0.35,
+        roughness: 0.56,
+      }),
+    );
+    starPatch.rotation.x = -Math.PI / 2;
+    starPatch.position.set(34, -0.13, 30);
+    ow.add(starPatch);
+
+    // 4. Regional Scenic Landmarks (Peach Trees, Buried Giant Swords, Basalt Spires, Cloud Pillars)
+    const trunkMat = new THREE.MeshStandardMaterial({ map: lacquerTex, color: '#4c2c24', roughness: 0.85 });
+    const blossomMat = new THREE.MeshStandardMaterial({
+      color: '#f4a8c4',
+      emissive: new THREE.Color('#4a182c'),
+      emissiveIntensity: 0.25,
+      roughness: 0.8,
+    });
+    for (const [px, pz] of [[24, -26], [40, -24], [38, -38], [26, -38]]) {
+      const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.38, 3.2, 7), trunkMat);
+      tr.position.set(px, 1.4, pz);
+      tr.castShadow = true;
+      const cr = new THREE.Mesh(new THREE.DodecahedronGeometry(1.75, 1), blossomMat);
+      cr.position.set(px, 3.3, pz);
+      ow.add(tr, cr);
+      this.openWorldObstacles.push({ x: px, z: pz, r: 0.55 });
+    }
+
+    const buriedBladeMat = new THREE.MeshStandardMaterial({ color: '#7e869c', roughness: 0.42, metalness: 0.72 });
+    for (const [gx, gz, rotZ] of [[-28, -26, 0.22], [-42, -26, -0.25], [-40, -39, 0.16], [-26, -39, -0.18]]) {
+      const sb = new THREE.Mesh(new THREE.BoxGeometry(0.45, 5.2, 0.14), buriedBladeMat);
+      sb.position.set(gx, 1.9, gz);
+      sb.rotation.z = rotZ;
+      sb.castShadow = true;
+      ow.add(sb);
+      this.openWorldObstacles.push({ x: gx, z: gz, r: 0.65 });
+    }
+
+    const starColMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#c8e4f2',
+      emissive: new THREE.Color('#1c4058'),
+      emissiveIntensity: 0.3,
+      roughness: 0.45,
+    });
+    for (const [sx, sz] of [[28, 26], [42, 25], [42, 38], [29, 40]]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.68, 5.6, 6), starColMat);
+      col.position.set(sx, 2.6, sz);
+      col.castShadow = true;
+      ow.add(col);
+      this.openWorldObstacles.push({ x: sx, z: sz, r: 0.78 });
+    }
+
+    // 5. Four Teleport Waypoint Beacons (传送锚点)
+    const wpPedMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#9ab4c4', roughness: 0.65 });
+    for (const wp of WORLD_WAYPOINTS) {
+      const g = new THREE.Group();
+      g.position.set(wp.x, 0, wp.z);
+      const ped = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.25, 0.38, 8), wpPedMat);
+      ped.position.y = 0.19;
+      ped.castShadow = true;
+      const mat = new THREE.MeshBasicMaterial({ color: '#ff5c6c', transparent: true, opacity: 0.85 });
+      const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), mat);
+      orb.position.y = 1.65;
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.16, 0.38, 11.0, 10, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: '#4cf8e8',
+          transparent: true,
+          opacity: 0.28,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
+      );
+      beam.position.y = 5.6;
+      beam.visible = false;
+      g.add(ped, orb, beam);
+      ow.add(g);
+      this.waypointVisuals.set(wp.id, { orb, beam, mat, lit: false });
+      this.openWorldObstacles.push({ x: wp.x, z: wp.z, r: 0.95 });
+    }
+
+    // 6. Six Wild Treasure Chests (野外宝箱)
+    const boxWoodMat = new THREE.MeshStandardMaterial({ color: '#5c331e', roughness: 0.68, metalness: 0.18 });
+    const boxGoldMat = new THREE.MeshStandardMaterial({ color: '#dfc075', roughness: 0.32, metalness: 0.85 });
+    for (const ch of WORLD_CHESTS) {
+      const cg = new THREE.Group();
+      cg.position.set(ch.x, 0, ch.z);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.56, 0.72), boxWoodMat);
+      base.position.y = 0.28;
+      base.castShadow = true;
+      const band = new THREE.Mesh(new THREE.BoxGeometry(1.09, 0.1, 0.76), boxGoldMat);
+      band.position.y = 0.54;
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.22, 0.74), boxGoldMat);
+      lid.position.y = 0.66;
+      const glowCol = ch.rarity === 'epic' ? '#c86bff' : ch.rarity === 'rare' ? '#4ee8dc' : '#ffe384';
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: glowCol,
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.65, 2.2, 12, 1, true), glowMat);
+      glow.position.y = 1.1;
+      cg.add(base, band, lid, glow);
+      ow.add(cg);
+      this.chestVisuals.set(ch.id, { lid, glow, mat: glowMat, opened: false });
+      this.openWorldObstacles.push({ x: ch.x, z: ch.z, r: 0.72 });
+    }
+  }
+
   getBiome(): WorldBiome {
     return this.currentBiome;
+  }
+
+  getLayout(): ArenaLayout {
+    return this.layout;
+  }
+
+  getIslandCrystalCount(): number {
+    return this.islandCrystals.length;
+  }
+
+  getCrystalPos(idx: number): THREE.Vector3 {
+    const c = this.islandCrystals[idx];
+    return c ? c.pos.clone() : new THREE.Vector3();
+  }
+
+  isCrystalUsed(idx: number): boolean {
+    return this.islandCrystals[idx]?.used ?? true;
+  }
+
+  setCrystalUsed(idx: number, used: boolean): void {
+    const c = this.islandCrystals[idx];
+    if (!c) return;
+    c.used = used;
+    c.mat.emissiveIntensity = used ? 0.14 : 1.4;
+    c.mat.opacity = used ? 0.3 : 0.94;
+    c.ring.visible = !used;
+    c.light.intensity = used ? 0.6 : 8.0;
+  }
+
+  setWaypointLit(id: string, lit: boolean): void {
+    const wp = this.waypointVisuals.get(id);
+    if (!wp) return;
+    wp.lit = lit;
+    wp.mat.color.set(lit ? '#56ffea' : '#ff5c6c');
+    wp.beam.visible = lit;
+  }
+
+  setChestOpened(id: string, opened: boolean): void {
+    const ch = this.chestVisuals.get(id);
+    if (!ch) return;
+    ch.opened = opened;
+    ch.lid.rotation.x = opened ? -0.95 : 0;
+    ch.lid.position.y = opened ? 0.8 : 0.66;
+    ch.lid.position.z = opened ? -0.28 : 0;
+    ch.glow.visible = !opened;
+  }
+
+  isInWorldLava(pos: THREE.Vector3): boolean {
+    if (this.layout !== 'openworld') return false;
+    const dPool = Math.hypot(pos.x + 30, pos.z - 29);
+    const dAltar = Math.hypot(pos.x + 34, pos.z - 32);
+    return dPool <= 13.8 && dAltar > 6.2;
   }
 
   setBiome(biome: WorldBiome): void {
@@ -3433,17 +3802,18 @@ export class ShushanArena {
 
     // 1. Toggle biome decoration groups via .visible (ZERO runtime disposal churn!)
     const isCorridor = this.layout === 'corridor';
-    this.bambooArenaGroup.visible = b === 'bamboo_canyon';
-    this.bambooGrovesGroup.visible = b === 'bamboo_canyon';
-    this.peachShrineGroup.visible = b === 'peach_shrine';
+    const isOpen = this.layout === 'openworld';
+    this.bambooArenaGroup.visible = !isOpen && b === 'bamboo_canyon';
+    this.bambooGrovesGroup.visible = !isOpen && b === 'bamboo_canyon';
+    this.peachShrineGroup.visible = !isOpen && b === 'peach_shrine';
     this.peachCorridorSubGroup.visible = isCorridor;
-    this.swordGraveyardGroup.visible = b === 'sword_graveyard';
+    this.swordGraveyardGroup.visible = !isOpen && b === 'sword_graveyard';
     this.swordCorridorSubGroup.visible = isCorridor;
-    this.lavaAbyssGroup.visible = b === 'lava_abyss';
+    this.lavaAbyssGroup.visible = !isOpen && b === 'lava_abyss';
     this.lavaCorridorSubGroup.visible = isCorridor;
-    this.celestialSanctumGroup.visible = b === 'celestial_sanctum';
+    this.celestialSanctumGroup.visible = !isOpen && b === 'celestial_sanctum';
     this.celestialCorridorSubGroup.visible = isCorridor;
-    this.campPropsGroup.visible = b === 'haven_camp';
+    this.campPropsGroup.visible = !isOpen && b === 'haven_camp';
 
     // Zone 1 Healing Spring Shrine visible only in corridor mode (maxZone >= 1) and NOT haven_camp
     this.shrineGroup.visible = isCorridor && this.maxZone >= 1 && b !== 'haven_camp';
@@ -3615,9 +3985,25 @@ export class ShushanArena {
     this.circleObstacles.length = 0;
     this.capsuleObstacles.length = 0;
 
+    if (this.layout === 'openworld') {
+      for (const o of this.openWorldObstacles) this.circleObstacles.push(o);
+      return;
+    }
+
     for (const o of this.zone0Obstacles) this.circleObstacles.push(o);
     if (this.currentBiome === 'haven_camp') {
       for (const o of this.campObstacles) this.circleObstacles.push(o);
+    }
+
+    if (this.layout === 'pillars') {
+      for (const o of this.pillarsObstacles) this.circleObstacles.push(o);
+      for (const c of this.arenaArchwayCapsules) this.capsuleObstacles.push(c);
+      return;
+    }
+
+    if (this.layout === 'islands') {
+      for (const c of this.arenaArchwayCapsules) this.capsuleObstacles.push(c);
+      return;
     }
 
     if (this.layout === 'arena') {
@@ -3648,18 +4034,48 @@ export class ShushanArena {
 
   setArenaLayout(layout: ArenaLayout, maxZone: 0 | 1 | 2 = 2): void {
     this.layout = layout;
-    this.maxZone = layout === 'arena' ? 0 : maxZone;
+    this.maxZone = layout === 'corridor' ? maxZone : 0;
     this.unlockedZone = 0;
+    this.playableRadius =
+      layout === 'openworld'
+        ? WORLD_BOUND
+        : layout === 'pillars' || layout === 'islands'
+          ? 21.0
+          : 17.4;
 
-    if (layout === 'arena') {
+    const expandScale = layout === 'pillars' || layout === 'islands' ? 1.18 : 1.0;
+    this.terraceMesh.scale.set(expandScale, 1, expandScale);
+    this.cliffMesh.scale.set(expandScale, 1, expandScale);
+    this.cliffMesh.visible = layout !== 'openworld';
+
+    this.pillarsLayoutGroup.visible = layout === 'pillars';
+    this.islandsLayoutGroup.visible = layout === 'islands';
+    this.openWorldGroup.visible = layout === 'openworld';
+    if (layout === 'islands') {
+      for (let i = 0; i < this.islandCrystals.length; i++) {
+        this.setCrystalUsed(i, false);
+      }
+    }
+
+    if (layout === 'openworld') {
       this.corridorGroup.visible = false;
-      this.zone0FullCurb.visible = true;
+      this.zone0FullCurb.visible = false;
       this.zone0OpenCurb.visible = false;
-      this.archwayGroup.position.set(0, 0, -16.6);
-      this.archwayOccludable.position.set(0, 3.0, -16.6);
+      this.archwayGroup.visible = false;
+      this.bossRingPlane.position.set(0, 0.036, 0);
+      this.skySwordRing.position.set(0, 14.5, -26);
+    } else if (layout === 'arena' || layout === 'pillars' || layout === 'islands') {
+      this.archwayGroup.visible = true;
+      this.corridorGroup.visible = false;
+      this.zone0FullCurb.visible = layout === 'arena';
+      this.zone0OpenCurb.visible = false;
+      const archZ = layout === 'arena' ? -16.6 : -19.8;
+      this.archwayGroup.position.set(0, 0, archZ);
+      this.archwayOccludable.position.set(0, 3.0, archZ);
       this.bossRingPlane.position.set(0, 0.036, 0);
       this.skySwordRing.position.set(0, 11.2, -23);
     } else {
+      this.archwayGroup.visible = true;
       this.corridorGroup.visible = true;
       this.zone0FullCurb.visible = this.maxZone === 0;
       this.zone0OpenCurb.visible = this.maxZone >= 1;
@@ -3774,7 +4190,11 @@ export class ShushanArena {
   }
 
   isOutOfBounds(pos: THREE.Vector3, margin = 0): boolean {
-    if (this.layout === 'arena') {
+    if (this.layout === 'openworld') {
+      const lim = WORLD_BOUND + margin;
+      return Math.abs(pos.x) > lim || Math.abs(pos.z) > lim;
+    }
+    if (this.layout === 'arena' || this.layout === 'pillars' || this.layout === 'islands') {
       return Math.hypot(pos.x, pos.z) > this.playableRadius + margin;
     }
 
@@ -3870,7 +4290,11 @@ export class ShushanArena {
         resolveCircleVsCapsule(pos, radius, cap);
       }
 
-      if (this.layout === 'arena') {
+      if (this.layout === 'openworld') {
+        const lim = WORLD_BOUND - radius;
+        pos.x = clamp(pos.x, -lim, lim);
+        pos.z = clamp(pos.z, -lim, lim);
+      } else if (this.layout === 'arena' || this.layout === 'pillars' || this.layout === 'islands') {
         const dist = Math.hypot(pos.x, pos.z);
         const maxR = this.playableRadius - radius;
         if (dist > maxR && dist > 1e-5) {
@@ -3942,14 +4366,43 @@ export class ShushanArena {
   }
 
   update(dt: number, elapsed: number, focusPos: THREE.Vector3): void {
-    const targetAnchorZ = this.layout === 'corridor' ? focusPos.z : 0;
+    const targetAnchorZ = this.layout === 'corridor' || this.layout === 'openworld' ? focusPos.z : 0;
+    const targetAnchorX = this.layout === 'openworld' ? focusPos.x : 0;
     if (Math.abs(targetAnchorZ - this.backdropAnchorZ) > 24) {
       this.backdropAnchorZ = targetAnchorZ;
     } else {
       this.backdropAnchorZ += (targetAnchorZ - this.backdropAnchorZ) * Math.min(1, dt * 6);
     }
-    this.skyDome.position.z = this.backdropAnchorZ;
-    this.mountainGroup.position.z = this.backdropAnchorZ;
+    if (Math.abs(targetAnchorX - this.backdropAnchorX) > 24) {
+      this.backdropAnchorX = targetAnchorX;
+    } else {
+      this.backdropAnchorX += (targetAnchorX - this.backdropAnchorX) * Math.min(1, dt * 6);
+    }
+    this.skyDome.position.set(this.backdropAnchorX, 0, this.backdropAnchorZ);
+    this.mountainGroup.position.set(this.backdropAnchorX, 0, this.backdropAnchorZ);
+
+    if (this.layout === 'islands') {
+      for (const c of this.islandCrystals) {
+        c.orb.position.y = 1.48 + Math.sin(elapsed * 2.6 + c.pos.x) * (c.used ? 0.03 : 0.14);
+        c.orb.rotation.y = elapsed * 1.3;
+        if (c.ring.visible) {
+          c.ring.rotation.x = Math.PI / 2 + Math.sin(elapsed * 1.9) * 0.25;
+          c.ring.rotation.z = elapsed * 0.9;
+        }
+      }
+    }
+
+    if (this.layout === 'openworld') {
+      for (const wp of this.waypointVisuals.values()) {
+        wp.orb.position.y = 1.65 + Math.sin(elapsed * 2.4) * 0.14;
+        wp.orb.rotation.y = elapsed * 1.4;
+      }
+      for (const ch of this.chestVisuals.values()) {
+        if (!ch.opened) {
+          ch.mat.opacity = 0.45 + Math.sin(elapsed * 3.2) * 0.14;
+        }
+      }
+    }
 
     (this.skyDome.material as THREE.ShaderMaterial).uniforms.uTime.value = elapsed;
     this.baguaMat.uniforms.uTime.value = elapsed;

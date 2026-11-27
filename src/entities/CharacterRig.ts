@@ -57,6 +57,7 @@ import ironArmorUrl from '../assets/iron-armor.jpg';
 import ironArmorNrmUrl from '../assets/iron-armor-nrm.jpg';
 
 export type CharacterArchetype = 'xiaoyao' | 'ally' | 'bladesman' | 'caster' | 'elite' | 'boss';
+export type BossArchetype = 'titan' | 'phantom' | 'inferno' | 'celestial';
 
 export type PoseName =
   | 'idle'
@@ -400,6 +401,11 @@ export class CharacterRig {
   private guardCrystalMat?: THREE.MeshPhysicalMaterial;
   private bossRelicEmberMat?: THREE.MeshStandardMaterial;
   private readonly bossRimHandles: SilhouetteRimHandle[] = [];
+  private bossArmorMat?: THREE.MeshStandardMaterial;
+  private bossTrimMat?: THREE.MeshStandardMaterial;
+  private bossOrnamentGroup: THREE.Group | null = null;
+  private bossWheelMesh: THREE.Object3D | null = null;
+  private bossWingBlades: THREE.Object3D[] = [];
   private readonly skinPrimaryMat?: THREE.MeshPhysicalMaterial;
   private readonly skinSecondaryMat?: THREE.MeshPhysicalMaterial;
   private readonly skinRobeInnerMat?: THREE.MeshPhysicalMaterial;
@@ -488,6 +494,9 @@ export class CharacterRig {
       this.skinAccentMat = palette.accent as THREE.MeshPhysicalMaterial;
       this.skinTrimMat = palette.trim as THREE.MeshStandardMaterial;
       this.skinBronzeMat = palette.bronze;
+    } else if (archetype === 'boss') {
+      this.bossArmorMat = palette.primary as THREE.MeshStandardMaterial;
+      this.bossTrimMat = palette.trim as THREE.MeshStandardMaterial;
     }
     this.flashMats.push(palette.primary, palette.secondary, palette.armor);
     for (const m of this.flashMats) {
@@ -1831,6 +1840,107 @@ export class CharacterRig {
     }
   }
 
+  applyBossArchetype(variant: BossArchetype): void {
+    if (this.archetype !== 'boss') return;
+
+    if (this.bossOrnamentGroup) {
+      this.torso.remove(this.bossOrnamentGroup);
+      this.bossOrnamentGroup = null;
+    }
+    this.bossWheelMesh = null;
+    this.bossWingBlades = [];
+
+    const grp = new THREE.Group();
+    if (variant === 'titan') {
+      this.bossArmorMat?.color.set('#d2b488');
+      this.bossTrimMat?.color.set('#8f5e24');
+      this.weaponGlowMat.emissive.set('#e08a24');
+      for (const h of this.bossRimHandles) h.uRimColor.value.set('#ffb848');
+      const spikeMat = new THREE.MeshStandardMaterial({
+        color: '#e0b058',
+        emissive: new THREE.Color('#6b380c'),
+        emissiveIntensity: 0.45,
+        roughness: 0.28,
+        metalness: 0.85,
+      });
+      for (const sx of [-1, 1]) {
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.068, 0.48, 6), spikeMat);
+        spike.position.set(sx * 0.34, 0.56, -0.02);
+        spike.rotation.z = sx * -0.58;
+        spike.rotation.x = -0.18;
+        grp.add(spike);
+      }
+    } else if (variant === 'phantom') {
+      this.bossArmorMat?.color.set('#9696ca');
+      this.bossTrimMat?.color.set('#3c3272');
+      this.weaponGlowMat.emissive.set('#9642ff');
+      for (const h of this.bossRimHandles) h.uRimColor.value.set('#b264ff');
+      const wingMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1.45, 0.65, 2.35),
+        transparent: true,
+        opacity: 0.85,
+      });
+      for (let i = 0; i < 6; i++) {
+        const side = i < 3 ? -1 : 1;
+        const idx = i % 3;
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.78 - idx * 0.1, 0.025), wingMat);
+        const bx = side * (0.34 + idx * 0.18);
+        const by = 0.52 - idx * 0.14;
+        blade.position.set(bx, by, -0.26);
+        blade.rotation.z = side * (-0.36 - idx * 0.22);
+        blade.userData.baseX = bx;
+        blade.userData.baseY = by;
+        blade.userData.phase = i * 0.75;
+        grp.add(blade);
+        this.bossWingBlades.push(blade);
+      }
+    } else if (variant === 'inferno') {
+      this.bossArmorMat?.color.set('#84423a');
+      this.bossTrimMat?.color.set('#b8321c');
+      this.weaponGlowMat.emissive.set('#ff4e1a');
+      for (const h of this.bossRimHandles) h.uRimColor.value.set('#ff6a28');
+      const flameMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(2.2, 0.65, 0.16),
+      });
+      const crownRing = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.024, 6, 20), flameMat);
+      crownRing.position.set(0, 0.74, -0.14);
+      crownRing.rotation.x = 0.35;
+      grp.add(crownRing);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.24, 5), flameMat);
+        horn.position.set(Math.cos(a) * 0.24, 0.78, -0.14 + Math.sin(a) * 0.12);
+        grp.add(horn);
+      }
+    } else {
+      // celestial
+      this.bossArmorMat?.color.set('#c4b4dc');
+      this.bossTrimMat?.color.set('#5a265c');
+      this.weaponGlowMat.emissive.set('#ff3868');
+      for (const h of this.bossRimHandles) h.uRimColor.value.set('#ff4e88');
+      const wheel = new THREE.Group();
+      wheel.position.set(0, 0.42, -0.32);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(2.0, 0.42, 0.78),
+      });
+      const outer = new THREE.Mesh(new THREE.TorusGeometry(0.68, 0.028, 8, 28), ringMat);
+      const inner = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.018, 6, 20), ringMat);
+      wheel.add(outer, inner);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.44, 0.02), ringMat);
+        spoke.position.set(Math.cos(a) * 0.56, Math.sin(a) * 0.56, 0);
+        spoke.rotation.z = a + Math.PI / 2;
+        wheel.add(spoke);
+      }
+      grp.add(wheel);
+      this.bossWheelMesh = wheel;
+    }
+
+    this.torso.add(grp);
+    this.bossOrnamentGroup = grp;
+  }
+
   triggerHitFlash(strength = 1.0): void {
     this.hitFlash = Math.max(this.hitFlash, strength);
   }
@@ -2255,6 +2365,14 @@ export class CharacterRig {
         const baseY = (sw.userData.baseY as number) ?? 0.78;
         const ph = (sw.userData.phase as number) ?? 0;
         sw.position.y = baseY + Math.sin(elapsed * spd + ph) * amp;
+      }
+      if (this.bossWheelMesh) {
+        this.bossWheelMesh.rotation.z = elapsed * (this.phase2Active ? 2.2 : 1.15);
+      }
+      for (const blade of this.bossWingBlades) {
+        const baseY = (blade.userData.baseY as number) ?? 0.4;
+        const ph = (blade.userData.phase as number) ?? 0;
+        blade.position.y = baseY + Math.sin(elapsed * 3.4 + ph) * 0.055;
       }
     }
 

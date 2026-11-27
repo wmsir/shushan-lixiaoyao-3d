@@ -19,6 +19,8 @@ import {
   rollEquipmentDrop,
 } from './EquipmentData';
 import type { WorldBiome } from '../world/ShushanArena';
+import type { BossArchetype } from '../entities/CharacterRig';
+import { EPISODE_STORY_SCRIPTS } from './StoryScripts';
 
 export const BIOME_LABELS: Record<WorldBiome, string> = {
   bamboo_canyon: '翠竹云溪',
@@ -60,6 +62,7 @@ export interface StageEnemySpec {
   speedMult?: number;
   scaleMult?: number;
   affix?: EnemyAffix;
+  bossArchetype?: BossArchetype;
 }
 
 export interface StageWaveDef {
@@ -73,6 +76,7 @@ export interface StageDef {
   chapter: 1 | 2 | 3 | 4;
   episodeNum: number;
   biome: WorldBiome;
+  stageLayout?: 'corridor' | 'pillars' | 'islands';
   name: string;
   subtitle: string;
   badge: string;
@@ -140,6 +144,9 @@ export interface CampaignSaveData {
   claimedBounties: string[];
   cultivationLevel: number;
   activeMealId: string | null;
+  worldWaypoints?: string[];
+  worldChests?: string[];
+  worldBossKills?: Record<string, number>;
 }
 
 export interface CultivationRealmStep {
@@ -197,7 +204,7 @@ export interface BountyState {
 
 export interface StageDialogueLine {
   speaker: string;
-  role: 'elder' | 'enemy' | 'hero';
+  role: 'elder' | 'ally' | 'enemy' | 'hero';
   seal: string;
   text: string;
 }
@@ -206,6 +213,9 @@ export interface EpisodeChoiceDef {
   id: string;
   title: string;
   subtitle: string;
+  storyHint?: string;
+  heroReply?: string;
+  battleCallout?: string;
   dmgBonus?: number;
   speedBonus?: number;
   ultBonus?: number;
@@ -215,6 +225,7 @@ export interface EpisodeChoiceDef {
 
 export interface StageDialogueDef {
   stageId: number;
+  mode?: 'preStage' | 'epilogue' | 'campNpc';
   episodeTag: string;
   biomeLabel: string;
   kicker: string;
@@ -222,7 +233,9 @@ export interface StageDialogueDef {
   chapterName: string;
   intel: string[];
   lines: StageDialogueLine[];
-  choices: [EpisodeChoiceDef, EpisodeChoiceDef];
+  choices: EpisodeChoiceDef[];
+  confirmLabel?: string;
+  tipText?: string;
 }
 
 export interface SwordRealmInfo {
@@ -422,6 +435,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 1,
     episodeNum: 3,
     biome: 'peach_shrine',
+    stageLayout: 'pillars',
     name: '幽符困阵',
     subtitle: '三才法阵 · 破符夺先',
     badge: '疾风狂雷',
@@ -496,7 +510,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     parTimeSec: 122,
     recommendedRealm: '筑基剑修',
     hazard: 'none',
-    introLine: '玄甲镇门将·破岳：「蜀山小儿，先过本将手中巨剑！」',
+    introLine: '蜀山小儿，先过本将手中巨剑！',
     victoryLine: '第一章通关！蜀山山门肃清，剑冢古道已开启。',
     waves: [
       {
@@ -515,6 +529,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
             x: 0.0,
             z: -5.0,
             name: '玄甲镇门将 · 破岳',
+            bossArchetype: 'titan',
             hpMult: 1.38,
             poiseMult: 1.25,
             dmgMult: 1.22,
@@ -564,6 +579,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 2,
     episodeNum: 7,
     biome: 'sword_graveyard',
+    stageLayout: 'pillars',
     name: '鬼火祭坛',
     subtitle: '天雷阵域 · 步步惊心',
     badge: '天雷灾害',
@@ -682,7 +698,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     hazardLabel: '血雷天罚',
     hazardIntervalSec: 5.0,
     hazardDamage: 28,
-    introLine: '赤霄魔君：「葬身剑冢之魂，皆为本尊剑下养料！」',
+    introLine: '葬身剑冢之魂，皆为本尊剑下养料！',
     victoryLine: '第二章通关！古剑冢封印重固，锁妖深渊入口洞开。',
     waves: [
       {
@@ -701,6 +717,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
             x: 0.0,
             z: -5.0,
             name: '剑冢血尊 · 赤霄魔君',
+            bossArchetype: 'phantom',
             hpMult: 1.37,
             poiseMult: 1.32,
             dmgMult: 1.3,
@@ -717,6 +734,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 3,
     episodeNum: 11,
     biome: 'lava_abyss',
+    stageLayout: 'islands',
     name: '赤焰剑狱',
     subtitle: '地火喷涌 · 焦土血战',
     badge: '地火灾害',
@@ -791,6 +809,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 3,
     episodeNum: 13,
     biome: 'lava_abyss',
+    stageLayout: 'pillars',
     name: '符阵合围',
     subtitle: '四象幽冥 · 弹幕破阵',
     badge: '四方弹幕',
@@ -829,6 +848,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 3,
     episodeNum: 14,
     biome: 'lava_abyss',
+    stageLayout: 'islands',
     name: '锁妖双王',
     subtitle: '深渊双将 · 天剑破局',
     badge: '双将压境',
@@ -857,6 +877,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 3,
     episodeNum: 15,
     biome: 'lava_abyss',
+    stageLayout: 'islands',
     name: '焚天剑煞',
     subtitle: '第三章首领 · 炎狱妖王',
     badge: '章末 Boss',
@@ -868,7 +889,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     hazardLabel: '焚天火劫',
     hazardIntervalSec: 3.8,
     hazardDamage: 32,
-    introLine: '炎狱妖王：「三百年地火淬剑，今日拿蜀山剑修试锋！」',
+    introLine: '三百年地火淬剑，今日拿蜀山剑修试锋！',
     victoryLine: '第三章通关！锁妖深渊烈焰平息，终极绝巅之路开启！',
     waves: [
       {
@@ -887,6 +908,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
             x: 0.0,
             z: -5.0,
             name: '焚天剑圣 · 炎狱妖王',
+            bossArchetype: 'inferno',
             hpMult: 1.73,
             poiseMult: 1.5,
             dmgMult: 1.49,
@@ -904,6 +926,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 4,
     episodeNum: 16,
     biome: 'celestial_sanctum',
+    stageLayout: 'pillars',
     name: '九幽玄阶',
     subtitle: '绝巅初阶 · 九幽劫雷',
     badge: '九幽天劫',
@@ -977,6 +1000,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 4,
     episodeNum: 18,
     biome: 'celestial_sanctum',
+    stageLayout: 'islands',
     name: '魔将车轮',
     subtitle: '三连首领 · 绝地突围',
     badge: '三波车轮',
@@ -1024,7 +1048,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     subtitle: '双首领同台 · 终局前夜',
     badge: '双 Boss 战',
     isBossStage: true,
-    bossCutscene: false,
+    bossCutscene: true,
     parTimeSec: 160,
     recommendedRealm: '蜀山剑圣',
     hazard: 'abyss',
@@ -1042,6 +1066,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
             x: -4.6,
             z: -5.6,
             name: '九幽左尊 · 噬星',
+            bossArchetype: 'phantom',
             hpMult: 1.44,
             poiseMult: 1.42,
             dmgMult: 1.56,
@@ -1079,7 +1104,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     hazardLabel: '灭世天劫',
     hazardIntervalSec: 3.1,
     hazardDamage: 38,
-    introLine: '九幽剑煞·镇狱天尊：「能连闯十九重剑劫至此，你配见本尊真容！」',
+    introLine: '能连闯十九重剑劫至此，你配见本尊真容！',
     victoryLine: '二十重剑劫全破！九幽天尊伏诛，李逍遥威名震彻蜀山三界！',
     waves: [
       {
@@ -1098,6 +1123,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
             x: 0.0,
             z: -5.2,
             name: '九幽剑煞 · 镇狱天尊',
+            bossArchetype: 'celestial',
             hpMult: 2.26,
             poiseMult: 1.74,
             dmgMult: 1.68,
@@ -1139,7 +1165,7 @@ export const DUNGEON_LIST: DungeonDef[] = [
       parTimeSec: 100,
       recommendedRealm: '筑基剑修',
       hazard: 'none',
-      introLine: '古陵镇墓兽：「擅入蜀山古陵者，留下神兵作祭！」',
+      introLine: '擅入蜀山古陵者，留下神兵作祭！',
       victoryLine: '古陵妖煞尽伏，满地灵宝光柱冲天！',
       waves: [
         {
@@ -1154,7 +1180,7 @@ export const DUNGEON_LIST: DungeonDef[] = [
           label: '镇墓兽降临',
           enemies: [
             { kind: 'elite', x: -4.2, z: -4.2, name: '墓室铁卫', hpMult: 1.51, poiseMult: 1.2, dmgMult: 1.29 },
-            { kind: 'boss', x: 0.5, z: -5.4, name: '古陵镇墓兽', hpMult: 1.69, poiseMult: 1.32, dmgMult: 1.37 },
+            { kind: 'boss', x: 0.5, z: -5.4, name: '古陵镇墓兽', bossArchetype: 'titan', hpMult: 1.69, poiseMult: 1.32, dmgMult: 1.37 },
           ],
         },
       ],
@@ -1186,7 +1212,7 @@ export const DUNGEON_LIST: DungeonDef[] = [
       hazardLabel: '天雷剑阵',
       hazardIntervalSec: 4.0,
       hazardDamage: 28,
-      introLine: '剑冢残魂：「百代剑魄聚此一窟，敢来夺宝者先接我魔剑！」',
+      introLine: '百代剑魄聚此一窟，敢来夺宝者先接我魔剑！',
       victoryLine: '剑冢残魂散尽，玄光紫柱照耀剑台！',
       waves: [
         {
@@ -1201,7 +1227,7 @@ export const DUNGEON_LIST: DungeonDef[] = [
           label: '剑冢主宰',
           enemies: [
             { kind: 'bladesman', x: -4.6, z: -3.5, name: '疾风剑傀', hpMult: 1.74, dmgMult: 1.45, affix: 'swift' },
-            { kind: 'boss', x: 0.0, z: -5.4, name: '剑冢残魂', hpMult: 2.13, poiseMult: 1.54, dmgMult: 1.56, affix: 'storm' },
+            { kind: 'boss', x: 0.0, z: -5.4, name: '剑冢残魂', bossArchetype: 'phantom', hpMult: 2.13, poiseMult: 1.54, dmgMult: 1.56, affix: 'storm' },
           ],
         },
       ],
@@ -1233,7 +1259,7 @@ export const DUNGEON_LIST: DungeonDef[] = [
       hazardLabel: '灭世天劫',
       hazardIntervalSec: 3.3,
       hazardDamage: 35,
-      introLine: '九幽魔尊：「区区凡胎也敢窥伺太初仙兵？入本尊魔殿者有去无回！」',
+      introLine: '区区凡胎也敢窥伺太初仙兵？入本尊魔殿者有去无回！',
       victoryLine: '九幽魔尊伏诛！金色传奇光柱直贯九霄！',
       waves: [
         {
@@ -1249,7 +1275,7 @@ export const DUNGEON_LIST: DungeonDef[] = [
           label: '九幽魔尊亲临',
           enemies: [
             { kind: 'elite', x: -4.8, z: -4.8, name: '魔尊护法', hpMult: 2.03, poiseMult: 1.2, dmgMult: 1.61, affix: 'swift' },
-            { kind: 'boss', x: 0.0, z: -5.4, name: '九幽魔尊', hpMult: 2.64, poiseMult: 1.7, dmgMult: 1.77, affix: 'storm', scaleMult: 1.06 },
+            { kind: 'boss', x: 0.0, z: -5.4, name: '九幽魔尊', bossArchetype: 'inferno', hpMult: 2.64, poiseMult: 1.7, dmgMult: 1.77, affix: 'storm', scaleMult: 1.06 },
           ],
         },
       ],
@@ -1662,7 +1688,12 @@ export function getStageDialogueForStage(stage: StageDef, includeElder = false):
   const chapter = getChapterDef(stage.chapter);
   const elderBrief = CHAPTER_ELDER_BRIEF[stage.chapter];
   const allEnemies = stage.waves.flatMap((w) => w.enemies);
-  const bossOrLead = [...allEnemies].reverse().find((e) => e.name)?.name ?? (stage.isBossStage ? '镇狱妖王' : '山门妖将');
+  const leadSpec =
+    [...allEnemies].reverse().find((e) => e.kind === 'boss' && e.name) ??
+    [...allEnemies].reverse().find((e) => e.kind === 'elite' && e.name) ??
+    [...allEnemies].reverse().find((e) => e.kind === 'caster' && e.name) ??
+    [...allEnemies].reverse().find((e) => e.name);
+  const bossOrLead = leadSpec?.name ?? (stage.isBossStage ? '镇狱妖王' : '山门妖将');
   const affixes = Array.from(new Set(allEnemies.map((e) => e.affix).filter(Boolean))) as EnemyAffix[];
   const affixLabels = affixes.map((a) => AFFIX_META[a].label);
   const isDungeon = stage.id > 100;
@@ -1671,13 +1702,6 @@ export function getStageDialogueForStage(stage: StageDef, includeElder = false):
     ? `秘境外传 · ${stage.badge}`
     : `${VOLUME_LABELS[stage.chapter]}第 ${stage.episodeNum} 集`;
   const tvTitle = EPISODE_DRAMA_TITLES[stage.id] ?? `第 ${stage.episodeNum} 集 · ${stage.name}`;
-
-  const enemyLine = stage.introLine;
-  const heroReply = stage.isBossStage
-    ? `「${bossOrLead}，少废话！今日我李逍遥便以七星剑魄斩你于${biomeLabel}之上！」`
-    : stage.waves.length >= 2
-      ? `「妖气虽盛，不过土鸡瓦狗！待我连破这 ${stage.waves.length} 阵妖兵，再取灵石锻剑！」`
-      : `「既已至此，便让我试一试蜀山真传剑招！」`;
 
   const intel: string[] = [
     `地界：${biomeLabel}`,
@@ -1688,6 +1712,29 @@ export function getStageDialogueForStage(stage: StageDef, includeElder = false):
   if (affixLabels.length > 0) {
     intel.push(`妖邪词缀：${affixLabels.join(' / ')}`);
   }
+
+  const scripted = EPISODE_STORY_SCRIPTS[stage.id];
+  if (scripted) {
+    return {
+      stageId: stage.id,
+      mode: 'preStage',
+      episodeTag,
+      biomeLabel,
+      kicker: `${episodeTag} · ${biomeLabel}`,
+      title: `${tvTitle} — ${stage.subtitle}`,
+      chapterName: isDungeon ? '蜀山秘境' : `${chapter.roman} ${chapter.name}`,
+      intel,
+      lines: scripted.lines.map((l) => ({ ...l })),
+      choices: scripted.choices.map((c) => ({ ...c })),
+    };
+  }
+
+  const enemyLine = stage.introLine;
+  const heroReply = stage.isBossStage
+    ? `「${bossOrLead}，少废话！今日我李逍遥便以七星剑魄斩你于${biomeLabel}之上！」`
+    : stage.waves.length >= 2
+      ? `「妖气虽盛，不过土鸡瓦狗！待我连破这 ${stage.waves.length} 阵妖兵，再取灵石锻剑！」`
+      : `「既已至此，便让我试一试蜀山真传剑招！」`;
 
   const lines: StageDialogueLine[] = [];
   if (includeElder) {
@@ -1715,6 +1762,7 @@ export function getStageDialogueForStage(stage: StageDef, includeElder = false):
 
   return {
     stageId: stage.id,
+    mode: 'preStage',
     episodeTag,
     biomeLabel,
     kicker: `${episodeTag} · ${biomeLabel}`,
@@ -1834,6 +1882,16 @@ export class CampaignSaveStore {
               : [],
             cultivationLevel,
             activeMealId,
+            worldWaypoints: Array.isArray(parsed.worldWaypoints)
+              ? parsed.worldWaypoints.filter((id): id is string => typeof id === 'string')
+              : [],
+            worldChests: Array.isArray(parsed.worldChests)
+              ? parsed.worldChests.filter((id): id is string => typeof id === 'string')
+              : [],
+            worldBossKills:
+              parsed.worldBossKills && typeof parsed.worldBossKills === 'object'
+                ? (parsed.worldBossKills as Record<string, number>)
+                : {},
           };
         }
       }
@@ -1841,7 +1899,7 @@ export class CampaignSaveStore {
       // ignore storage failure in private mode
     }
     return {
-      version: 4,
+      version: 5,
       cleared: {},
       lastPlayedStage: 1,
       jade: DEFAULT_STARTER_JADE,
@@ -1855,6 +1913,9 @@ export class CampaignSaveStore {
       claimedBounties: [],
       cultivationLevel: 0,
       activeMealId: null,
+      worldWaypoints: [],
+      worldChests: [],
+      worldBossKills: {},
     };
   }
 
@@ -2223,5 +2284,42 @@ export class CampaignSaveStore {
     this.data.activeMealId = null;
     this.persist();
     return meal;
+  }
+
+  isWorldWaypointLit(id: string): boolean {
+    return (this.data.worldWaypoints ?? []).includes(id);
+  }
+
+  unlockWorldWaypoint(id: string): boolean {
+    if (!this.data.worldWaypoints) this.data.worldWaypoints = [];
+    if (this.data.worldWaypoints.includes(id)) return false;
+    this.data.worldWaypoints.push(id);
+    this.persist();
+    return true;
+  }
+
+  isWorldChestOpened(id: string): boolean {
+    return (this.data.worldChests ?? []).includes(id);
+  }
+
+  openWorldChest(id: string): boolean {
+    if (!this.data.worldChests) this.data.worldChests = [];
+    if (this.data.worldChests.includes(id)) return false;
+    this.data.worldChests.push(id);
+    this.persist();
+    return true;
+  }
+
+  recordWorldBossKill(bossId: string): void {
+    if (!this.data.worldBossKills) this.data.worldBossKills = {};
+    this.data.worldBossKills[bossId] = (this.data.worldBossKills[bossId] ?? 0) + 1;
+    this.persist();
+  }
+
+  getWorldProgress(): { waypoints: number; chests: number; bosses: number } {
+    const waypoints = (this.data.worldWaypoints ?? []).length;
+    const chests = (this.data.worldChests ?? []).length;
+    const bosses = Object.keys(this.data.worldBossKills ?? {}).length;
+    return { waypoints, chests, bosses };
   }
 }

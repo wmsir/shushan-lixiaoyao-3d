@@ -24,6 +24,8 @@ import {
   getSwordRealm,
 } from '../game/CampaignData';
 import type { WorldBiome } from '../world/ShushanArena';
+import type { MountMode } from '../entities/MountRig';
+import { WORLD_BOUND, WORLD_WAYPOINTS } from '../game/OpenWorldData';
 import {
   CATEGORY_LABELS,
   type EquipCategory,
@@ -45,6 +47,7 @@ import { APP_VERSION } from '../version';
 export type ScreenMode =
   | 'title'
   | 'camp'
+  | 'world'
   | 'dialogue'
   | 'playing'
   | 'cutscene'
@@ -63,6 +66,10 @@ export interface MinimapEntityDot {
 
 export interface HudTacticalState {
   corridorMode: boolean;
+  openWorldMode?: boolean;
+  mountMode?: MountMode;
+  worldWaypoints?: Array<{ x: number; z: number; lit: boolean }>;
+  worldChests?: Array<{ x: number; z: number; opened: boolean }>;
   biome?: WorldBiome;
   heroX: number;
   heroZ: number;
@@ -83,11 +90,19 @@ export interface HudTacticalState {
 export interface HudCallbacks {
   onStart: (stageId: number) => void;
   onConfirmDialogue: (choiceId?: string) => void;
+  onDialogueChoiceSelect?: (choiceId: string) => void;
   onEnterCamp: () => void;
+  onEnterOpenWorld?: () => void;
+  onToggleMount?: (mode: Exclude<MountMode, 'none'>) => void;
+  onWorldInteract?: () => void;
+  onWorldTeleport?: (waypointId: string) => void;
+  onWorldRespawnBosses?: () => void;
+  onCampInteract?: () => void;
   onLeaveCampToEpisode: (stageId: number) => void;
   onCampCultivate: () => { ok: boolean; level: number; reason: string };
   onCampSelectMeal: (mealId: string) => { ok: boolean; reason: string };
   onNextStage: (nextStageId: number, selectedBlessingId?: string) => void;
+  onReplayEpilogue?: () => void;
   onRetry: () => void;
   onBackToTitle: () => void;
   onToggleMute: () => boolean;
@@ -292,9 +307,14 @@ export class HudController {
   private readonly dlgIntel = this.q('#dlg-intel');
   private readonly dlgLines = this.q('#dlg-lines');
   private readonly dlgChoices = this.q('#dlg-choices');
+  private readonly dlgTip = this.q('#dlg-tip');
+  private readonly dlgConfirmBtn = this.q('#btn-dialogue-confirm');
 
   // Walkable Camp HUD elements
   private readonly campHud = this.q('#camp-hud');
+  private readonly campNpcLabels = this.q('#camp-npc-labels');
+  private readonly campInteractBtn = this.q('#btn-camp-interact');
+  private readonly campInteractLabel = this.q('#camp-interact-label');
   private readonly campRealmPill = this.q('#camp-realm-pill');
   private readonly campJadePill = this.q('#camp-jade-pill');
   private readonly campMealBadge = this.q('#camp-meal-badge');
@@ -313,6 +333,19 @@ export class HudController {
   private readonly campCultivateBtn = this.q('#btn-camp-cultivate') as HTMLButtonElement;
   private readonly campMealList = this.q('#camp-meal-list');
 
+  // Mount bar & Open World HUD elements
+  private readonly mountHorseBtn = this.q('#btn-mount-horse');
+  private readonly mountSwordBtn = this.q('#btn-mount-sword');
+  private readonly worldHud = this.q('#world-hud');
+  private readonly worldRegionName = this.q('#world-region-name');
+  private readonly worldProgressPill = this.q('#world-progress-pill');
+  private readonly worldToastEl = this.q('#world-toast');
+  private readonly worldTpDrawer = this.q('#world-tp-drawer');
+  private readonly worldTpList = this.q('#world-tp-list');
+  private readonly worldInteractBtn = this.q('#btn-world-interact');
+  private readonly worldInteractLabel = this.q('#world-interact-label');
+  private worldToastTimer: number | null = null;
+
   private readonly mapRealmPill = this.q('#map-realm-pill');
   private readonly mapRealmBuff = this.q('#map-realm-buff');
   private readonly mapStarsPill = this.q('#map-stars-pill');
@@ -326,7 +359,9 @@ export class HudController {
   // Result modal elements
   private readonly resultModalCard = this.q('#result-modal-card');
   private readonly resultStageTag = this.q('#result-stage-tag');
+  private readonly resultEpilogueBtn = this.q('#btn-result-epilogue');
   private readonly resultTitle = this.q('#result-title');
+  private readonly resultStoryLine = this.q('#result-story-line');
   private readonly resultStarsRow = this.q('#result-stars-row');
   private readonly resultJadeGain = this.q('#result-jade-gain');
   private readonly resultStats = this.q('#result-stats');
@@ -392,7 +427,20 @@ export class HudController {
     }
 
     this.startBtn.addEventListener('click', () => this.callbacks.onStart(this.selectedStage));
+    this.q('#btn-open-world').addEventListener('click', () => this.callbacks.onEnterOpenWorld?.());
     this.q('#btn-open-camp').addEventListener('click', () => this.callbacks.onEnterCamp());
+    this.q('#btn-camp-world').addEventListener('click', () => this.callbacks.onEnterOpenWorld?.());
+    this.mountHorseBtn.addEventListener('click', () => this.callbacks.onToggleMount?.('horse'));
+    this.mountSwordBtn.addEventListener('click', () => this.callbacks.onToggleMount?.('sword'));
+    this.q('#btn-world-tp').addEventListener('click', () => {
+      this.renderWorldTeleportList();
+      this.worldTpDrawer.classList.toggle('visible');
+    });
+    this.q('#btn-world-respawn').addEventListener('click', () => this.callbacks.onWorldRespawnBosses?.());
+    this.q('#btn-world-shop').addEventListener('click', () => this.openShop());
+    this.q('#btn-world-camp').addEventListener('click', () => this.callbacks.onEnterCamp());
+    this.q('#btn-world-title').addEventListener('click', () => this.callbacks.onBackToTitle());
+    this.worldInteractBtn.addEventListener('click', () => this.callbacks.onWorldInteract?.());
     this.q('#btn-open-dungeon').addEventListener('click', () => this.openDungeon());
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
     this.q('#btn-open-shop').addEventListener('click', () => this.openShop());
@@ -410,6 +458,8 @@ export class HudController {
     this.q('#btn-dialogue-confirm').addEventListener('click', () =>
       this.callbacks.onConfirmDialogue(this.selectedDialogueChoiceId),
     );
+    this.campInteractBtn.addEventListener('click', () => this.callbacks.onCampInteract?.());
+    this.resultEpilogueBtn.addEventListener('click', () => this.callbacks.onReplayEpilogue?.());
     this.q('#btn-camp-title').addEventListener('click', () => this.callbacks.onBackToTitle());
     this.q('#btn-camp-shop').addEventListener('click', () => this.openShop());
     this.campDepartBtn.addEventListener('click', () => this.callbacks.onLeaveCampToEpisode(this.selectedStage));
@@ -496,6 +546,37 @@ export class HudController {
       ) {
         e.preventDefault();
         this.callbacks.onConfirmDialogue(this.selectedDialogueChoiceId);
+      } else if (
+        this.currentScreenMode === 'camp' &&
+        !this.campaignOverlay.classList.contains('visible') &&
+        !this.shopOverlay.classList.contains('visible') &&
+        !this.dungeonOverlay.classList.contains('visible') &&
+        e.code === 'KeyG'
+      ) {
+        e.preventDefault();
+        this.callbacks.onCampInteract?.();
+      } else if (
+        this.currentScreenMode === 'world' &&
+        !this.campaignOverlay.classList.contains('visible') &&
+        !this.shopOverlay.classList.contains('visible') &&
+        !this.dungeonOverlay.classList.contains('visible') &&
+        e.code === 'KeyG'
+      ) {
+        e.preventDefault();
+        this.callbacks.onWorldInteract?.();
+      } else if (
+        (this.currentScreenMode === 'playing' || this.currentScreenMode === 'camp' || this.currentScreenMode === 'world') &&
+        !this.campaignOverlay.classList.contains('visible') &&
+        !this.shopOverlay.classList.contains('visible') &&
+        !this.dungeonOverlay.classList.contains('visible')
+      ) {
+        if (e.code === 'KeyV') {
+          e.preventDefault();
+          this.callbacks.onToggleMount?.('horse');
+        } else if (e.code === 'KeyB') {
+          e.preventDefault();
+          this.callbacks.onToggleMount?.('sword');
+        }
       }
     });
 
@@ -672,7 +753,7 @@ export class HudController {
     }
   }
 
-  private setCampTab(tab: 'cultivate' | 'meal'): void {
+  setCampTab(tab: 'cultivate' | 'meal'): void {
     this.campTabCultivateBtn.classList.toggle('active', tab === 'cultivate');
     this.campTabMealBtn.classList.toggle('active', tab === 'meal');
     this.campTabCultivateBody.classList.toggle('active', tab === 'cultivate');
@@ -689,7 +770,7 @@ export class HudController {
     this.showCampToast(text, false);
   }
 
-  private showCampToast(text: string, ok: boolean): void {
+  showCampToast(text: string, ok: boolean): void {
     this.campToastEl.textContent = text;
     this.campToastEl.classList.toggle('err', !ok);
     this.campToastEl.classList.add('visible');
@@ -772,13 +853,13 @@ export class HudController {
   }
 
   showStageDialogue(dlg: StageDialogueDef): void {
-    this.dlgKicker.textContent = `${dlg.episodeTag} · ${dlg.biomeLabel}`;
+    this.dlgKicker.textContent = dlg.kicker || `${dlg.episodeTag} · ${dlg.biomeLabel}`;
     this.dlgTitle.textContent = dlg.title;
     this.dlgIntel.innerHTML = dlg.intel.map((t) => `<span class="dlg-chip">${t}</span>`).join('');
     this.dlgLines.innerHTML = dlg.lines
       .map(
-        (line) => `
-      <div class="dlg-line role-${line.role}">
+        (line, idx) => `
+      <div class="dlg-line role-${line.role}" style="--line-idx:${idx}">
         <span class="dlg-seal">${line.seal}</span>
         <div class="dlg-bubble">
           <div class="dlg-speaker">${line.speaker}</div>
@@ -791,16 +872,41 @@ export class HudController {
     const choices: EpisodeChoiceDef[] = dlg.choices ?? [];
     this.selectedDialogueChoiceId = choices[0]?.id;
     this.dlgChoices.innerHTML = '';
+    this.dlgChoices.style.display = choices.length > 0 ? 'grid' : 'none';
+    this.dlgTip.textContent = dlg.tipText ?? '阅毕战前秘报，点击确认即刻入阵对决';
+    this.dlgConfirmBtn.textContent = dlg.confirmLabel ?? '确定 · 拔剑开战';
+
+    const syncHeroChoiceReply = (choice: EpisodeChoiceDef | undefined, animate: boolean) => {
+      if (!choice?.heroReply) return;
+      const heroLines = this.dlgLines.querySelectorAll<HTMLElement>('.dlg-line.role-hero');
+      const targetLine = heroLines.length > 0 ? heroLines[heroLines.length - 1] : null;
+      const txtEl = targetLine?.querySelector<HTMLElement>('.dlg-text');
+      if (targetLine && txtEl) {
+        txtEl.textContent = choice.heroReply;
+        if (animate) {
+          targetLine.classList.remove('dlg-line-flash');
+          void targetLine.offsetWidth;
+          targetLine.classList.add('dlg-line-flash');
+        }
+      }
+    };
+
+    if (choices.length > 0) {
+      syncHeroChoiceReply(choices[0], false);
+    }
+
     choices.forEach((choice, idx) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `dlg-choice-card${idx === 0 ? ' active' : ''}`;
       btn.dataset.choiceId = choice.id;
+      const hintHtml = choice.storyHint ? `<div class="dlg-choice-hint">${choice.storyHint}</div>` : '';
       btn.innerHTML = `
         <div class="dlg-choice-top">
           <span class="dlg-choice-tag">${idx === 0 ? '抉择 · 甲' : '抉择 · 乙'}</span>
           <strong class="dlg-choice-title">${choice.title}</strong>
         </div>
+        ${hintHtml}
         <div class="dlg-choice-sub">${choice.subtitle}</div>
       `;
       btn.addEventListener('click', () => {
@@ -809,11 +915,35 @@ export class HudController {
           sib.classList.remove('active');
         }
         btn.classList.add('active');
+        syncHeroChoiceReply(choice, true);
+        this.callbacks.onDialogueChoiceSelect?.(choice.id);
       });
       this.dlgChoices.appendChild(btn);
     });
 
     this.setMode('dialogue');
+  }
+
+  setCampInteractPrompt(label: string | null): void {
+    if (!label) {
+      this.campInteractBtn.classList.remove('visible');
+      return;
+    }
+    this.campInteractLabel.textContent = label;
+    this.campInteractBtn.classList.add('visible');
+  }
+
+  updateCampNpcLabels(items: Array<{ label: string; x: number; y: number; ally?: boolean }>): void {
+    if (items.length === 0) {
+      if (this.campNpcLabels.childElementCount > 0) this.campNpcLabels.innerHTML = '';
+      return;
+    }
+    this.campNpcLabels.innerHTML = items
+      .map(
+        (it) =>
+          `<span class="camp-npc-tag${it.ally ? ' ally' : ''}" style="left:${it.x.toFixed(1)}px;top:${it.y.toFixed(1)}px">${it.label}</span>`,
+      )
+      .join('');
   }
 
   private renderShopModal(): void {
@@ -1249,19 +1379,30 @@ export class HudController {
   setMode(mode: ScreenMode): void {
     this.currentScreenMode = mode;
     this.appRoot.classList.toggle('camp-mode', mode === 'camp');
+    this.appRoot.classList.toggle('world-mode', mode === 'world');
     this.titleOverlay.classList.toggle('visible', mode === 'title');
     this.campHud.classList.toggle('visible', mode === 'camp');
+    this.worldHud.classList.toggle('visible', mode === 'world');
     this.dialogueOverlay.classList.toggle('visible', mode === 'dialogue');
     if (mode !== 'title') this.campaignOverlay.classList.remove('visible');
     if (mode === 'playing' || mode === 'cutscene' || mode === 'dialogue') {
       this.shopOverlay.classList.remove('visible');
       this.dungeonOverlay.classList.remove('visible');
     }
-    const playableHud = mode === 'playing' || mode === 'camp';
+    const playableHud = mode === 'playing' || mode === 'camp' || mode === 'world';
     this.hudRoot.classList.toggle('visible', playableHud);
     this.touchRoot.classList.toggle('visible', playableHud);
     this.pauseOverlay.classList.toggle('visible', mode === 'paused');
     this.resultOverlay.classList.toggle('visible', mode === 'victory' || mode === 'defeat');
+
+    if (mode !== 'camp') {
+      this.setCampInteractPrompt(null);
+      this.updateCampNpcLabels([]);
+    }
+    if (mode !== 'world') {
+      this.setWorldInteractPrompt(null);
+      this.worldTpDrawer.classList.remove('visible');
+    }
 
     if (mode === 'camp') {
       this.renderCampPanel();
@@ -1269,7 +1410,7 @@ export class HudController {
       this.touchDodgeBtn.classList.remove('action-hint-dodge');
       this.touchBlockBtn.classList.remove('action-hint-parry');
       this.minimapBox.classList.remove('visible');
-    } else if (mode !== 'playing') {
+    } else if (mode !== 'playing' && mode !== 'world') {
       this.dangerWarning.classList.remove('visible');
       this.touchDodgeBtn.classList.remove('action-hint-dodge');
       this.touchBlockBtn.classList.remove('action-hint-parry');
@@ -1357,6 +1498,12 @@ export class HudController {
             ? `第 ${stageDef?.id ?? ''} 关 凯 旋`
             : '身 陨 剑 台');
     this.resultTitle.className = victory ? 'result-title win' : 'result-title lose';
+    this.resultStoryLine.textContent =
+      opts?.customSub ??
+      (victory
+        ? stageDef?.victoryLine ?? ''
+        : '剑心未泯，暂返云来剑庐吐纳温酒，重整旗鼓再破妖阵。');
+    this.resultEpilogueBtn.style.display = isFinalWin ? 'inline-flex' : 'none';
 
     // 3-Star Seal Display
     if (victory && opts?.starResult) {
@@ -1559,7 +1706,17 @@ export class HudController {
         ? `万剑归宗 ${tactical.comboUltTimer.toFixed(1)}s`
         : '万剑归宗';
 
-    if (tactical?.corridorMode) {
+    if (tactical?.mountMode !== undefined) {
+      this.mountHorseBtn.classList.toggle('active', tactical.mountMode === 'horse');
+      this.mountSwordBtn.classList.toggle('active', tactical.mountMode === 'sword');
+    }
+
+    if (tactical?.openWorldMode) {
+      this.minimapBox.classList.add('visible');
+      this.minimapZoneName.textContent = tactical.zoneName;
+      this.minimapPct.textContent = '九州';
+      this.drawOpenWorldMinimap(tactical);
+    } else if (tactical?.corridorMode) {
       this.minimapBox.classList.add('visible');
       this.minimapZoneName.textContent = tactical.zoneName;
       this.minimapPct.textContent = `${Math.round(clamp(tactical.progressPct, 0, 100))}%`;
@@ -1721,6 +1878,117 @@ export class HudController {
 
     // 3. Entity Dots & Hero Directional Arrow
     this.drawMinimapEntities(ctx, tactical.dots, toX, toY, now);
+    this.drawMinimapHeroArrow(ctx, toX(tactical.heroX), toY(tactical.heroZ), tactical.heroYaw);
+  }
+
+  setWorldStatus(regionName: string, waypoints: number, chests: number, bosses: number): void {
+    this.worldRegionName.textContent = regionName;
+    this.worldProgressPill.textContent = `锚点 ${waypoints}/4 · 宝箱 ${chests}/6 · 首领 ${bosses}/4`;
+  }
+
+  setWorldInteractPrompt(label: string | null): void {
+    if (!label) {
+      this.worldInteractBtn.classList.remove('visible');
+      return;
+    }
+    this.worldInteractLabel.textContent = label;
+    this.worldInteractBtn.classList.add('visible');
+  }
+
+  showWorldToast(text: string, ok = true): void {
+    this.worldToastEl.textContent = text;
+    this.worldToastEl.classList.toggle('err', !ok);
+    this.worldToastEl.classList.add('visible');
+    if (this.worldToastTimer !== null) window.clearTimeout(this.worldToastTimer);
+    this.worldToastTimer = window.setTimeout(() => {
+      this.worldToastEl.classList.remove('visible');
+      this.worldToastTimer = null;
+    }, 2600);
+  }
+
+  renderWorldTeleportList(): void {
+    const store = this.saveStore;
+    const items: Array<{ id: string; name: string; sub: string; lit: boolean }> = [
+      { id: 'wp_center', name: '蜀山云台主阵', sub: '中枢起始点', lit: true },
+      ...WORLD_WAYPOINTS.map((wp) => ({
+        id: wp.id,
+        name: wp.name,
+        sub: wp.regionName,
+        lit: store ? store.isWorldWaypointLit(wp.id) : false,
+      })),
+    ];
+    this.worldTpList.innerHTML = '';
+    for (const item of items) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `world-tp-item${item.lit ? '' : ' locked'}`;
+      btn.disabled = !item.lit;
+      btn.innerHTML = `<span>${item.name}</span><span>${item.lit ? '传送 →' : '未点亮'}</span>`;
+      btn.addEventListener('click', () => {
+        if (!item.lit) return;
+        this.worldTpDrawer.classList.remove('visible');
+        this.callbacks.onWorldTeleport?.(item.id);
+      });
+      this.worldTpList.appendChild(btn);
+    }
+  }
+
+  private drawOpenWorldMinimap(tactical: HudTacticalState): void {
+    const ctx = this.minimapCtx;
+    if (!ctx) return;
+    const w = this.minimapCanvas.width;
+    const h = this.minimapCanvas.height;
+    const pad = 10;
+    const mapSize = Math.min(w, h) - pad * 2;
+    const ox = (w - mapSize) * 0.5;
+    const oy = (h - mapSize) * 0.5;
+    const toX = (x: number): number => ox + ((clamp(x, -WORLD_BOUND, WORLD_BOUND) + WORLD_BOUND) / (WORLD_BOUND * 2)) * mapSize;
+    const toY = (z: number): number => oy + ((clamp(z, -WORLD_BOUND, WORLD_BOUND) + WORLD_BOUND) / (WORLD_BOUND * 2)) * mapSize;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#091522';
+    ctx.fillRect(0, 0, w, h);
+
+    // Quadrant biome tints
+    const half = mapSize * 0.5;
+    ctx.fillStyle = 'rgba(42, 128, 108, 0.24)'; // NE Peach
+    ctx.fillRect(ox + half, oy, half, half);
+    ctx.fillStyle = 'rgba(116, 78, 178, 0.24)'; // NW Graveyard
+    ctx.fillRect(ox, oy, half, half);
+    ctx.fillStyle = 'rgba(184, 62, 32, 0.26)'; // SW Lava
+    ctx.fillRect(ox, oy + half, half, half);
+    ctx.fillStyle = 'rgba(56, 136, 198, 0.24)'; // SE Celestial
+    ctx.fillRect(ox + half, oy + half, half, half);
+
+    // Central Shushan Terrace
+    ctx.strokeStyle = 'rgba(124, 240, 224, 0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(ox + half, oy + half, mapSize * 0.14, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Waypoints
+    for (const wp of tactical.worldWaypoints ?? []) {
+      const wx = toX(wp.x);
+      const wy = toY(wp.z);
+      ctx.fillStyle = wp.lit ? '#5cffea' : '#647284';
+      ctx.beginPath();
+      ctx.moveTo(wx, wy - 4);
+      ctx.lineTo(wx + 4, wy);
+      ctx.lineTo(wx, wy + 4);
+      ctx.lineTo(wx - 4, wy);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Unopened Chests
+    for (const ch of tactical.worldChests ?? []) {
+      if (ch.opened) continue;
+      ctx.fillStyle = '#ffd866';
+      ctx.fillRect(toX(ch.x) - 2, toY(ch.z) - 2, 4, 4);
+    }
+
+    this.drawMinimapEntities(ctx, tactical.dots, toX, toY, performance.now());
     this.drawMinimapHeroArrow(ctx, toX(tactical.heroX), toY(tactical.heroZ), tactical.heroYaw);
   }
 

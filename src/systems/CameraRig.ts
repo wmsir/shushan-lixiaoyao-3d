@@ -49,7 +49,7 @@ export class CameraRig {
   }
 
   setZoom(factor: number): void {
-    this.zoomFactor = clamp(factor, 0.92, 1.24);
+    this.zoomFactor = clamp(factor, 0.92, 1.32);
   }
 
   snapTo(heroPos: THREE.Vector3): void {

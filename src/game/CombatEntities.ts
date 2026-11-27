@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CharacterRig, type CharacterArchetype } from '../entities/CharacterRig';
+import { CharacterRig, type BossArchetype, type CharacterArchetype } from '../entities/CharacterRig';
 import type { TelegraphHandle } from '../vfx/VfxSystem';
 
 export type HeroActionState =
@@ -97,13 +97,31 @@ export type EnemyAiState =
   | 'hit'
   | 'dead';
 
-export type EnemyMoveKind = 'cleave' | 'lunge' | 'slam' | 'orb' | 'yinCircle' | 'barrage';
+export type EnemyMoveKind =
+  | 'cleave'
+  | 'lunge'
+  | 'slam'
+  | 'orb'
+  | 'yinCircle'
+  | 'barrage'
+  | 'quakeRing'
+  | 'blinkStrike'
+  | 'swordStorm'
+  | 'lavaEruption'
+  | 'crossBeam'
+  | 'meteorRain';
 
 export interface EnemyEntity {
   id: number;
   kind: Exclude<CharacterArchetype, 'xiaoyao' | 'ally'>;
   name: string;
   affix?: 'swift' | 'vampiric' | 'ironclad' | 'storm';
+  bossArchetype?: BossArchetype;
+  homePos?: THREE.Vector3;
+  worldCampId?: string;
+  worldBossId?: string;
+  aggroRadius?: number;
+  leashRadius?: number;
   speedMult: number;
   damageMult: number;
   rig: CharacterRig;
@@ -307,6 +325,7 @@ export interface EnemyCreateOverrides {
   speedMult?: number;
   scaleMult?: number;
   affix?: 'swift' | 'vampiric' | 'ironclad' | 'storm';
+  bossArchetype?: BossArchetype;
 }
 
 const AFFIX_LABEL: Record<NonNullable<EnemyCreateOverrides['affix']>, string> = {
@@ -324,6 +343,9 @@ export function createEnemy(
   overrides?: EnemyCreateOverrides,
 ): EnemyEntity {
   const rig = new CharacterRig(kind);
+  if (kind === 'boss' && overrides?.bossArchetype) {
+    rig.applyBossArchetype(overrides.bossArchetype);
+  }
   rig.root.position.copy(spawnPos);
   const scaleMult = overrides?.scaleMult ?? 1.0;
   if (Math.abs(scaleMult - 1.0) > 0.01) {
@@ -393,6 +415,7 @@ export function createEnemy(
     kind,
     name,
     affix,
+    bossArchetype: overrides?.bossArchetype,
     speedMult,
     damageMult,
     rig,

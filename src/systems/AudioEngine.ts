@@ -558,6 +558,40 @@ export class AudioEngine {
     this.playChime(now + 0.18, 880, 0.26, 0.55);
   }
 
+  /** Soft pentatonic guzheng harmonic pluck for story dialogue choices & camp NPC chats */
+  playDialogueStep(isChoice = false): void {
+    if (this.muted || !this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+    if (isChoice) {
+      this.playChime(now, 587.33, 0.16, 0.34);
+      this.playChime(now + 0.055, 880, 0.14, 0.42);
+    } else {
+      this.playChime(now, 440, 0.15, 0.32);
+      this.playChime(now + 0.07, 587.33, 0.14, 0.42);
+    }
+  }
+
+  /** Resonant bronze temple bell + deep war-drum sting for Boss entrance cutscenes */
+  playBossAppearSting(): void {
+    if (this.muted || !this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+    this.playChime(now, 293.66, 0.36, 1.35);
+    this.playChime(now + 0.06, 440, 0.26, 1.15);
+    this.playChime(now + 0.14, 587.33, 0.22, 1.0);
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(118, now);
+    osc.frequency.exponentialRampToValueAtTime(34, now + 0.85);
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.55, now + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.92);
+    osc.connect(g);
+    g.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.96);
+  }
+
   playDropChime(rarity: 'heal' | 'spirit' | 'gourd'): void {
     if (this.muted || !this.ctx || !this.sfxGain) return;
     const now = this.ctx.currentTime;

@@ -4,7 +4,7 @@ import { RenderPipeline } from '../core/RenderPipeline';
 import { triggerHaptic } from '../core/NativeBridge';
 import { ShushanArena, type WorldBiome } from '../world/ShushanArena';
 import { VfxSystem } from '../vfx/VfxSystem';
-import { AudioEngine } from '../systems/AudioEngine';
+import { AudioEngine, type HeroVoiceKind } from '../systems/AudioEngine';
 import { CameraRig } from '../systems/CameraRig';
 import {
   HudController,
@@ -69,7 +69,28 @@ import {
 } from '../net/MultiplayerClient';
 import { angleDiff, clamp, damp, dampAngle } from '../utils/math';
 import { createSeededRandom } from '../utils/random';
-import type { PoseName } from '../entities/CharacterRig';
+import { CharacterRig, type PoseName } from '../entities/CharacterRig';
+import { MountRig, type MountMode } from '../entities/MountRig';
+import {
+  getWorldRegionAt,
+  WORLD_BOSS_SPAWNS,
+  WORLD_CHESTS,
+  WORLD_MOB_CAMPS,
+  WORLD_SPAWN_POS,
+  WORLD_WAYPOINTS,
+  type WorldBossDef,
+  type WorldMobCampDef,
+} from './OpenWorldData';
+import {
+  CAMP_MEDITATION_QUOTES,
+  CAMP_TEA_QUOTES,
+  EPISODE_STORY_SCRIPTS,
+  STAGE_20_EPILOGUE,
+  getBossCutsceneTaunt,
+  getBossEnrageLine,
+  getWineMasterCampDialogue,
+  getXuanyingCampDialogue,
+} from './StoryScripts';
 
 type StagePhase = 'combat' | 'waveTransition' | 'bossTransition' | 'done';
 
@@ -148,9 +169,31 @@ export class Game {
   private corridorMode = false;
   private healingShrineCollected = false;
   private activeDialogueDef: StageDialogueDef | null = null;
+  private dialogueContext: 'preStage' | 'campNpc' | 'epilogue' = 'preStage';
+  private pendingEpilogueResultOpts: ResultDisplayOptions | null = null;
+  private lastEpilogueResultOpts: ResultDisplayOptions | null = null;
+  private campNpcGroup: THREE.Group | null = null;
+  private campNpcWineMaster: { rig: CharacterRig; pos: THREE.Vector3; yaw: number; label: string; drinkCycle: number } | null = null;
+  private campNpcXuanying: { rig: CharacterRig; pos: THREE.Vector3; yaw: number; label: string; sparTimer: number } | null = null;
+  private activeCampHotspot: 'wine' | 'ally' | 'mat' | 'tea' | null = null;
+  private campDialogueFocusPos: THREE.Vector3 | null = null;
+  private campMeditationIdx = 0;
+  private campTeaIdx = 0;
+  private storySubtitleUntil = 0;
+  private lastVoiceSubtitleAt = -999;
   private activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
   private episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
   private moonKeyLight: THREE.DirectionalLight | null = null;
+
+  private readonly mountRig = new MountRig();
+  private mountMode: MountMode = 'none';
+  private mountDashTimer = 0;
+  private mountWindTimer = 0;
+  private worldMobTimers = new Map<string, number>();
+  private worldBossTimers = new Map<string, number>();
+  private worldLastRegionId = '';
+  private activeWorldInteract: { kind: 'waypoint' | 'chest'; id: string; label: string } | null = null;
+  private worldLavaBurnTimer = 0;
 
   private frame = 0;
   private elapsed = 0;
@@ -220,6 +263,7 @@ export class Game {
     this.hero.rig.root.position.copy(this.hero.pos);
     this.hero.rig.root.rotation.y = this.hero.yaw;
     this.scene.add(this.hero.rig.root);
+    this.scene.add(this.mountRig.root);
     this.applyCurrentLoadoutVisuals();
 
     this.mp = new MultiplayerClient({
@@ -304,8 +348,30 @@ export class Game {
       onConfirmDialogue: (choiceId?: string) => {
         this.confirmStageDialogue(choiceId);
       },
+      onDialogueChoiceSelect: () => {
+        this.audio.unlock();
+        this.audio.playDialogueStep(true);
+      },
       onEnterCamp: () => {
         this.enterCampMode();
+      },
+      onEnterOpenWorld: () => {
+        this.enterOpenWorldMode();
+      },
+      onToggleMount: (mode) => {
+        this.toggleMount(mode);
+      },
+      onWorldInteract: () => {
+        this.triggerWorldInteract();
+      },
+      onWorldTeleport: (waypointId) => {
+        this.teleportToWorldWaypoint(waypointId);
+      },
+      onWorldRespawnBosses: () => {
+        this.respawnAllWorldBosses();
+      },
+      onCampInteract: () => {
+        this.triggerCampHotspotInteract();
       },
       onLeaveCampToEpisode: (stageId: number) => {
         this.mp.leave();
@@ -346,6 +412,15 @@ export class Game {
           }
         }
         this.startNewRun(false, nextStageId, true, false);
+      },
+      onReplayEpilogue: () => {
+        if (!this.lastEpilogueResultOpts) return;
+        this.pendingEpilogueResultOpts = this.lastEpilogueResultOpts;
+        this.dialogueContext = 'epilogue';
+        this.activeDialogueDef = STAGE_20_EPILOGUE;
+        this.mode = 'dialogue';
+        this.audio.playDialogueStep(false);
+        this.hud.showStageDialogue(STAGE_20_EPILOGUE);
       },
       onRetry: () => {
         if (this.mp.mode !== 'offline' && this.mp.peerConnected && this.peer) {
@@ -661,12 +736,19 @@ export class Game {
   }
 
   private enterTitleMode(): void {
+    this.setMountMode('none', true);
+    this.worldMobTimers.clear();
+    this.worldBossTimers.clear();
+    this.activeWorldInteract = null;
     this.clearCombatEntities();
+    this.setCampNpcsVisible(false);
     this.activeDungeon = null;
     this.stageDroppedGear = [];
     this.corridorMode = false;
     this.healingShrineCollected = false;
     this.activeDialogueDef = null;
+    this.dialogueContext = 'preStage';
+    this.campDialogueFocusPos = null;
     this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
     this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
     this.arena.setArenaLayout('arena', 0);
@@ -688,7 +770,9 @@ export class Game {
   }
 
   private enterShowcaseMode(): void {
+    this.setMountMode('none', true);
     this.clearCombatEntities();
+    this.setCampNpcsVisible(false);
     this.corridorMode = false;
     this.healingShrineCollected = false;
     this.arena.setArenaLayout('arena', 0);
@@ -711,6 +795,10 @@ export class Game {
 
   enterCampMode(): void {
     this.audio.unlock();
+    this.setMountMode('none', true);
+    this.worldMobTimers.clear();
+    this.worldBossTimers.clear();
+    this.activeWorldInteract = null;
     this.mp.leave();
     this.clearPeerHero();
     this.hud.setMpHudBadge('');
@@ -721,6 +809,9 @@ export class Game {
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
     this.activeDialogueDef = null;
+    this.dialogueContext = 'preStage';
+    this.campDialogueFocusPos = null;
+    this.activeCampHotspot = null;
     this.pendingCutsceneAfterDialogue = false;
     this.corridorMode = false;
     this.healingShrineCollected = false;
@@ -732,6 +823,8 @@ export class Game {
     this.arena.setHealingShrineUsed(false);
     this.applyBiomeAtmosphere('haven_camp');
     this.targetRingMesh.visible = false;
+    this.ensureCampNpcs();
+    this.setCampNpcsVisible(true);
 
     this.resetHero(new THREE.Vector3(0, 0, 5.4), Math.PI);
     this.applyCurrentLoadoutVisuals();
@@ -745,7 +838,360 @@ export class Game {
     this.hud.setMode('camp');
     this.audio.setMood('title');
     this.cameraRig.snapTo(this.hero.pos);
+    this.updateCampNpcs(0.016);
+    this.showStorySubtitle('云来剑庐：可走近师尊酒剑仙、玄影师兄、蒲团或篝火茶席互动（按 G 键）', 3.4);
     this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, 'none', this.buildTacticalState());
+  }
+
+  private toggleMount(mode: Exclude<MountMode, 'none'>): void {
+    if (this.mp.mode !== 'offline') {
+      this.hud.showSubtitle('联机比武模式下暂不可召唤坐骑/御剑', 2.0);
+      return;
+    }
+    if (this.mode !== 'world' && this.mode !== 'camp' && this.mode !== 'playing') return;
+    if (this.hero.state !== 'idle' && this.hero.state !== 'run') return;
+    const next: MountMode = this.mountMode === mode ? 'none' : mode;
+    this.setMountMode(next);
+  }
+
+  private setMountMode(mode: MountMode, silent = false): void {
+    if (this.mountMode === mode && mode === 'none') {
+      this.mountRig.setMode('none');
+      this.hero.rig.root.position.y = 0;
+      this.hero.rig.root.rotation.x = 0;
+      return;
+    }
+    this.mountMode = mode;
+    this.mountDashTimer = 0;
+    this.mountWindTimer = 0;
+    this.mountRig.setMode(mode);
+    this.mountRig.root.position.copy(this.hero.pos);
+    this.mountRig.root.rotation.y = this.hero.yaw;
+
+    if (mode === 'none') {
+      this.hero.rig.root.position.y = 0;
+      this.hero.rig.root.rotation.x = 0;
+      this.cameraRig.setZoom(1.0);
+      if (!silent) {
+        this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(0.55, 1.5, 1.85), 0.25, 1.8, 0.28);
+      }
+      return;
+    }
+
+    this.rmbMoveTarget = null;
+    this.hero.rig.setWeaponDrawn(mode === 'horse');
+    this.cameraRig.setZoom(mode === 'sword' ? 1.18 : 1.08);
+    if (!silent) {
+      this.audio.playDodge(mode === 'sword');
+      triggerHaptic('medium');
+      if (mode === 'sword') {
+        this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(0.45, 2.25, 2.35), 0.35, 3.0, 0.42);
+        this.spawnWorldCallout('御剑凌空!', this.hero.pos.clone().add(new THREE.Vector3(0, 1.4, 0)), 'info');
+      } else {
+        this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(2.2, 1.55, 0.55), 0.35, 2.8, 0.42);
+        this.spawnWorldCallout('铁骑踏阵!', this.hero.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 'info');
+      }
+    }
+  }
+
+  enterOpenWorldMode(): void {
+    this.audio.unlock();
+    this.setMountMode('none', true);
+    this.mp.leave();
+    this.clearPeerHero();
+    this.hud.setMpHudBadge('');
+    this.hud.setMpLobbyStatus('', false, false);
+    this.hud.setHeroName('李逍遥');
+    this.clearCombatEntities();
+    this.setCampNpcsVisible(false);
+    this.activeDungeon = null;
+    this.stageDroppedGear = [];
+    this.blessings = createEmptyBlessings();
+    this.activeDialogueDef = null;
+    this.dialogueContext = 'preStage';
+    this.campDialogueFocusPos = null;
+    this.activeCampHotspot = null;
+    this.pendingCutsceneAfterDialogue = false;
+    this.corridorMode = false;
+    this.healingShrineCollected = false;
+    this.worldMobTimers.clear();
+    this.worldBossTimers.clear();
+    this.worldLastRegionId = 'central_terrace';
+    this.activeWorldInteract = null;
+    this.worldLavaBurnTimer = 0;
+
+    this.arena.setArenaLayout('openworld', 0);
+    this.arena.setBiome('bamboo_canyon');
+    this.arena.setHealingShrineUsed(false);
+    this.applyBiomeAtmosphere('bamboo_canyon');
+    this.targetRingMesh.visible = false;
+
+    for (const wp of WORLD_WAYPOINTS) {
+      this.arena.setWaypointLit(wp.id, this.saveStore.isWorldWaypointLit(wp.id));
+    }
+    for (const ch of WORLD_CHESTS) {
+      this.arena.setChestOpened(ch.id, this.saveStore.isWorldChestOpened(ch.id));
+    }
+
+    this.resetHero(new THREE.Vector3(WORLD_SPAWN_POS.x, 0, WORLD_SPAWN_POS.z), Math.PI);
+    this.applyCurrentLoadoutVisuals();
+    this.hero.rig.setWeaponDrawn(false);
+    this.hero.spirit = this.hero.maxSpirit;
+
+    for (const camp of WORLD_MOB_CAMPS) {
+      this.spawnWorldMobCamp(camp);
+    }
+    for (const wb of WORLD_BOSS_SPAWNS) {
+      this.spawnWorldBoss(wb);
+    }
+
+    this.mode = 'world';
+    this.stagePhase = 'combat';
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    this.hud.setMode('world');
+    this.hud.renderWorldTeleportList();
+    const prog = this.saveStore.getWorldProgress();
+    const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
+    this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses);
+    this.hud.setWorldInteractPrompt(null);
+    this.audio.setMood('skirmish');
+    this.cameraRig.snapTo(this.hero.pos);
+    this.showStorySubtitle('九州仙域已开启：按 V 唤战马、按 B 御剑飞渡，探索四方锚点、玄铁宝箱与野外首领！', 4.0);
+    this.hud.update(this.hero, '九州仙域 · 自由驰骋', null, null, 'none', this.buildTacticalState());
+  }
+
+  private spawnWorldMobCamp(camp: WorldMobCampDef): void {
+    const aliveInCamp = this.enemies.some((e) => e.worldCampId === camp.id && e.aiState !== 'dead');
+    if (aliveInCamp) return;
+    for (const m of camp.mobs) {
+      const e = this.spawnEnemy(m.kind, camp.x + m.dx, camp.z + m.dz, undefined, {
+        name: m.name,
+        hpMult: m.hpMult,
+        dmgMult: m.dmgMult,
+        affix: m.affix,
+      });
+      e.homePos = new THREE.Vector3(camp.x, 0, camp.z);
+      e.worldCampId = camp.id;
+      e.aggroRadius = 15;
+      e.leashRadius = 26;
+      e.aiState = 'orbit';
+      e.attackCooldown = 0.65;
+    }
+  }
+
+  private spawnWorldBoss(wb: WorldBossDef): void {
+    const alive = this.enemies.some((e) => e.worldBossId === wb.id && e.aiState !== 'dead');
+    if (alive) return;
+    const scaleMult = wb.bossArchetype === 'titan' ? 1.18 : wb.bossArchetype === 'celestial' ? 1.15 : 1.05;
+    const e = this.spawnEnemy('boss', wb.x, wb.z, undefined, {
+      name: wb.name,
+      hpMult: wb.hpMult,
+      poiseMult: wb.poiseMult,
+      dmgMult: wb.dmgMult,
+      scaleMult,
+      affix: wb.affix,
+      bossArchetype: wb.bossArchetype,
+    });
+    e.homePos = new THREE.Vector3(wb.x, 0, wb.z);
+    e.worldBossId = wb.id;
+    e.aggroRadius = 20;
+    e.leashRadius = 32;
+    e.aiState = 'orbit';
+    e.attackCooldown = 0.8;
+  }
+
+  private updateOpenWorld(dt: number): void {
+    const h = this.hero;
+    const region = getWorldRegionAt(h.pos.x, h.pos.z);
+    if (region.id !== this.worldLastRegionId) {
+      this.worldLastRegionId = region.id;
+      this.hud.showWorldToast(`踏入【${region.name}】· ${region.subtitle}`, true);
+    }
+
+    for (const [campId, remain] of Array.from(this.worldMobTimers.entries())) {
+      const next = remain - dt;
+      if (next <= 0) {
+        this.worldMobTimers.delete(campId);
+        const camp = WORLD_MOB_CAMPS.find((c) => c.id === campId);
+        if (camp) {
+          this.spawnWorldMobCamp(camp);
+          this.vfx.spawnShockRing(new THREE.Vector3(camp.x, 0, camp.z), new THREE.Color(0.55, 2.0, 2.2), 0.5, 4.0, 0.55);
+        }
+      } else {
+        this.worldMobTimers.set(campId, next);
+      }
+    }
+
+    for (const [bossId, remain] of Array.from(this.worldBossTimers.entries())) {
+      const next = remain - dt;
+      if (next <= 0) {
+        this.worldBossTimers.delete(bossId);
+        const wb = WORLD_BOSS_SPAWNS.find((b) => b.id === bossId);
+        if (wb) {
+          this.spawnWorldBoss(wb);
+          this.vfx.spawnBaguaArray({
+            pos: new THREE.Vector3(wb.x, 0.08, wb.z),
+            radius: 4.5,
+            color: new THREE.Color(2.0, 0.45, 0.55),
+            duration: 1.5,
+          });
+          this.hud.showWorldToast(`野外首领【${wb.name}】已在【${wb.regionName}】重新现身！`, true);
+        }
+      } else {
+        this.worldBossTimers.set(bossId, next);
+      }
+    }
+
+    if (this.arena.isInWorldLava(h.pos) && this.mountMode !== 'sword' && h.state !== 'dead') {
+      this.worldLavaBurnTimer -= dt;
+      if (this.worldLavaBurnTimer <= 0) {
+        this.worldLavaBurnTimer = 0.9;
+        this.tryHitHero(null, 14, true);
+        this.spawnWorldCallout('赤焰灼体！按 B 御剑飞渡！', h.pos.clone().add(new THREE.Vector3(0, 1.3, 0)), 'crit');
+      }
+    } else {
+      this.worldLavaBurnTimer = 0;
+    }
+
+    let nextPrompt: { kind: 'waypoint' | 'chest'; id: string; label: string } | null = null;
+    let bestDist = 4.4;
+
+    for (const wp of WORLD_WAYPOINTS) {
+      if (this.saveStore.isWorldWaypointLit(wp.id)) continue;
+      const d = Math.hypot(h.pos.x - wp.x, h.pos.z - wp.z);
+      if (d <= 4.2 && d < bestDist) {
+        bestDist = d;
+        nextPrompt = { kind: 'waypoint', id: wp.id, label: `点亮传送锚点 · ${wp.name} (G)` };
+      }
+    }
+
+    for (const ch of WORLD_CHESTS) {
+      if (this.saveStore.isWorldChestOpened(ch.id)) continue;
+      const d = Math.hypot(h.pos.x - ch.x, h.pos.z - ch.z);
+      if (d <= 3.8 && d < bestDist) {
+        bestDist = d;
+        nextPrompt = { kind: 'chest', id: ch.id, label: `开启宝箱 · ${ch.name} (G)` };
+      }
+    }
+
+    this.activeWorldInteract = nextPrompt;
+    this.hud.setWorldInteractPrompt(nextPrompt?.label ?? null);
+
+    const prog = this.saveStore.getWorldProgress();
+    this.hud.setWorldStatus(region.name, prog.waypoints, prog.chests, prog.bosses);
+  }
+
+  private triggerWorldInteract(forced?: { kind: 'waypoint' | 'chest'; id: string }): boolean {
+    if (this.mode !== 'world') return false;
+    const target = forced ?? this.activeWorldInteract;
+    if (!target) return false;
+
+    if (target.kind === 'waypoint') {
+      const wp = WORLD_WAYPOINTS.find((w) => w.id === target.id);
+      if (!wp) return false;
+      const firstLit = this.saveStore.unlockWorldWaypoint(wp.id);
+      if (firstLit) this.saveStore.addJade(wp.rewardJade);
+      this.arena.setWaypointLit(wp.id, true);
+      this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + Math.round(this.hero.maxHp * 0.35));
+      this.hero.spirit = this.hero.maxSpirit;
+      const wpPos = new THREE.Vector3(wp.x, 0.08, wp.z);
+      this.vfx.spawnBaguaArray({
+        pos: wpPos,
+        radius: 3.4,
+        color: new THREE.Color(0.45, 2.25, 2.15),
+        duration: 1.8,
+      });
+      this.vfx.spawnShockRing(wpPos, new THREE.Color(0.45, 2.35, 2.25), 0.4, 4.8, 0.55);
+      this.audio.playDropChime('spirit');
+      triggerHaptic('medium');
+      this.hud.renderWorldTeleportList();
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      this.hud.showWorldToast(
+        firstLit ? `已点亮传送锚点【${wp.name}】(+${wp.rewardJade}灵石)！可随时快速传送` : `【${wp.name}】灵脉充盈`,
+        true,
+      );
+      this.activeWorldInteract = null;
+      this.hud.setWorldInteractPrompt(null);
+      return true;
+    }
+
+    const ch = WORLD_CHESTS.find((c) => c.id === target.id);
+    if (!ch || this.saveStore.isWorldChestOpened(ch.id)) return false;
+    this.saveStore.openWorldChest(ch.id);
+    this.arena.setChestOpened(ch.id, true);
+    this.saveStore.addJade(ch.jade);
+    const item = rollEquipmentDrop({
+      tier: ch.tier,
+      guaranteedMinRarity: ch.rarity,
+      source: `九州宝箱·${ch.name}`,
+      rng: this.rng,
+    });
+    const addedRes = this.saveStore.addRolledItem(item);
+    const chPos = new THREE.Vector3(ch.x, 0.1, ch.z);
+    this.vfx.spawnShockRing(chPos, new THREE.Color(2.4, 1.9, 0.5), 0.35, 3.8, 0.5);
+    this.vfx.spawnHealVortex(this.hero.pos);
+    this.audio.playGearDropChime(item.rarity);
+    triggerHaptic('heavy');
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    const gearMsg = addedRes.added ? `神兵【${item.name}】` : `折算+${addedRes.overflowSalvagedJade ?? 0}灵石`;
+    this.hud.showWorldToast(`开启【${ch.name}】：+${ch.jade} 灵石 & ${gearMsg}！`, true);
+    this.spawnWorldCallout(`+${ch.jade} 灵石!`, chPos, 'info');
+    this.activeWorldInteract = null;
+    this.hud.setWorldInteractPrompt(null);
+    return true;
+  }
+
+  private teleportToWorldWaypoint(waypointId: string): boolean {
+    if (this.mode !== 'world') return false;
+    let dest: THREE.Vector3;
+    let wpName = '蜀山云台主阵';
+    if (waypointId === 'wp_center') {
+      dest = new THREE.Vector3(WORLD_SPAWN_POS.x, 0, WORLD_SPAWN_POS.z);
+    } else {
+      const wp = WORLD_WAYPOINTS.find((w) => w.id === waypointId);
+      if (!wp || !this.saveStore.isWorldWaypointLit(wp.id)) {
+        this.hud.showWorldToast('该传送锚点尚未点亮，需先前往激活！', false);
+        return false;
+      }
+      dest = new THREE.Vector3(wp.x, 0, wp.z + 2.4);
+      wpName = wp.name;
+    }
+
+    this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(0.45, 2.2, 2.35), 0.3, 2.8, 0.38);
+    this.hero.pos.copy(dest);
+    this.arena.constrainPosition(this.hero.pos, this.hero.radius);
+    this.hero.rig.root.position.set(this.hero.pos.x, this.mountMode !== 'none' ? this.hero.rig.root.position.y : 0, this.hero.pos.z);
+    this.mountRig.root.position.copy(this.hero.pos);
+    this.rmbMoveTarget = null;
+    this.vfx.spawnBaguaArray({
+      pos: this.hero.pos.clone(),
+      radius: 3.2,
+      color: new THREE.Color(0.45, 2.3, 2.2),
+      duration: 1.1,
+    });
+    this.audio.playDodge(true);
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.showWorldToast(`御风传送至【${wpName}】`, true);
+    const prog = this.saveStore.getWorldProgress();
+    const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
+    this.worldLastRegionId = reg.id;
+    this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses);
+    return true;
+  }
+
+  private respawnAllWorldBosses(): void {
+    if (this.mode !== 'world') return;
+    let count = 0;
+    for (const wb of WORLD_BOSS_SPAWNS) {
+      this.worldBossTimers.delete(wb.id);
+      const alreadyAlive = this.enemies.some((e) => e.worldBossId === wb.id && e.aiState !== 'dead');
+      if (!alreadyAlive) {
+        this.spawnWorldBoss(wb);
+        count += 1;
+      }
+    }
+    this.audio.playBossAppearSting();
+    this.hud.showWorldToast(count > 0 ? `已重新召出 ${count} 尊四方野外首领！` : '四方野外首领皆在阵中！', true);
   }
 
   private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false, skipDialogue = false): void {
@@ -827,7 +1273,69 @@ export class Game {
     this.audio.playDropChime('spirit');
 
     const dlg = this.activeDialogueDef;
+    const context = this.dialogueContext;
     this.activeDialogueDef = null;
+    this.dialogueContext = 'preStage';
+    this.campDialogueFocusPos = null;
+
+    if (context === 'epilogue') {
+      const opts = this.pendingEpilogueResultOpts ?? this.lastEpilogueResultOpts;
+      this.pendingEpilogueResultOpts = null;
+      this.mode = 'victory';
+      this.hud.clearSubtitle();
+      this.hud.setMode('victory');
+      this.audio.playHeroVoice('victory');
+      if (opts) {
+        this.hud.showResult(true, this.runElapsed, this.hero, opts);
+      }
+      return true;
+    }
+
+    if (context === 'campNpc') {
+      const chosenId = choiceId ?? dlg?.choices[0]?.id;
+      this.mode = 'camp';
+      this.hud.setMode('camp');
+      if (chosenId === 'camp_wine_cultivate') {
+        this.hud.setCampTab('cultivate');
+        this.hero.hp = this.hero.maxHp;
+        this.hero.delayedHp = this.hero.maxHp;
+        this.hero.spirit = this.hero.maxSpirit;
+        this.vfx.spawnHealVortex(this.hero.pos);
+        this.showStorySubtitle('酒剑仙：「凝神吐纳，气沉丹田——破境之时就在眼前！」', 2.8);
+        this.hud.showCampToast('师尊护法：已切至「吐纳修炼」并回满气血真气', true);
+      } else if (chosenId === 'camp_wine_drink') {
+        this.hud.setCampTab('meal');
+        this.hero.state = 'drink';
+        this.hero.stateTime = 0;
+        this.hero.stateDuration = 0.68;
+        this.hero.attackVfxFired = false;
+        this.triggerHeroVoice('heal', true);
+        this.hud.showCampToast('师徒对饮：已切至「篝火煮酒」，可择仙酿温养下战', true);
+      } else if (chosenId === 'camp_ally_depart') {
+        const targetStage = dlg && dlg.stageId > 0 ? dlg.stageId : this.saveStore.getRecommendedStage();
+        this.mp.leave();
+        this.clearPeerHero();
+        this.hud.setMpHudBadge('');
+        this.hud.setHeroName('李逍遥');
+        this.blessings = createEmptyBlessings();
+        this.startNewRun(false, targetStage, false, false);
+        return true;
+      } else if (chosenId === 'camp_ally_spar') {
+        this.hero.spirit = this.hero.maxSpirit;
+        this.hero.ult = 100;
+        this.hero.cdQ = 0;
+        this.hero.cdE = 0;
+        this.hero.cdR = 0;
+        this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(0.55, 2.2, 2.3), 0.35, 2.6, 0.45);
+        this.showStorySubtitle('玄影：「真气剑意已满！先拿木人桩试试 Q 追影与三印万剑归宗！」', 3.0);
+        this.hud.showCampToast('同门演武：真气与剑意已满，可随时试剑', true);
+      }
+      this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, 'none', this.buildTacticalState());
+      return true;
+    }
+
+    const stageDef = this.getActiveStageDef();
+    const chDef = getChapterDef(stageDef.chapter);
     const chosen = dlg ? (dlg.choices.find((c) => c.id === choiceId) ?? dlg.choices[0]) : undefined;
     if (chosen) {
       this.episodeChoiceBuff = {
@@ -851,17 +1359,30 @@ export class Game {
       this.mode = 'cutscene';
       this.hud.setMode('cutscene');
       this.audio.setDucked(true);
+      this.audio.playBossAppearSting();
+      this.hud.showStageBanner('首 领 降 临', boss.name, 2.6);
+      this.showStorySubtitle(getBossCutsceneTaunt(stageDef.id, boss.name), 3.4);
       this.cameraRig.startCutscene(boss.pos, 2.55);
     } else {
       this.mode = 'playing';
       this.hud.setMode('playing');
+      const kicker = this.activeDungeon
+        ? `秘境外传 · ${this.activeDungeon.name}`
+        : `${chDef.roman} 第 ${stageDef.episodeNum} 集 · ${BIOME_LABELS[stageDef.biome] ?? chDef.name}`;
+      this.hud.showStageBanner(kicker, `${stageDef.name} · ${stageDef.subtitle}`, 2.6);
+      this.showStorySubtitle(chosen?.battleCallout ?? stageDef.introLine, 2.8);
     }
     return true;
   }
 
   private startMultiplayerMatch(mode: 'coop' | 'solo', stageId: number, peerName: string): void {
     this.audio.unlock();
+    this.setMountMode('none', true);
+    this.worldMobTimers.clear();
+    this.worldBossTimers.clear();
+    this.activeWorldInteract = null;
     this.clearCombatEntities();
+    this.setCampNpcsVisible(false);
     this.clearPeerHero();
     this.activeDungeon = null;
     this.stageDroppedGear = [];
@@ -951,7 +1472,14 @@ export class Game {
     jumpLastWave = false,
     showDialogue = false,
   ): void {
+    this.setMountMode('none', true);
+    this.worldMobTimers.clear();
+    this.worldBossTimers.clear();
+    this.activeWorldInteract = null;
     this.clearCombatEntities();
+    this.setCampNpcsVisible(false);
+    this.campDialogueFocusPos = null;
+    this.dialogueContext = 'preStage';
     this.currentStageId = this.activeDungeon ? this.activeDungeon.stageDef.id : clamp(Math.floor(stageId), 1, 20);
     const stageDef = this.getActiveStageDef();
     const chDef = getChapterDef(stageDef.chapter);
@@ -965,9 +1493,15 @@ export class Game {
     this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
 
     const isCorridor = this.mp.mode !== 'solo';
+    const customArenaLayout = this.mp.mode === 'offline' ? stageDef.stageLayout : undefined;
     const maxZone: 0 | 1 | 2 = stageDef.waves.length >= 3 ? 2 : 1;
-    this.corridorMode = isCorridor;
-    this.arena.setArenaLayout(isCorridor ? 'corridor' : 'arena', maxZone);
+    if (customArenaLayout && customArenaLayout !== 'corridor') {
+      this.corridorMode = false;
+      this.arena.setArenaLayout(customArenaLayout, 0);
+    } else {
+      this.corridorMode = isCorridor;
+      this.arena.setArenaLayout(isCorridor ? 'corridor' : 'arena', maxZone);
+    }
     const startZone = this.getZoneForWave(stageDef, this.currentWaveIdx);
     this.arena.setUnlockedZone(startZone);
     if (jumpLastWave && isCorridor && startZone > 0) {
@@ -1033,6 +1567,7 @@ export class Game {
         speedMult: spec.speedMult,
         scaleMult: spec.scaleMult,
         affix: spec.affix,
+        bossArchetype: spec.bossArchetype,
       };
       const e = this.spawnEnemy(spec.kind, spec.x, spec.z + zoneCenterZ, undefined, overrides);
       if (spec.kind === 'boss') bossEntity = e;
@@ -1062,6 +1597,9 @@ export class Game {
         this.mode = 'cutscene';
         this.hud.setMode('cutscene');
         this.audio.setDucked(true);
+        this.audio.playBossAppearSting();
+        this.hud.showStageBanner('首 领 降 临', bossEntity.name, 2.6);
+        this.showStorySubtitle(getBossCutsceneTaunt(stageDef.id, bossEntity.name), 3.4);
         this.cameraRig.startCutscene(bossEntity.pos, 2.55);
       } else {
         bossEntity.aiState = 'orbit';
@@ -1076,6 +1614,13 @@ export class Game {
       }
       this.mode = 'playing';
       this.hud.setMode('playing');
+      if (allowCutscene) {
+        if (wave.subtitle) {
+          this.showStorySubtitle(wave.subtitle, 3.2);
+        } else if (waveIdx > 0) {
+          this.showStorySubtitle(`【${wave.label}】妖众增援杀至！`, 2.4);
+        }
+      }
     }
   }
 
@@ -1142,7 +1687,7 @@ export class Game {
     this.q2DashTargetId = null;
     this.waterRippleTimer = 0;
     h.rig.root.position.copy(pos);
-    h.rig.root.rotation.y = yaw;
+    h.rig.root.rotation.set(0, yaw, 0);
     h.rig.applyPose('combatIdle', 0, 0, 0.016, 0);
     this.rmbMoveTarget = null;
   }
@@ -1206,7 +1751,25 @@ export class Game {
     );
   }
 
+  private findNearestBossInRange(maxDist: number): EnemyEntity | null {
+    let best: EnemyEntity | null = null;
+    let bestDist = maxDist;
+    for (const e of this.enemies) {
+      if (e.kind !== 'boss' || e.aiState === 'dead') continue;
+      const d = Math.hypot(e.pos.x - this.hero.pos.x, e.pos.z - this.hero.pos.z);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
   private getObjectiveLabel(): string {
+    if (this.mode === 'world') {
+      const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
+      return `九州仙域 · ${reg.name}`;
+    }
     if (this.mp.mode === 'solo' && this.peer) {
       return `1v1 · ${this.peer.name}`;
     }
@@ -1258,7 +1821,28 @@ export class Game {
     }
 
     if (this.mode === 'dialogue') {
-      const lead = this.enemies.find((e) => e.aiState !== 'dead') ?? null;
+      if (this.dialogueContext === 'campNpc') {
+        const focus = this.campDialogueFocusPos;
+        if (focus) {
+          this.hero.yaw = Math.atan2(focus.x - this.hero.pos.x, focus.z - this.hero.pos.z);
+          this.hero.rig.root.rotation.y = this.hero.yaw;
+        }
+        this.hero.rig.applyPose('idle', 0, this.elapsed, animDt, 0);
+        this.updateCampNpcs(animDt);
+        this.targetRingMesh.visible = false;
+        this.arena.update(animDt, this.elapsed, this.hero.pos);
+        this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, focus, { x: 0, y: 0 });
+        this.audio.updateMusic(rawDt);
+        if (doRender) this.pipeline.render();
+        this.input.endFrame();
+        this.publishDiagnostics();
+        return;
+      }
+      const lead =
+        this.enemies.find((e) => e.kind === 'boss' && e.aiState !== 'dead') ??
+        this.enemies.find((e) => e.kind === 'elite' && e.aiState !== 'dead') ??
+        this.enemies.find((e) => e.aiState !== 'dead') ??
+        null;
       if (lead) {
         lead.yaw = Math.atan2(this.hero.pos.x - lead.pos.x, this.hero.pos.z - lead.pos.z);
         lead.rig.root.rotation.y = lead.yaw;
@@ -1338,6 +1922,30 @@ export class Game {
       this.tickMultiplayerSync(rawDt);
 
       if (
+        this.arena.getLayout() === 'islands' &&
+        this.hero.state !== 'dead'
+      ) {
+        const cCount = this.arena.getIslandCrystalCount();
+        for (let ci = 0; ci < cCount; ci++) {
+          if (this.arena.isCrystalUsed(ci)) continue;
+          const cPos = this.arena.getCrystalPos(ci);
+          if (Math.hypot(this.hero.pos.x - cPos.x, this.hero.pos.z - cPos.z) <= 2.4) {
+            this.arena.setCrystalUsed(ci, true);
+            const healHp = Math.round(this.hero.maxHp * 0.25);
+            this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + healHp);
+            this.hero.delayedHp = Math.max(this.hero.delayedHp, this.hero.hp);
+            this.hero.spirit = Math.min(this.hero.maxSpirit, this.hero.spirit + 45);
+            this.hero.ult = Math.min(100, this.hero.ult + 25);
+            this.audio.playDropChime('spirit');
+            this.vfx.spawnHealVortex(this.hero.pos);
+            this.vfx.spawnShockRing(cPos, new THREE.Color(0.45, 2.25, 2.15), 0.35, 3.0, 0.45);
+            this.spawnWorldCallout('灵晶共鸣 +真气剑意!', this.hero.pos, 'info');
+            triggerHaptic('medium');
+          }
+        }
+      }
+
+      if (
         this.corridorMode &&
         this.arena.getMaxZone() >= 1 &&
         !this.healingShrineCollected &&
@@ -1355,6 +1963,7 @@ export class Game {
           this.vfx.spawnHealVortex(this.hero.pos);
           this.vfx.spawnShockRing(shrinePos, new THREE.Color(0.45, 2.1, 1.35), 0.35, 2.8, 0.48);
           this.spawnWorldCallout('仙灵清泉 +气血真气!', this.hero.pos, 'heal');
+          this.showStorySubtitle('李逍遥：「好一泓蜀山灵泉！剑气澄明，伤势尽复！」', 2.6);
           triggerHaptic('medium');
         }
       }
@@ -1386,9 +1995,40 @@ export class Game {
       this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
       const threat = this.updateTargetRingAndThreat(rawDt);
       this.hud.update(this.hero, this.getObjectiveLabel(), boss, this.peer, threat, this.buildTacticalState());
+    } else if (this.mode === 'world') {
+      this.runElapsed += dt;
+      this.updateHero(dt, rawDt);
+      this.updateEnemies(dt);
+      this.updateStageHazards(dt);
+      this.updateProjectiles(dt);
+      this.resolveEntitySeparation();
+      this.updateOpenWorld(dt);
+
+      this.vfx.update(
+        dt,
+        this.elapsed,
+        this.hero.pos,
+        (kind, gearItem) => this.onCollectDrop(kind, gearItem),
+        (kind) => {
+          if (kind !== 'gear') this.audio.playDropChime(kind);
+        },
+        this.camera.position,
+      );
+      this.arena.update(dt, this.elapsed, this.hero.pos);
+      const boss = this.findNearestBossInRange(22);
+      this.cameraRig.updateGameplay(rawDt, this.elapsed, this.hero.pos, boss?.pos ?? null, this.input.mouseNdc);
+      if (this.moonKeyLight) {
+        this.moonKeyLight.position.set(this.hero.pos.x - 15, 24, this.hero.pos.z - 18);
+        this.moonKeyLight.target.position.copy(this.hero.pos);
+        this.moonKeyLight.target.updateMatrixWorld();
+      }
+      this.arena.updateOcclusion(this.camera.position, this.hero.pos, rawDt);
+      const threat = this.updateTargetRingAndThreat(rawDt);
+      this.hud.update(this.hero, this.getObjectiveLabel(), boss, null, threat, this.buildTacticalState());
     } else if (this.mode === 'camp') {
       this.updateHero(dt, rawDt);
       this.updateCampDummy(dt);
+      this.updateCampNpcs(dt);
       this.updateProjectiles(dt);
       this.resolveEntitySeparation();
 
@@ -1579,7 +2219,12 @@ export class Game {
       }
     }
 
-    const canDodgeNow = h.state !== 'hit' && h.state !== 'skillR' && h.state !== 'comboUlt' && h.state !== 'parryCounter' && h.stamina >= 24;
+    const canDodgeNow =
+      h.state !== 'hit' &&
+      h.state !== 'skillR' &&
+      h.state !== 'comboUlt' &&
+      h.state !== 'parryCounter' &&
+      h.stamina >= (this.mountMode !== 'none' ? 16 : 24);
     if (canDodgeNow && this.input.consumeAction('dodge')) {
       this.rmbMoveTarget = null;
       this.startHeroDodge();
@@ -1682,6 +2327,7 @@ export class Game {
     }
 
     if (isFree && this.input.isBlocking() && h.stamina > 6) {
+      if (this.mountMode !== 'none') this.setMountMode('none', true);
       if (h.state !== 'block') {
         h.state = 'block';
         h.stateTime = 0;
@@ -1714,27 +2360,58 @@ export class Game {
     }
 
     if (h.state === 'idle' || h.state === 'run') {
+      if (this.mountDashTimer > 0) this.mountDashTimer = Math.max(0, this.mountDashTimer - dt);
+      const mountMult = this.mountMode === 'sword' ? 1.88 : this.mountMode === 'horse' ? 1.58 : 1.0;
+      const dashMult = this.mountMode !== 'none' && this.mountDashTimer > 0 ? 1.45 : 1.0;
       const speed =
         7.4 *
+        mountMult *
+        dashMult *
         this.blessings.speedMult *
         loadout.speedMult *
         (1 + this.activeMealBuff.speedBonus + this.episodeChoiceBuff.speedBonus);
       const moving = Math.hypot(this.moveVec.x, this.moveVec.z) > 0.05;
+      const prevYaw = h.yaw;
       if (moving) {
         h.state = 'run';
         h.vel.set(this.moveVec.x * speed, 0, this.moveVec.z * speed);
         h.pos.addScaledVector(h.vel, dt);
         const targetYaw = Math.atan2(this.moveVec.x, this.moveVec.z);
-        h.yaw = dampAngle(h.yaw, targetYaw, 15, dt);
+        h.yaw = dampAngle(h.yaw, targetYaw, this.mountMode === 'none' ? 15 : 10, dt);
       } else {
         h.state = 'idle';
         h.vel.set(0, 0, 0);
       }
       this.arena.constrainPosition(h.pos, h.radius, prevPos);
-      h.rig.root.position.copy(h.pos);
       h.rig.root.rotation.y = h.yaw;
-      h.rig.setSwordGlow(0.85);
-      h.rig.applyPose(moving ? 'run' : anyThreat ? 'combatIdle' : 'idle', 0, this.elapsed, dt, h.vel.length());
+      if (this.mountMode !== 'none') {
+        const turnRate = angleDiff(prevYaw, h.yaw) / Math.max(0.001, dt);
+        this.mountRig.root.position.copy(h.pos);
+        this.mountRig.root.rotation.y = h.yaw;
+        const mPose = this.mountRig.update(dt, this.elapsed, h.vel.length(), turnRate);
+        h.rig.root.position.set(h.pos.x, mPose.heroY, h.pos.z);
+        h.rig.root.rotation.x = mPose.heroPitch;
+        h.rig.setSwordGlow(this.mountMode === 'sword' ? 1.8 : 0.85);
+        h.rig.applyPose(this.mountMode === 'sword' ? 'combatIdle' : 'idle', 0, this.elapsed, dt, 0);
+        if (this.mountMode === 'sword' && moving) {
+          this.mountWindTimer -= dt;
+          if (this.mountWindTimer <= 0) {
+            this.mountWindTimer = 0.22;
+            this.vfx.spawnHitSparks(
+              h.pos.clone().add(new THREE.Vector3(0, mPose.heroY - 0.15, 0)),
+              new THREE.Vector3(-Math.sin(h.yaw), 0.1, -Math.cos(h.yaw)),
+              new THREE.Color(0.45, 2.2, 2.35),
+              5,
+              this.rng,
+            );
+          }
+        }
+      } else {
+        h.rig.root.position.copy(h.pos);
+        h.rig.root.rotation.x = 0;
+        h.rig.setSwordGlow(0.85);
+        h.rig.applyPose(moving ? 'run' : anyThreat ? 'combatIdle' : 'idle', 0, this.elapsed, dt, h.vel.length());
+      }
     } else if (h.state === 'attack') {
       this.tickHeroAttack(dt, prevPos);
     } else if (h.state === 'dodge') {
@@ -1770,7 +2447,8 @@ export class Game {
       if (p >= 1) h.state = 'idle';
     }
 
-    const movingInWater = (h.state === 'run' || h.state === 'dodge') && this.arena.isInShallowWater(h.pos);
+    const movingInWater =
+      this.mountMode !== 'sword' && (h.state === 'run' || h.state === 'dodge') && this.arena.isInShallowWater(h.pos);
     if (movingInWater) {
       this.waterRippleTimer -= dt;
       if (this.waterRippleTimer <= 0) {
@@ -1833,6 +2511,7 @@ export class Game {
 
   private startHeroAttack(step: number): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     const isShadowStrike = h.dodgeEmpowered || h.shadowStrikeTimer > 0;
     this.shadowAttackActive = isShadowStrike;
     this.q2AttackActive = false;
@@ -2043,6 +2722,26 @@ export class Game {
 
   private startHeroDodge(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') {
+      h.stamina = Math.max(0, h.stamina - 16);
+      this.mountDashTimer = 0.45;
+      h.dodgeInvuln = 0.22;
+      this.audio.playDodge(this.mountMode === 'sword');
+      this.vfx.spawnShockRing(
+        h.pos.clone().add(new THREE.Vector3(0, this.mountMode === 'sword' ? 1.5 : 0.4, 0)),
+        this.mountMode === 'sword' ? new THREE.Color(0.45, 2.3, 2.35) : new THREE.Color(2.2, 1.55, 0.55),
+        0.35,
+        3.2,
+        0.38,
+      );
+      this.spawnWorldCallout(
+        this.mountMode === 'sword' ? '御剑破空!' : '飞骑疾驰!',
+        h.pos.clone().add(new THREE.Vector3(0, 1.2, 0)),
+        'info',
+      );
+      triggerHaptic('light');
+      return;
+    }
     h.state = 'dodge';
     h.stateTime = 0;
     h.stateDuration = 0.36;
@@ -2105,7 +2804,7 @@ export class Game {
     h.magnetTargetId = target.id;
 
     this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(2.2, 1.8, 0.55), h.rig.root);
-    this.audio.playHeroVoice('counter');
+    this.triggerHeroVoice('counter');
     const dx = target.pos.x - h.pos.x;
     const dz = target.pos.z - h.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -2140,7 +2839,7 @@ export class Game {
     h.magnetTargetId = -999;
 
     this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(2.2, 1.8, 0.55), h.rig.root);
-    this.audio.playHeroVoice('counter');
+    this.triggerHeroVoice('counter');
     const dx = this.peer.pos.x - h.pos.x;
     const dz = this.peer.pos.z - h.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -2227,6 +2926,7 @@ export class Game {
 
   private startComboUlt(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     h.comboUltReady = false;
     h.comboUltTimer = 0;
     h.comboSigils = [];
@@ -2241,7 +2941,7 @@ export class Game {
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillR();
-    this.audio.playHeroVoice('comboUlt');
+    this.triggerHeroVoice('comboUlt');
     this.hud.triggerSkillPulse('R');
     this.spawnWorldCallout('万剑归宗 · 连携破阵!', h.pos, 'parry');
     triggerHaptic('ultimate');
@@ -2249,6 +2949,7 @@ export class Game {
 
   private startSkillQ(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     const loadout = this.getLoadoutStats();
     h.spirit -= 20;
     h.cdQ = 3.5 * this.blessings.cdMult * loadout.cdMult;
@@ -2263,7 +2964,7 @@ export class Game {
     h.rig.root.rotation.y = h.yaw;
     this.recordComboSigil('Q');
     this.audio.playSkillQ();
-    this.audio.playHeroVoice('skillQ');
+    this.triggerHeroVoice('skillQ');
     this.hud.triggerSkillPulse('Q');
     triggerHaptic('medium');
     this.mp.sendAction('skillQ', { x: h.pos.x, z: h.pos.z, yaw: h.yaw });
@@ -2271,6 +2972,7 @@ export class Game {
 
   private startSkillQ2(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     const loadout = this.getLoadoutStats();
     h.q2ReadyTimer = 0;
     const preferredId = h.q2TargetId;
@@ -2352,6 +3054,7 @@ export class Game {
 
   private startSkillE(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     const loadout = this.getLoadoutStats();
     h.spirit -= 45;
     h.cdE = 7.5 * this.blessings.cdMult * loadout.cdMult;
@@ -2365,13 +3068,14 @@ export class Game {
     h.rig.root.rotation.y = h.yaw;
     this.recordComboSigil('E');
     this.audio.playSkillE();
-    this.audio.playHeroVoice('skillE');
+    this.triggerHeroVoice('skillE');
     this.hud.triggerSkillPulse('E');
     triggerHaptic('heavy');
   }
 
   private startSkillR(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     const loadout = this.getLoadoutStats();
     h.ult = 0;
     h.cdR = 12.0 * this.blessings.cdMult * loadout.cdMult;
@@ -2385,19 +3089,20 @@ export class Game {
     if (tgt) h.yaw = Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z);
     h.rig.root.rotation.y = h.yaw;
     this.audio.playSkillR();
-    this.audio.playHeroVoice('skillR');
+    this.triggerHeroVoice('skillR');
     this.hud.triggerSkillPulse('R');
     triggerHaptic('ultimate');
   }
 
   private startDrinkGourd(): void {
     const h = this.hero;
+    if (this.mountMode !== 'none') this.setMountMode('none', true);
     h.state = 'drink';
     h.stateTime = 0;
     h.stateDuration = 0.68;
     h.cdHeal = 1.5;
     h.attackVfxFired = false;
-    this.audio.playHeroVoice('heal');
+    this.triggerHeroVoice('heal');
     this.hud.triggerSkillPulse('F');
     triggerHaptic('light');
   }
@@ -2903,7 +3608,7 @@ export class Game {
       this.vfx.spawnShockRing(e.pos, new THREE.Color(2.3, 0.25, 0.5), 0.6, 7.5, 0.65);
       this.vfx.spawnGroundCrater(e.pos, 3.2, new THREE.Color(2.3, 0.25, 0.45), 3.6);
       this.cameraRig.addShake(0.6);
-      this.hud.showSubtitle(`${e.name}：「魔剑狂化！」`, 1.5);
+      this.showStorySubtitle(getBossEnrageLine(this.currentStageId, e.name), 3.2);
     }
 
     if (!e.isDummy && e.hp <= 0) {
@@ -2984,6 +3689,42 @@ export class Game {
 
     if (this.mp.mode === 'offline' || this.mp.role === 'host') {
       this.saveStore.incrementStat('totalKills', 1);
+      if (this.mode === 'world') {
+        if (e.worldCampId) {
+          const camp = WORLD_MOB_CAMPS.find((c) => c.id === e.worldCampId);
+          const campAlive = this.enemies.some((x) => x.id !== e.id && x.worldCampId === e.worldCampId && x.aiState !== 'dead');
+          if (camp && !campAlive) {
+            this.saveStore.addJade(camp.jadeReward);
+            this.worldMobTimers.set(camp.id, camp.respawnSec);
+            this.hud.showWorldToast(`清剿据点【${camp.name}】：+${camp.jadeReward} 灵石！`, true);
+          }
+        }
+        if (e.worldBossId) {
+          const wb = WORLD_BOSS_SPAWNS.find((b) => b.id === e.worldBossId);
+          if (wb) {
+            this.saveStore.recordWorldBossKill(wb.id);
+            this.saveStore.addJade(wb.jadeReward);
+            this.worldBossTimers.set(wb.id, wb.respawnSec);
+            const dropCount = wb.guaranteedMinRarity === 'legendary' ? 2 : 1;
+            for (let k = 0; k < dropCount; k++) {
+              const item = rollEquipmentDrop({
+                tier: wb.tier,
+                guaranteedMinRarity: wb.guaranteedMinRarity,
+                pityTriggered: k === 0 ? this.saveStore.advancePityAndCheck() : false,
+                source: `九州首领·${wb.name}`,
+                rng: this.rng,
+              });
+              this.vfx.spawnGearDrop(e.pos, item, this.rng);
+              if (k === 0) this.audio.playGearDropChime(item.rarity);
+            }
+            this.hud.showWorldToast(`斩杀野外首领【${wb.name}】！+${wb.jadeReward} 灵石与神兵掉落！`, true);
+            const prog = this.saveStore.getWorldProgress();
+            const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
+            this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses);
+          }
+        }
+        return;
+      }
       const stageDef = this.getActiveStageDef();
       const tier: 1 | 2 | 3 = this.activeDungeon
         ? this.activeDungeon.tier
@@ -3071,7 +3812,12 @@ export class Game {
 
   private updateStageHazards(dt: number): void {
     const stageDef = this.getActiveStageDef();
-    if (stageDef.hazard !== 'none' && this.stagePhase === 'combat' && this.enemies.some((e) => e.aiState !== 'dead')) {
+    if (
+      this.mode !== 'world' &&
+      stageDef.hazard !== 'none' &&
+      this.stagePhase === 'combat' &&
+      this.enemies.some((e) => e.aiState !== 'dead')
+    ) {
       this.hazardTimer -= dt;
       if (this.hazardTimer <= 0) {
         this.hazardTimer = stageDef.hazardIntervalSec ?? 5.0;
@@ -3186,6 +3932,219 @@ export class Game {
     }
   }
 
+  private showStorySubtitle(line: string, duration = 3.0): void {
+    if (!line) return;
+    this.storySubtitleUntil = this.elapsed + duration * 0.85;
+    this.hud.showSubtitle(line, duration);
+  }
+
+  private triggerHeroVoice(kind: HeroVoiceKind, showSub = true): void {
+    const line = this.audio.playHeroVoice(kind);
+    if (!showSub || !line) return;
+    if (this.elapsed < this.storySubtitleUntil) return;
+    if (this.elapsed - this.lastVoiceSubtitleAt < 2.4 && kind !== 'skillR' && kind !== 'comboUlt') return;
+    this.lastVoiceSubtitleAt = this.elapsed;
+    this.hud.showSubtitle(`李逍遥：「${line}」`, 2.1);
+  }
+
+  private ensureCampNpcs(): void {
+    if (this.campNpcGroup) return;
+    const grp = new THREE.Group();
+    grp.visible = false;
+
+    const wineRig = new CharacterRig('xiaoyao');
+    wineRig.applyHeroAppearance(
+      {
+        primaryHex: '#3c2a1e',
+        robeInnerHex: '#e8dcc2',
+        secondaryHex: '#a8762c',
+        accentHex: '#8d2424',
+        trimHex: '#d8b464',
+        bronzeHex: '#d4a84e',
+        sheenHex: '#f6d68a',
+      },
+      {
+        steelHex: '#f0dfac',
+        glowHex: '#ffeaa8',
+        emissiveHex: '#cc8818',
+        trailCore: [2, 1.6, 0.8],
+        trailEdge: [1.5, 0.9, 0.2],
+      },
+    );
+    wineRig.setWeaponDrawn(false);
+    const winePos = new THREE.Vector3(3.65, 0, -0.95);
+    const wineYaw = Math.atan2(-3.65, 2.5);
+    wineRig.root.position.copy(winePos);
+    wineRig.root.rotation.y = wineYaw;
+    grp.add(wineRig.root);
+    this.campNpcWineMaster = { rig: wineRig, pos: winePos, yaw: wineYaw, label: '师尊 · 酒剑仙', drinkCycle: 0 };
+
+    const allyRig = new CharacterRig('ally');
+    allyRig.setWeaponDrawn(true);
+    const allyPos = new THREE.Vector3(-3.55, 0, -2.15);
+    const allyYaw = Math.atan2(3.55, 3.0);
+    allyRig.root.position.copy(allyPos);
+    allyRig.root.rotation.y = allyYaw;
+    grp.add(allyRig.root);
+    this.campNpcXuanying = { rig: allyRig, pos: allyPos, yaw: allyYaw, label: '同门 · 玄影', sparTimer: 0 };
+
+    this.scene.add(grp);
+    this.campNpcGroup = grp;
+  }
+
+  private setCampNpcsVisible(visible: boolean): void {
+    if (this.campNpcGroup) {
+      this.campNpcGroup.visible = visible;
+    }
+    if (!visible) {
+      this.activeCampHotspot = null;
+      this.hud.setCampInteractPrompt(null);
+      this.hud.updateCampNpcLabels([]);
+    }
+  }
+
+  private updateCampNpcs(dt: number): void {
+    if (!this.campNpcGroup || !this.campNpcGroup.visible) return;
+    const h = this.hero;
+
+    if (this.campNpcWineMaster) {
+      const npc = this.campNpcWineMaster;
+      const d = Math.hypot(h.pos.x - npc.pos.x, h.pos.z - npc.pos.z);
+      const baseYaw = Math.atan2(-3.65, 2.5);
+      const targetYaw = d < 4.5 ? Math.atan2(h.pos.x - npc.pos.x, h.pos.z - npc.pos.z) : baseYaw;
+      npc.yaw = dampAngle(npc.yaw, targetYaw, 5.0, dt);
+      npc.rig.root.rotation.y = npc.yaw;
+      npc.drinkCycle = (npc.drinkCycle + dt) % 9.0;
+      if (npc.drinkCycle > 7.4) {
+        npc.rig.applyPose('drink', (npc.drinkCycle - 7.4) / 1.6, this.elapsed, dt, 0);
+      } else {
+        npc.rig.applyPose('idle', 0, this.elapsed, dt, 0);
+      }
+    }
+
+    if (this.campNpcXuanying) {
+      const npc = this.campNpcXuanying;
+      const d = Math.hypot(h.pos.x - npc.pos.x, h.pos.z - npc.pos.z);
+      const baseYaw = Math.atan2(3.55, 3.0);
+      const targetYaw = d < 4.5 ? Math.atan2(h.pos.x - npc.pos.x, h.pos.z - npc.pos.z) : baseYaw;
+      npc.yaw = dampAngle(npc.yaw, targetYaw, 6.0, dt);
+      npc.rig.root.rotation.y = npc.yaw;
+      npc.sparTimer = (npc.sparTimer + dt) % 7.5;
+      if (npc.sparTimer > 6.4 && d >= 3.2) {
+        npc.rig.applyPose('combo1', (npc.sparTimer - 6.4) / 1.1, this.elapsed, dt, 0);
+      } else {
+        npc.rig.applyPose('combatIdle', 0, this.elapsed, dt, 0);
+      }
+    }
+
+    if (this.mode === 'camp') {
+      const labels: Array<{ label: string; x: number; y: number; ally?: boolean }> = [];
+      const w = this.canvas.clientWidth || window.innerWidth;
+      const ch = this.canvas.clientHeight || window.innerHeight;
+      const projectNpc = (npcPos: THREE.Vector3, label: string, ally: boolean) => {
+        this.tmpVec.set(npcPos.x, 2.08, npcPos.z).project(this.camera);
+        if (this.tmpVec.z < 1) {
+          const sx = (this.tmpVec.x * 0.5 + 0.5) * w;
+          const sy = (-this.tmpVec.y * 0.5 + 0.5) * ch;
+          if (sx > 24 && sx < w - 24 && sy > 24 && sy < ch - 24) {
+            labels.push({ label, x: sx, y: sy, ally });
+          }
+        }
+      };
+      if (this.campNpcWineMaster) projectNpc(this.campNpcWineMaster.pos, this.campNpcWineMaster.label, false);
+      if (this.campNpcXuanying) projectNpc(this.campNpcXuanying.pos, this.campNpcXuanying.label, true);
+      this.hud.updateCampNpcLabels(labels);
+
+      const candidates: Array<{ id: 'wine' | 'ally' | 'mat' | 'tea'; dist: number; prompt: string }> = [];
+      if (this.campNpcWineMaster) {
+        const d = Math.hypot(h.pos.x - this.campNpcWineMaster.pos.x, h.pos.z - this.campNpcWineMaster.pos.z);
+        if (d <= 2.65) candidates.push({ id: 'wine', dist: d, prompt: '与师尊 · 酒剑仙论剑' });
+      }
+      if (this.campNpcXuanying) {
+        const d = Math.hypot(h.pos.x - this.campNpcXuanying.pos.x, h.pos.z - this.campNpcXuanying.pos.z);
+        if (d <= 2.65) candidates.push({ id: 'ally', dist: d, prompt: '与同门 · 玄影探报试剑' });
+      }
+      const dMat = Math.hypot(h.pos.x - -4.25, h.pos.z - 1.85);
+      if (dMat <= 2.45) candidates.push({ id: 'mat', dist: dMat, prompt: '盘膝打坐 · 吐纳心法' });
+      const dTea = Math.hypot(h.pos.x - 4.5, h.pos.z - 0.85);
+      if (dTea <= 2.45) candidates.push({ id: 'tea', dist: dTea, prompt: '围炉品茗 · 温养剑意' });
+
+      candidates.sort((a, b) => a.dist - b.dist);
+      const best = candidates[0] ?? null;
+      this.activeCampHotspot = best ? best.id : null;
+      this.hud.setCampInteractPrompt(best ? best.prompt : null);
+    } else {
+      this.hud.setCampInteractPrompt(null);
+      this.hud.updateCampNpcLabels([]);
+    }
+  }
+
+  private triggerCampHotspotInteract(forced?: 'wine' | 'ally' | 'mat' | 'tea'): boolean {
+    if (this.mode !== 'camp') return false;
+    const spot = forced ?? this.activeCampHotspot;
+    if (!spot) return false;
+    this.audio.unlock();
+
+    if (spot === 'wine') {
+      const realm = this.saveStore.getCultivationBonus().current.name;
+      const cleared = this.saveStore.getClearedCount();
+      const dlg = getWineMasterCampDialogue(cleared, realm);
+      this.dialogueContext = 'campNpc';
+      this.activeDialogueDef = dlg;
+      this.campDialogueFocusPos = this.campNpcWineMaster?.pos.clone() ?? null;
+      this.mode = 'dialogue';
+      this.audio.playDialogueStep(false);
+      this.hud.showStageDialogue(dlg);
+      return true;
+    }
+
+    if (spot === 'ally') {
+      const nextStageId = this.saveStore.getRecommendedStage();
+      const nextStage = getStageDef(nextStageId);
+      const cleared = this.saveStore.getClearedCount();
+      const dlg = getXuanyingCampDialogue(nextStage, cleared);
+      this.dialogueContext = 'campNpc';
+      this.activeDialogueDef = dlg;
+      this.campDialogueFocusPos = this.campNpcXuanying?.pos.clone() ?? null;
+      this.mode = 'dialogue';
+      this.audio.playDialogueStep(false);
+      this.hud.showStageDialogue(dlg);
+      return true;
+    }
+
+    if (spot === 'mat') {
+      const quote = CAMP_MEDITATION_QUOTES[this.campMeditationIdx % CAMP_MEDITATION_QUOTES.length];
+      this.campMeditationIdx += 1;
+      this.hero.hp = this.hero.maxHp;
+      this.hero.delayedHp = this.hero.maxHp;
+      this.hero.spirit = this.hero.maxSpirit;
+      this.hero.ult = Math.min(100, this.hero.ult + 25);
+      this.hud.setCampTab('cultivate');
+      this.audio.playDropChime('spirit');
+      this.vfx.spawnHealVortex(this.hero.pos);
+      this.spawnWorldCallout('吐纳清心 +25剑意!', this.hero.pos, 'heal');
+      this.showStorySubtitle(`李逍遥：「${quote}」`, 3.0);
+      this.hud.showCampToast('蒲团吐纳：气血真气回满，剑意 +25%', true);
+      return true;
+    }
+
+    const quote = CAMP_TEA_QUOTES[this.campTeaIdx % CAMP_TEA_QUOTES.length];
+    this.campTeaIdx += 1;
+    this.hero.state = 'drink';
+    this.hero.stateTime = 0;
+    this.hero.stateDuration = 0.68;
+    this.hero.attackVfxFired = false;
+    this.hero.hp = Math.min(this.hero.maxHp, this.hero.hp + 45);
+    this.hero.delayedHp = Math.max(this.hero.delayedHp, this.hero.hp);
+    this.hud.setCampTab('meal');
+    this.audio.playHeal();
+    this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(2.1, 1.5, 0.55), 0.35, 2.2, 0.45);
+    this.spawnWorldCallout('篝火品茗 · 神清气爽!', this.hero.pos, 'parry');
+    this.showStorySubtitle(`李逍遥：「${quote}」`, 3.0);
+    this.hud.showCampToast('篝火品茗：气血温养，可择仙酿加护下战', true);
+    return true;
+  }
+
   private updateEnemies(dt: number): void {
     const h = this.hero;
     const maxMeleeAttackers = this.getActiveStageDef().chapter <= 2 ? 3 : 4;
@@ -3237,6 +4196,36 @@ export class Game {
       const dist = Math.hypot(dx, dz);
       const toHeroYaw = Math.atan2(dx, dz);
 
+      if (e.homePos && (e.aiState === 'orbit' || e.aiState === 'chase')) {
+        const dHome = Math.hypot(e.pos.x - e.homePos.x, e.pos.z - e.homePos.z);
+        const hHome = Math.hypot(targetPos.x - e.homePos.x, targetPos.z - e.homePos.z);
+        const aggroR = e.aggroRadius ?? 16;
+        const leashR = e.leashRadius ?? 26;
+        if (dHome > leashR || (hHome > aggroR + 7 && dHome > 2.2)) {
+          const hx = e.homePos.x - e.pos.x;
+          const hz = e.homePos.z - e.pos.z;
+          const retDist = Math.hypot(hx, hz);
+          const retYaw = Math.atan2(hx, hz);
+          e.yaw = dampAngle(e.yaw, retYaw, 8, dt);
+          const retSpd = 5.4 * e.speedMult;
+          if (retDist > 0.1) {
+            e.pos.x += (hx / retDist) * retSpd * dt;
+            e.pos.z += (hz / retDist) * retSpd * dt;
+          }
+          e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.08 * dt);
+          e.rig.root.position.copy(e.pos);
+          e.rig.root.rotation.y = e.yaw;
+          e.rig.applyPose('run', 0, this.elapsed, dt, retSpd);
+          continue;
+        }
+        if (hHome > aggroR) {
+          e.yaw = dampAngle(e.yaw, toHeroYaw, 3.5, dt);
+          e.rig.root.rotation.y = e.yaw;
+          e.rig.applyPose('combatIdle', 0, this.elapsed, dt, 0);
+          continue;
+        }
+      }
+
       if (this.corridorMode && (e.aiState === 'orbit' || e.aiState === 'chase') && dist > 20) {
         e.yaw = dampAngle(e.yaw, toHeroYaw, 5, dt);
         e.rig.root.rotation.y = e.yaw;
@@ -3282,12 +4271,21 @@ export class Game {
           } else if (activeMeleeAttackers < maxMeleeAttackers) {
             if ((e.kind === 'boss' || e.kind === 'elite') && dist > 6.5) {
               activeMeleeAttackers += 1;
-              this.beginEnemyWindup(
-                e,
-                e.kind === 'boss' && e.phase === 2 && this.rng() < 0.45 ? 'barrage' : 'lunge',
-                undefined,
-                targetPos,
-              );
+              let longMove: EnemyEntity['moveKind'] =
+                e.kind === 'boss' && e.phase === 2 && this.rng() < 0.45 ? 'barrage' : 'lunge';
+              if (e.kind === 'boss' && e.bossArchetype) {
+                const rLong = this.rng();
+                if (e.bossArchetype === 'phantom') {
+                  longMove = rLong < 0.44 ? 'blinkStrike' : rLong < 0.76 ? 'swordStorm' : 'lunge';
+                } else if (e.bossArchetype === 'celestial') {
+                  longMove = rLong < 0.4 ? 'meteorRain' : rLong < 0.72 ? 'crossBeam' : 'swordStorm';
+                } else if (e.bossArchetype === 'inferno') {
+                  longMove = rLong < 0.5 ? 'lavaEruption' : 'barrage';
+                } else if (e.bossArchetype === 'titan' && dist < 8.5) {
+                  longMove = rLong < 0.48 ? 'quakeRing' : 'lunge';
+                }
+              }
+              this.beginEnemyWindup(e, longMove, undefined, targetPos);
             } else {
               e.aiState = 'chase';
               e.stateTime = 0;
@@ -3312,7 +4310,27 @@ export class Game {
             activeMeleeAttackers += 1;
             if (e.kind === 'boss' || e.kind === 'elite') {
               const roll = this.rng();
-              const mv = roll < 0.45 ? 'cleave' : roll < 0.75 ? 'slam' : 'lunge';
+              let mv: EnemyEntity['moveKind'] = roll < 0.45 ? 'cleave' : roll < 0.75 ? 'slam' : 'lunge';
+              if (e.kind === 'boss' && e.bossArchetype) {
+                if (e.bossArchetype === 'titan') {
+                  mv = roll < 0.36 ? 'quakeRing' : roll < 0.62 ? 'slam' : roll < 0.84 ? 'cleave' : 'lunge';
+                } else if (e.bossArchetype === 'phantom') {
+                  mv = roll < 0.34 ? 'blinkStrike' : roll < 0.62 ? 'swordStorm' : roll < 0.84 ? 'lunge' : 'cleave';
+                } else if (e.bossArchetype === 'inferno') {
+                  mv = roll < 0.4 ? 'lavaEruption' : roll < 0.66 ? 'slam' : roll < 0.85 ? 'barrage' : 'cleave';
+                } else if (e.bossArchetype === 'celestial') {
+                  mv =
+                    roll < 0.32
+                      ? 'crossBeam'
+                      : roll < 0.62
+                        ? 'meteorRain'
+                        : roll < 0.82
+                          ? e.phase === 2
+                            ? 'quakeRing'
+                            : 'slam'
+                          : 'swordStorm';
+                }
+              }
               this.beginEnemyWindup(e, mv, undefined, targetPos);
             } else {
               this.beginEnemyWindup(e, 'cleave', undefined, targetPos);
@@ -3345,12 +4363,30 @@ export class Game {
         if (p >= 1) {
           if (e.moveKind === 'lunge') {
             e.telegraphPos.copy(e.pos);
+          } else if (e.moveKind === 'blinkStrike') {
+            this.vfx.spawnAfterimage(e.pos, e.yaw, new THREE.Color(0.85, 0.35, 1.9), e.rig.root);
+            const behindAng = this.hero.yaw + Math.PI;
+            e.pos.set(
+              this.hero.pos.x + Math.sin(behindAng) * 2.3,
+              0,
+              this.hero.pos.z + Math.cos(behindAng) * 2.3,
+            );
+            this.arena.constrainPosition(e.pos, e.radius, prevPos);
+            e.yaw = Math.atan2(this.hero.pos.x - e.pos.x, this.hero.pos.z - e.pos.z);
+            e.rig.root.position.copy(e.pos);
+            e.rig.root.rotation.y = e.yaw;
+            this.vfx.spawnShockRing(e.pos, new THREE.Color(1.4, 0.45, 2.35), 0.25, 2.2, 0.32);
           }
           e.telegraph?.dispose();
           e.telegraph = null;
           e.aiState = 'attack';
           e.stateTime = 0;
-          e.stateDuration = e.moveKind === 'lunge' ? 0.34 : e.moveKind === 'slam' ? 0.42 : 0.34;
+          e.stateDuration =
+            e.moveKind === 'lunge' || e.moveKind === 'blinkStrike'
+              ? 0.34
+              : e.moveKind === 'slam' || e.moveKind === 'quakeRing'
+                ? 0.45
+                : 0.36;
           e.moveHasHit = false;
           this.audio.playSwordSwing(e.kind === 'boss' || e.kind === 'elite' ? 3 : 2);
         }
@@ -3362,13 +4398,19 @@ export class Game {
           e.pos.x += Math.sin(e.yaw) * lSpd * dt;
           e.pos.z += Math.cos(e.yaw) * lSpd * dt;
           this.arena.constrainPosition(e.pos, e.radius, prevPos);
-        } else if (e.moveKind === 'cleave' && p < 0.4) {
+        } else if ((e.moveKind === 'cleave' || e.moveKind === 'blinkStrike') && p < 0.4) {
           e.pos.x += Math.sin(e.yaw) * 3.5 * dt;
           e.pos.z += Math.cos(e.yaw) * 3.5 * dt;
           this.arena.constrainPosition(e.pos, e.radius, prevPos);
         }
         e.rig.root.position.copy(e.pos);
-        e.rig.applyPose(e.moveKind === 'slam' ? 'bossSlam' : 'enemySlash', p, this.elapsed, dt, 0);
+        const isSlamPose =
+          e.moveKind === 'slam' ||
+          e.moveKind === 'quakeRing' ||
+          e.moveKind === 'lavaEruption' ||
+          e.moveKind === 'crossBeam' ||
+          e.moveKind === 'meteorRain';
+        e.rig.applyPose(isSlamPose ? 'bossSlam' : 'enemySlash', p, this.elapsed, dt, 0);
 
         if (!e.moveHasHit && p >= 0.25) {
           this.executeEnemyMoveHit(e);
@@ -3492,6 +4534,45 @@ export class Game {
       e.moveRange = 14;
       e.moveDamage = Math.round((move === 'barrage' ? baseAtk * 0.72 : baseAtk) * e.damageMult);
       e.moveUnblockable = false;
+    } else if (move === 'quakeRing') {
+      e.stateDuration = 1.05 * fast;
+      e.moveRange = 8.2;
+      e.moveDamage = Math.round(baseAtk * 1.32 * e.damageMult);
+      e.moveUnblockable = true;
+      e.telegraphPos.copy(e.pos);
+      e.telegraph = this.vfx.createTelegraph('circle', e.pos, 0, e.moveRange, e.moveRange, new THREE.Color(2.2, 1.05, 0.25));
+    } else if (move === 'blinkStrike') {
+      e.stateDuration = 0.7 * fast;
+      e.moveRange = 3.8;
+      e.moveDamage = Math.round(baseAtk * 1.12 * e.damageMult);
+      e.moveUnblockable = false;
+      e.telegraph = this.vfx.createTelegraph('fan', e.pos, e.yaw, 4.4, 3.6);
+    } else if (move === 'swordStorm') {
+      e.stateDuration = 0.85 * fast;
+      e.moveRange = 15;
+      e.moveDamage = Math.round(baseAtk * 0.76 * e.damageMult);
+      e.moveUnblockable = false;
+    } else if (move === 'lavaEruption') {
+      e.stateDuration = 0.92 * fast;
+      e.moveRange = 3.4;
+      e.moveDamage = Math.round(baseAtk * 1.25 * e.damageMult);
+      e.moveUnblockable = true;
+      e.telegraphPos.copy(targetPos ?? this.hero.pos);
+      e.telegraph = this.vfx.createTelegraph('circle', e.telegraphPos, 0, 3.0, 3.0, new THREE.Color(2.4, 0.45, 0.15));
+    } else if (move === 'crossBeam') {
+      e.stateDuration = 0.95 * fast;
+      e.moveRange = 11.0;
+      e.moveDamage = Math.round(baseAtk * 1.18 * e.damageMult);
+      e.moveUnblockable = true;
+      e.telegraphPos.copy(e.pos);
+      e.telegraph = this.vfx.createTelegraph('circle', e.pos, 0, 4.8, 4.8, new THREE.Color(1.4, 0.7, 2.4));
+    } else if (move === 'meteorRain') {
+      e.stateDuration = 1.0 * fast;
+      e.moveRange = 3.6;
+      e.moveDamage = Math.round(baseAtk * 1.28 * e.damageMult);
+      e.moveUnblockable = true;
+      e.telegraphPos.copy(targetPos ?? this.hero.pos);
+      e.telegraph = this.vfx.createTelegraph('circle', e.telegraphPos, 0, 3.4, 3.4, new THREE.Color(1.6, 0.35, 2.3));
     }
   }
 
@@ -3499,16 +4580,19 @@ export class Game {
     e.moveHasHit = true;
     const h = this.hero;
 
-    if (e.moveKind === 'orb' || e.moveKind === 'barrage') {
-      const count = e.moveKind === 'barrage' ? 5 : 1;
-      const spread = 0.28;
+    if (e.moveKind === 'orb' || e.moveKind === 'barrage' || e.moveKind === 'swordStorm') {
+      const count = e.moveKind === 'swordStorm' ? 8 : e.moveKind === 'barrage' ? 5 : 1;
+      const spread = e.moveKind === 'swordStorm' ? (Math.PI * 2) / 8 : 0.28;
       for (let i = 0; i < count; i++) {
-        const ang = e.yaw + (i - (count - 1) * 0.5) * spread;
+        const ang =
+          e.moveKind === 'swordStorm'
+            ? e.yaw + i * spread + 0.15
+            : e.yaw + (i - (count - 1) * 0.5) * spread;
         const mesh = buildYinOrbMesh(e.kind === 'boss' || e.kind === 'elite');
         const startPos = e.pos.clone().add(new THREE.Vector3(Math.sin(ang) * 1.1, 1.25, Math.cos(ang) * 1.1));
         mesh.position.copy(startPos);
         this.scene.add(mesh);
-        const speed = e.kind === 'boss' ? 13.2 : 11.2;
+        const speed = e.moveKind === 'swordStorm' ? 12.2 : e.kind === 'boss' ? 13.2 : 11.2;
         this.projectiles.push({
           id: this.nextEntityId++,
           friendly: false,
@@ -3523,6 +4607,72 @@ export class Game {
           mesh,
         });
       }
+      return;
+    }
+
+    if (e.moveKind === 'quakeRing') {
+      this.vfx.spawnShockRing(e.pos, new THREE.Color(2.4, 1.35, 0.35), 0.8, e.moveRange, 0.62);
+      this.vfx.spawnShockRing(e.pos, new THREE.Color(2.2, 0.45, 0.25), 0.4, e.moveRange * 0.7, 0.48);
+      this.vfx.spawnGroundCrater(e.pos, e.moveRange * 0.65, new THREE.Color(2.2, 0.85, 0.25), 3.6);
+      this.audio.playHit(true);
+      this.cameraRig.addShake(0.65);
+      if (Math.hypot(h.pos.x - e.pos.x, h.pos.z - e.pos.z) <= e.moveRange) {
+        this.tryHitHero(e, e.moveDamage, true);
+      }
+      return;
+    }
+
+    if (e.moveKind === 'lavaEruption' || e.moveKind === 'meteorRain' || e.moveKind === 'crossBeam') {
+      const points: THREE.Vector3[] = [];
+      if (e.moveKind === 'crossBeam') {
+        const dirs = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ];
+        for (const [dx, dz] of dirs) {
+          for (const stepD of [3.5, 7.2]) {
+            const pt = new THREE.Vector3(e.pos.x + dx * stepD, 0, e.pos.z + dz * stepD);
+            this.arena.constrainPosition(pt, 1.0);
+            points.push(pt);
+          }
+        }
+      } else {
+        const count = e.moveKind === 'meteorRain' ? 4 : 3;
+        const anchor = e.telegraphPos.clone();
+        for (let i = 0; i < count; i++) {
+          const ang = (i / count) * Math.PI * 2 + this.rng() * 0.9;
+          const rad = i === 0 ? 0.6 : 2.6 + this.rng() * 2.4;
+          const pt = new THREE.Vector3(anchor.x + Math.cos(ang) * rad, 0, anchor.z + Math.sin(ang) * rad);
+          this.arena.constrainPosition(pt, 1.2);
+          points.push(pt);
+        }
+      }
+      const hzKind: Exclude<StageHazardType, 'none'> =
+        e.moveKind === 'lavaEruption' ? 'ember' : e.moveKind === 'crossBeam' ? 'lightning' : 'abyss';
+      const col =
+        hzKind === 'ember'
+          ? new THREE.Color(2.4, 0.55, 0.18)
+          : hzKind === 'lightning'
+            ? new THREE.Color(1.4, 0.55, 2.4)
+            : new THREE.Color(2.0, 0.3, 1.9);
+      const radius = e.moveKind === 'crossBeam' ? 2.1 : 2.85;
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i];
+        const telegraph = this.vfx.createTelegraph('circle', pt, 0, radius, radius, col);
+        this.hazards.push({
+          kind: hzKind,
+          pos: pt,
+          radius,
+          damage: e.moveDamage,
+          elapsed: -i * 0.08,
+          duration: 0.92,
+          telegraph,
+        });
+      }
+      this.audio.playSkillE();
+      this.cameraRig.addShake(0.35);
       return;
     }
 
@@ -3621,7 +4771,7 @@ export class Game {
         this.timeScale = 0.28;
         this.slowMoTimer = 0.34;
         this.audio.playDodge(true);
-        this.audio.playHeroVoice('dodge');
+        this.triggerHeroVoice('dodge');
         this.vfx.spawnShockRing(h.pos, new THREE.Color(0.45, 2.1, 2.2), 0.25, 2.6, 0.35);
         this.spawnWorldCallout('极限闪避 · 流云蓄势!', h.pos, 'info');
         triggerHaptic('medium');
@@ -3630,6 +4780,15 @@ export class Game {
     }
 
     if (h.hurtInvuln > 0) return false;
+
+    if (
+      this.mountMode === 'sword' &&
+      attacker &&
+      (attacker.moveKind === 'quakeRing' || attacker.moveKind === 'lavaEruption')
+    ) {
+      this.spawnWorldCallout('御剑凌空避震!', h.pos.clone().add(new THREE.Vector3(0, 1.4, 0)), 'info');
+      return false;
+    }
 
     if (h.state === 'block' && !unblockable) {
       const refPos = attacker?.pos ?? attackerWorldPos;
@@ -3702,6 +4861,9 @@ export class Game {
       }
     }
 
+    if (this.mountMode !== 'none') {
+      this.setMountMode('none', true);
+    }
     const finalDmg = Math.max(1, Math.round(dmg * (1 - loadout.dmgReduce)));
     if (!this.godMode) {
       h.hp = Math.max(0, h.hp - finalDmg);
@@ -3728,6 +4890,10 @@ export class Game {
           customTitle: '惜 败 剑 台',
           customSub: '技差一招，整顿剑意后再战！',
         });
+      } else if (this.mode === 'world') {
+        this.resetHero(new THREE.Vector3(WORLD_SPAWN_POS.x, 0, WORLD_SPAWN_POS.z), Math.PI);
+        this.cameraRig.snapTo(this.hero.pos);
+        this.showStorySubtitle('真气耗竭，已御风退回蜀山云台重整旗鼓！', 3.4);
       } else {
         this.mode = 'defeat';
         this.hud.setMode('defeat');
@@ -3849,7 +5015,17 @@ export class Game {
           }
         }
       } else if (!remove && !p.friendly) {
-        if (Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) <= h.radius + p.radius) {
+        const layoutNow = this.arena.getLayout();
+        if (layoutNow === 'pillars' || layoutNow === 'openworld') {
+          for (const obs of this.arena.circleObstacles) {
+            if (Math.hypot(p.pos.x - obs.x, p.pos.z - obs.z) <= obs.r + p.radius) {
+              this.vfx.spawnHitSparks(p.pos, new THREE.Vector3(0, 0.5, 0), new THREE.Color(1.8, 0.85, 0.5), 6, this.rng);
+              remove = true;
+              break;
+            }
+          }
+        }
+        if (!remove && Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) <= h.radius + p.radius) {
           this.tryHitHero(null, p.damage, false, p.pos);
           remove = true;
         }
@@ -3876,6 +5052,22 @@ export class Game {
         const push = (minD - d) * 0.5;
         h.pos.x += (dx / d) * push;
         h.pos.z += (dz / d) * push;
+      }
+    }
+
+    if (heroSolid && this.mode === 'camp' && this.campNpcGroup?.visible) {
+      for (const npc of [this.campNpcWineMaster, this.campNpcXuanying]) {
+        if (!npc) continue;
+        const dx = h.pos.x - npc.pos.x;
+        const dz = h.pos.z - npc.pos.z;
+        const minD = h.radius + 0.52;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < minD * minD && d2 > 1e-6) {
+          const d = Math.sqrt(d2);
+          const push = minD - d;
+          h.pos.x += (dx / d) * push;
+          h.pos.z += (dz / d) * push;
+        }
       }
     }
 
@@ -3932,6 +5124,7 @@ export class Game {
         if (this.corridorMode && this.arena.getUnlockedZone() < nextZone) {
           this.arena.setUnlockedZone(nextZone);
           this.audio.playDropChime('spirit');
+          this.showStorySubtitle(`灵桥已开，前方即是「${this.arena.getZoneName(nextZone)}」！`, 2.4);
         }
         this.stagePhase = 'waveTransition';
         this.stageTimer = 1.2;
@@ -3940,6 +5133,9 @@ export class Game {
         this.stagePhase = 'done';
         this.stageTimer = 1.1;
         this.audio.setMood('victory');
+        if (stageDef.victoryLine) {
+          this.showStorySubtitle(stageDef.victoryLine, 2.8);
+        }
       }
     } else if (this.stagePhase === 'waveTransition') {
       this.stageTimer -= dt;
@@ -3958,7 +5154,7 @@ export class Game {
     }
   }
 
-  private completeCurrentStage(): void {
+  private completeCurrentStage(skipEpilogue = false): void {
     for (const gear of this.vfx.collectAllGearDrops()) {
       this.saveStore.addRolledItem(gear);
       this.stageDroppedGear.push(gear);
@@ -4004,10 +5200,6 @@ export class Game {
     const nextStageId = stageDef.id < 20 ? stageDef.id + 1 : null;
     const blessingChoices = nextStageId && this.mp.mode === 'offline' ? pickBlessingChoices(this.rng, 3) : undefined;
 
-    this.mode = 'victory';
-    this.hud.clearSubtitle();
-    this.hud.setMode('victory');
-    this.audio.playHeroVoice('victory');
     const opts: ResultDisplayOptions = {
       stageDef,
       starResult,
@@ -4016,6 +5208,25 @@ export class Game {
       droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
       jadeEarned: this.hero.stageJadeEarned,
     };
+
+    if (stageDef.id === 20 && this.mp.mode === 'offline') {
+      this.lastEpilogueResultOpts = opts;
+      if (!skipEpilogue) {
+        this.pendingEpilogueResultOpts = opts;
+        this.dialogueContext = 'epilogue';
+        this.activeDialogueDef = STAGE_20_EPILOGUE;
+        this.mode = 'dialogue';
+        this.hud.clearSubtitle();
+        this.audio.playDialogueStep(false);
+        this.hud.showStageDialogue(STAGE_20_EPILOGUE);
+        return;
+      }
+    }
+
+    this.mode = 'victory';
+    this.hud.clearSubtitle();
+    this.hud.setMode('victory');
+    this.audio.playHeroVoice('victory');
     this.hud.showResult(true, this.runElapsed, this.hero, opts);
   }
 
@@ -4430,7 +5641,7 @@ export class Game {
         for (const e of this.enemies) {
           if (e.aiState !== 'dead') this.killEnemy(e);
         }
-        this.completeCurrentStage();
+        this.completeCurrentStage(true);
       },
       god: (on = true) => {
         this.godMode = on;
@@ -4551,6 +5762,7 @@ export class Game {
       playing: 'playing',
       cutscene: 'playing',
       camp: 'explore',
+      world: 'explore',
       showcase: 'explore',
       victory: 'win',
       defeat: 'loss',
@@ -4567,9 +5779,18 @@ export class Game {
           },
         },
         phase: phaseMap[this.mode] ?? 'ready',
+        mode: this.mode,
         biome: this.arena.getBiome(),
         stageId: this.currentStageId,
         zone: this.arena.getZoneIndexAtZ(this.hero.pos.z),
+        mountMode: this.mountMode,
+        heroY: Number(this.hero.rig.root.position.y.toFixed(3)),
+        arenaLayout: this.arena.getLayout(),
+        worldRegion: this.mode === 'world' ? getWorldRegionAt(this.hero.pos.x, this.hero.pos.z).name : '',
+        bossArchetypes: this.enemies
+          .filter((e) => e.kind === 'boss' && e.aiState !== 'dead')
+          .map((b) => b.bossArchetype ?? 'default'),
+        worldProgress: this.saveStore.getWorldProgress(),
       }),
       getStats: () => {
         const stats = this.pipeline.getStats();
@@ -4585,6 +5806,60 @@ export class Game {
       sendAction: (action: string) => {
         if (action === 'enterCamp') {
           this.enterCampMode();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action === 'enterWorld') {
+          this.enterOpenWorldMode();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action.startsWith('mount:')) {
+          const m = action.slice('mount:'.length) as MountMode;
+          if (m === 'none') {
+            this.setMountMode('none', true);
+          } else if (m === 'horse' || m === 'sword') {
+            this.setMountMode(m);
+            this.stepFrame(0.05, true);
+          } else {
+            return false;
+          }
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action === 'worldInteract') {
+          const ok = this.triggerWorldInteract();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action === 'worldOpenNearestChest') {
+          if (this.mode !== 'world') return false;
+          const nextChest = WORLD_CHESTS.find((c) => !this.saveStore.isWorldChestOpened(c.id)) ?? WORLD_CHESTS[0];
+          if (!nextChest) return false;
+          this.hero.pos.set(nextChest.x, 0, nextChest.z + 1.5);
+          this.hero.rig.root.position.x = this.hero.pos.x;
+          this.hero.rig.root.position.z = this.hero.pos.z;
+          const ok = this.triggerWorldInteract({ kind: 'chest', id: nextChest.id });
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action.startsWith('worldTeleport:')) {
+          const wpId = action.slice('worldTeleport:'.length);
+          if (wpId !== 'wp_center' && !this.saveStore.isWorldWaypointLit(wpId)) {
+            this.triggerWorldInteract({ kind: 'waypoint', id: wpId });
+          }
+          const ok = this.teleportToWorldWaypoint(wpId);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action === 'worldRespawnBosses') {
+          this.respawnAllWorldBosses();
           this.pipeline.render();
           this.publishDiagnostics();
           return true;
@@ -4616,6 +5891,32 @@ export class Game {
           this.pipeline.render();
           this.publishDiagnostics();
           return ok;
+        }
+        if (action.startsWith('interactCamp:')) {
+          const spot = action.slice('interactCamp:'.length) as 'wine' | 'ally' | 'mat' | 'tea';
+          const ok = this.triggerCampHotspotInteract(spot);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action === 'openEpilogue') {
+          this.currentStageId = 20;
+          const s20 = getStageDef(20);
+          const starRes = evaluateStageStars(s20, 62, 0.9, 4);
+          this.lastEpilogueResultOpts = {
+            stageDef: s20,
+            starResult: starRes,
+            nextStageId: null,
+            jadeEarned: 470,
+          };
+          this.pendingEpilogueResultOpts = this.lastEpilogueResultOpts;
+          this.dialogueContext = 'epilogue';
+          this.activeDialogueDef = STAGE_20_EPILOGUE;
+          this.mode = 'dialogue';
+          this.hud.showStageDialogue(STAGE_20_EPILOGUE);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
         }
         if (action === 'hitDummy') {
           const dummy = this.enemies.find((e) => e.isDummy && e.aiState !== 'dead');
@@ -4715,6 +6016,34 @@ export class Game {
           .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
         const diffPass = stage1Hp >= 1200 && stage20Hp > stage1Hp;
 
+        const allStoryIds = [...CAMPAIGN_STAGES.map((s) => s.id), 101, 102, 103];
+        const scriptsPresent = allStoryIds.every((id) => {
+          const sc = EPISODE_STORY_SCRIPTS[id];
+          return (
+            Boolean(sc) &&
+            sc.lines.length >= 3 &&
+            sc.choices.length === 2 &&
+            Boolean(sc.choices[0].heroReply) &&
+            Boolean(sc.choices[1].heroReply) &&
+            !sc.lines.some((l) => l.role === 'enemy' && l.text.startsWith(`${l.speaker.split('·')[0].trim()}`))
+          );
+        });
+        const epilogueOk = STAGE_20_EPILOGUE.lines.length >= 4 && STAGE_20_EPILOGUE.mode === 'epilogue';
+        const campNpcOk = this.campNpcGroup !== null;
+
+        const bossArchetypes = new Set(
+          CAMPAIGN_STAGES.flatMap((s) => s.waves.flatMap((w) => w.enemies.map((sp) => sp.bossArchetype))).filter(Boolean),
+        );
+        const stageLayouts = new Set(CAMPAIGN_STAGES.map((s) => s.stageLayout).filter(Boolean));
+        const mountsAndOpenWorldOk =
+          WORLD_WAYPOINTS.length === 4 &&
+          WORLD_CHESTS.length === 6 &&
+          WORLD_BOSS_SPAWNS.length === 4 &&
+          WORLD_MOB_CAMPS.length === 4 &&
+          bossArchetypes.size >= 4 &&
+          stageLayouts.has('pillars') &&
+          stageLayouts.has('islands');
+
         return {
           biomesDistinct: {
             pass: biomeSwitchOk,
@@ -4735,6 +6064,14 @@ export class Game {
           stageDifficultyBuffed: {
             pass: diffPass,
             detail: `stage1Hp=${stage1Hp}, stage20Hp=${stage20Hp}`,
+          },
+          storyScriptsValid: {
+            pass: scriptsPresent && epilogueOk,
+            detail: `scripts=${allStoryIds.length}, epilogue=${STAGE_20_EPILOGUE.lines.length}, campNpcInit=${campNpcOk}`,
+          },
+          mountsAndOpenWorldValid: {
+            pass: mountsAndOpenWorldOk,
+            detail: `wp=${WORLD_WAYPOINTS.length}, chests=${WORLD_CHESTS.length}, wb=${WORLD_BOSS_SPAWNS.length}, archetypes=${bossArchetypes.size}`,
           },
         };
       },
@@ -4767,8 +6104,25 @@ export class Game {
         dots.push({ x: d.pos.x, z: d.pos.z, kind: 'loot' });
       }
     }
+    const isWorld = this.mode === 'world';
     return {
       corridorMode: this.corridorMode,
+      openWorldMode: isWorld,
+      mountMode: this.mountMode,
+      worldWaypoints: isWorld
+        ? WORLD_WAYPOINTS.map((wp) => ({
+            x: wp.x,
+            z: wp.z,
+            lit: this.saveStore.isWorldWaypointLit(wp.id),
+          }))
+        : undefined,
+      worldChests: isWorld
+        ? WORLD_CHESTS.map((ch) => ({
+            x: ch.x,
+            z: ch.z,
+            opened: this.saveStore.isWorldChestOpened(ch.id),
+          }))
+        : undefined,
       biome: this.arena.getBiome(),
       heroX: h.pos.x,
       heroZ: h.pos.z,
@@ -4777,7 +6131,7 @@ export class Game {
       zMin,
       maxZone,
       unlockedZone,
-      zoneName: this.arena.getZoneName(curZone),
+      zoneName: isWorld ? getWorldRegionAt(h.pos.x, h.pos.z).name : this.arena.getZoneName(curZone),
       progressPct: this.arena.getProgressPct(h.pos.z),
       dots,
       q2Ready: h.q2ReadyTimer > 0,
