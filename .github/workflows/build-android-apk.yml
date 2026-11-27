@@ -59,7 +59,7 @@ jobs:
         run: |
           KS_FILE="$RUNNER_TEMP/lixiaoyao-release.jks"
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 --decode > "$KS_FILE"
+            printf '%s' "$KEYSTORE_B64" | tr -d '\r\n\t ' | base64 --decode > "$KS_FILE"
             echo "ANDROID_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
             echo "ANDROID_KEYSTORE_PASSWORD=${KEYSTORE_PASS}" >> "$GITHUB_ENV"
             echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"

@@ -74,9 +74,16 @@ async function main() {
   }
 
   execFileSync(ghBin, ['workflow', 'run', WORKFLOW, '--ref', branch, '--repo', REPO], { stdio: 'inherit' });
-  await delay(5000);
-  runs = await fetchRuns();
-  matching = runs.find((r) => r.head_sha === headSha) ?? runs[0] ?? null;
+  matching = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await delay(4000);
+    runs = await fetchRuns();
+    matching = runs.find((r) => r.head_sha === headSha) ?? null;
+    if (matching) break;
+  }
+  if (!matching) {
+    matching = runs[0] ?? null;
+  }
 
   console.log(
     JSON.stringify(

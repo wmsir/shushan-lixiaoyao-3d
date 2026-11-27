@@ -122,6 +122,7 @@ export interface EnemyEntity {
   worldBossId?: string;
   aggroRadius?: number;
   leashRadius?: number;
+  aggroHeroTimer?: number;
   speedMult: number;
   damageMult: number;
   rig: CharacterRig;

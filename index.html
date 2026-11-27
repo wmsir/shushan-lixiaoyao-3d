@@ -28,7 +28,7 @@
         <div class="title-card">
           <div class="title-kicker">
             <span>SHUSHAN DEMON-LOCK COURT · 20 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.61</span>
+            <span id="app-version-badge" class="version-pill">v1.62</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
@@ -56,7 +56,7 @@
             <button id="btn-open-world" class="xianxia-btn world-btn" type="button">九州仙域 · 大世界</button>
             <button id="btn-open-camp" class="xianxia-btn camp-btn" type="button">云来剑庐 · 休息养成</button>
             <button id="btn-open-dungeon" class="xianxia-btn dungeon-btn" type="button">
-              秘境打宝
+              试炼 · 塔/肉鸽
               <span id="dungeon-bounty-dot" class="bounty-dot" aria-hidden="true"></span>
             </button>
             <button id="btn-open-campaign" class="xianxia-btn map-btn" type="button">二十关 · 剑录</button>
@@ -121,8 +121,12 @@
           <!-- 4 Chapter Tabs -->
           <div id="chapter-tabs" class="chapter-tabs" role="tablist" aria-label="战役章节"></div>
 
-          <!-- Active Chapter Lore Banner -->
+          <!-- Active Chapter Lore Banner & Star Milestone Chests -->
           <div id="chapter-lore-bar" class="chapter-lore-bar"></div>
+          <div class="chapter-sub-strip">
+            <div id="chapter-chest-bar" class="chapter-chest-bar"></div>
+            <div id="campaign-diff-bar" class="diff-seg-bar" role="group" aria-label="关卡难度"></div>
+          </div>
 
           <!-- 5 Stage Cards for Active Chapter -->
           <div id="stage-card-grid" class="stage-card-grid"></div>
@@ -160,23 +164,50 @@
         </div>
       </section>
 
-      <!-- Legend-Style Repeatable Dungeon & Commercial Bounties Overlay (秘境打宝) -->
+      <!-- Commercial Trials Hub: Spiral Abyss Tower / Roguelike / Loot Dungeons & Bounties -->
       <section id="dungeon-overlay" class="overlay">
         <div class="dungeon-modal">
           <div class="dungeon-head">
             <div class="dungeon-head-left">
-              <h2 class="campaign-title">秘境打宝 · 传奇爆装</h2>
+              <h2 class="campaign-title">试炼秘境 · 锁妖塔 / 肉鸽 / 打宝</h2>
               <span id="dungeon-power-pill" class="realm-badge">剑道战力 460</span>
               <span id="dungeon-pity-pill" class="pity-badge">极品保底 0/5</span>
               <span id="dungeon-toast" class="shop-toast" role="status" aria-live="polite"></span>
             </div>
             <button id="btn-close-dungeon" class="util-btn" type="button">返回</button>
           </div>
+          <div class="trials-top-strip">
+            <div id="trials-tabs" class="trials-tabs" role="tablist" aria-label="试炼玩法切换">
+              <button id="tab-trials-tower" class="trials-tab active" type="button" data-trials-tab="tower">锁妖九重塔</button>
+              <button id="tab-trials-roguelike" class="trials-tab" type="button" data-trials-tab="roguelike">幻境肉鸽</button>
+              <button id="tab-trials-dungeon" class="trials-tab" type="button" data-trials-tab="dungeon">传奇秘境 &amp; 赏格</button>
+            </div>
+            <div id="trials-diff-bar" class="diff-seg-bar" role="group" aria-label="挑战难度"></div>
+          </div>
           <div class="dungeon-scroll">
-            <div id="dungeon-card-grid" class="dungeon-card-grid"></div>
-            <div class="bounty-section">
-              <div class="bounty-head">剑侠悬赏 · 日常赏格</div>
-              <div id="bounty-grid" class="bounty-grid"></div>
+            <div id="trials-pane-tower" class="trials-pane active">
+              <div id="tower-summary-row" class="tower-summary-row">
+                <span id="tower-stars-pill" class="stars-badge">★ 0 / 27</span>
+                <div id="tower-chest-bar" class="tower-chest-bar"></div>
+              </div>
+              <div id="tower-floor-grid" class="tower-floor-grid"></div>
+            </div>
+            <div id="trials-pane-roguelike" class="trials-pane">
+              <div id="roguelike-hero-bar" class="roguelike-hero-bar">
+                <div class="rl-hero-info">
+                  <strong class="rl-hero-title">六境幻境远征 · 三派系词条共鸣</strong>
+                  <span id="roguelike-record-text" class="rl-hero-sub">最高深处 0 / 6 境 · 累计通关 0 次</span>
+                </div>
+                <button id="btn-start-roguelike" class="xianxia-btn primary rl-start-btn" type="button">开启 6 境幻境远征</button>
+              </div>
+              <div id="roguelike-paths-grid" class="roguelike-paths-grid"></div>
+            </div>
+            <div id="trials-pane-dungeon" class="trials-pane">
+              <div id="dungeon-card-grid" class="dungeon-card-grid"></div>
+              <div class="bounty-section">
+                <div class="bounty-head">剑侠悬赏 · 日常赏格</div>
+                <div id="bounty-grid" class="bounty-grid"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -263,6 +294,13 @@
             </div>
             <div class="boss-poise-track" title="破势条">
               <div id="boss-poise-fill" class="boss-poise-fill"></div>
+            </div>
+          </div>
+          <div id="stage-mod-bar" class="stage-mod-bar"></div>
+          <div id="monolith-bar" class="monolith-bar">
+            <span id="monolith-label" class="monolith-label">蜀山灵脉 100%</span>
+            <div class="monolith-track">
+              <div id="monolith-fill" class="monolith-fill"></div>
             </div>
           </div>
         </div>
@@ -485,7 +523,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.61</span>
+            <span id="pause-version-badge" class="version-pill">v1.62</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
@@ -516,6 +554,7 @@
             <p id="result-story-line" class="result-story-line"></p>
             <div class="result-badges-row">
               <div id="result-stars-row" class="result-stars-row"></div>
+              <span id="result-rank-badge" class="rank-badge">评级 S</span>
               <span id="result-jade-gain" class="jade-badge">+0 灵石</span>
             </div>
           </div>
@@ -523,8 +562,12 @@
             <div id="result-stats" class="result-stats"></div>
             <div id="result-loot-row" class="result-loot-row"></div>
             <div id="result-blessing-wrap" class="result-blessing-wrap">
-              <div class="blessing-header">剑阁赐福 · 择一随行</div>
+              <div id="result-blessing-header" class="blessing-header">剑阁赐福 · 择一随行</div>
               <div id="result-blessing-grid" class="blessing-grid"></div>
+              <label id="result-greed-row" class="greed-pact-row">
+                <input id="chk-greed-pact" type="checkbox" />
+                <span><b>贪狼赌契</b>：下境敌+25%血/+15%攻，额外奖励 +120 灵石 &amp; 必掉玄品神兵</span>
+              </label>
             </div>
           </div>
           <div class="modal-actions result-footer">

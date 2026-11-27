@@ -23,6 +23,22 @@ import {
   getStageDef,
   getSwordRealm,
 } from '../game/CampaignData';
+import {
+  CHAPTER_STAR_CHESTS,
+  DIFFICULTY_TIERS,
+  LEYLINE_AFFIX_MAP,
+  ROGUELIKE_PATHS,
+  STAGE_MODE_LABELS,
+  TOWER_FLOORS,
+  TOWER_STAR_CHESTS,
+  type CombatStyleRankInfo,
+  type DifficultyTierId,
+  type LeylineAffixId,
+  type RoguelikeBlessingDef,
+  type RoguelikePathId,
+  type StageMode,
+  type TowerFloorDef,
+} from '../game/EndgameData';
 import type { WorldBiome } from '../world/ShushanArena';
 import type { MountMode } from '../entities/MountRig';
 import { WORLD_BOUND, WORLD_WAYPOINTS } from '../game/OpenWorldData';
@@ -88,6 +104,17 @@ export interface HudTacticalState {
   comboSigils: Array<'A' | 'Q' | 'E' | 'D'>;
   comboUltReady: boolean;
   comboUltTimer: number;
+  stageMode?: StageMode;
+  leylineAffix?: LeylineAffixId;
+  difficultyShort?: string;
+  monolithHp?: number;
+  monolithMaxHp?: number;
+  surviveRemainSec?: number;
+  heroInLeylineZone?: boolean;
+  leylineZoneActive?: boolean;
+  roguelikePaths?: Record<RoguelikePathId, number>;
+  combatStyleScore?: number;
+  combatRank?: CombatStyleRankInfo;
 }
 
 export interface HudCallbacks {
@@ -127,11 +154,24 @@ export interface HudCallbacks {
   onSalvageLow: (maxRarity: 'common' | 'rare') => { count: number; jade: number };
   onClaimBounty: (bountyId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
   onCastComboUlt?: () => void;
+  onStartTower?: (floorNum: number) => void;
+  onStartRoguelike?: () => void;
+  onAdvanceRoguelike?: (selectedBlessingId?: string, greedPact?: boolean) => void;
+  onSetDifficulty?: (diff: DifficultyTierId) => void;
+  onClaimChapterChest?: (chestId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
+  onClaimTowerChest?: (starsReq: number) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
 }
 
 export interface ResultDisplayOptions {
   stageDef?: StageDef;
   dungeonDef?: DungeonDef;
+  towerFloor?: TowerFloorDef;
+  nextTowerFloorId?: number | null;
+  roguelikeChamber?: number;
+  roguelikeTotalChambers?: number;
+  roguelikeBlessings?: RoguelikeBlessingDef[];
+  roguelikePaths?: Record<RoguelikePathId, number>;
+  combatRank?: CombatStyleRankInfo;
   droppedGear?: RolledGearItem[];
   starResult?: {
     stars: 1 | 2 | 3;
@@ -298,13 +338,29 @@ export class HudController {
   private readonly shopPowerSummary = this.q('#shop-power-summary');
   private readonly shopBattleBtn = this.q('#btn-shop-battle');
 
-  // Dungeon & Bounty Modal elements
+  // Dungeon, Tower, Roguelike & Bounty Modal elements
   private readonly dungeonPowerPill = this.q('#dungeon-power-pill');
   private readonly dungeonPityPill = this.q('#dungeon-pity-pill');
   private readonly dungeonToastEl = this.q('#dungeon-toast');
+  private readonly trialsDiffBar = this.q('#trials-diff-bar');
+  private readonly trialsTabBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('#trials-tabs .trials-tab'));
+  private readonly trialsPaneTower = this.q('#trials-pane-tower');
+  private readonly trialsPaneRoguelike = this.q('#trials-pane-roguelike');
+  private readonly trialsPaneDungeon = this.q('#trials-pane-dungeon');
+  private readonly towerStarsPill = this.q('#tower-stars-pill');
+  private readonly towerChestBar = this.q('#tower-chest-bar');
+  private readonly towerFloorGrid = this.q('#tower-floor-grid');
+  private readonly roguelikeRecordText = this.q('#roguelike-record-text');
+  private readonly roguelikePathsGrid = this.q('#roguelike-paths-grid');
   private readonly dungeonCardGrid = this.q('#dungeon-card-grid');
   private readonly bountyGrid = this.q('#bounty-grid');
   private readonly dungeonBountyDot = this.q('#dungeon-bounty-dot');
+  private readonly chapterChestBar = this.q('#chapter-chest-bar');
+  private readonly campaignDiffBar = this.q('#campaign-diff-bar');
+  private readonly stageModBar = this.q('#stage-mod-bar');
+  private readonly monolithBar = this.q('#monolith-bar');
+  private readonly monolithLabel = this.q('#monolith-label');
+  private readonly monolithFill = this.q('#monolith-fill');
 
   // Dialogue Modal elements
   private readonly dlgKicker = this.q('#dlg-kicker');
@@ -374,11 +430,15 @@ export class HudController {
   private readonly resultTitle = this.q('#result-title');
   private readonly resultStoryLine = this.q('#result-story-line');
   private readonly resultStarsRow = this.q('#result-stars-row');
+  private readonly resultRankBadge = this.q('#result-rank-badge');
   private readonly resultJadeGain = this.q('#result-jade-gain');
   private readonly resultStats = this.q('#result-stats');
   private readonly resultLootRow = this.q('#result-loot-row');
   private readonly resultBlessingWrap = this.q('#result-blessing-wrap');
+  private readonly resultBlessingHeader = this.q('#result-blessing-header');
   private readonly resultBlessingGrid = this.q('#result-blessing-grid');
+  private readonly resultGreedRow = this.q('#result-greed-row');
+  private readonly chkGreedPact = this.q('#chk-greed-pact') as HTMLInputElement;
   private readonly nextStageBtn = this.q('#btn-next-stage');
   private readonly retryBtn = this.q('#btn-retry');
 
@@ -396,12 +456,15 @@ export class HudController {
   private selectedStage = 1;
   private activeChapter: 1 | 2 | 3 | 4 = 1;
   private activeShopCategory: EquipCategory | 'bag' = 'weapon';
+  private activeTrialsTab: 'tower' | 'roguelike' | 'dungeon' = 'tower';
   private campPanelCollapsed = false;
   private saveStore: CampaignSaveStore | null = null;
   private selectedBlessingId: string | undefined;
   private selectedDialogueChoiceId: string | undefined;
   private pendingNextStageId: number | null = null;
   private pendingDungeonId: string | null = null;
+  private pendingTowerFloorId: number | null = null;
+  private pendingRoguelikeNext = false;
   private currentScreenMode: ScreenMode = 'title';
   private subtitleTimer = 0;
   private stageBannerTimer = 0;
@@ -459,10 +522,20 @@ export class HudController {
     });
     this.q('#btn-world-next-goal').addEventListener('click', () => this.callbacks.onWorldCycleGuide?.());
     this.worldAutoNavBtn.addEventListener('click', () => this.callbacks.onWorldToggleAutoNav?.());
-    this.q('#btn-open-dungeon').addEventListener('click', () => this.openDungeon());
+    this.q('#btn-open-dungeon').addEventListener('click', () => this.openTrialsHub());
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
     this.q('#btn-open-shop').addEventListener('click', () => this.openShop());
     this.q('#btn-close-dungeon').addEventListener('click', () => this.closeDungeon());
+    for (const tabBtn of this.trialsTabBtns) {
+      tabBtn.addEventListener('click', () => {
+        const tab = tabBtn.dataset.trialsTab as 'tower' | 'roguelike' | 'dungeon';
+        if (tab) this.setTrialsTab(tab);
+      });
+    }
+    this.q('#btn-start-roguelike').addEventListener('click', () => {
+      this.closeDungeon();
+      this.callbacks.onStartRoguelike?.();
+    });
     this.q('#btn-close-campaign').addEventListener('click', () => this.closeCampaignMap());
     this.q('#btn-close-shop').addEventListener('click', () => this.closeShop());
     this.shopBattleBtn.addEventListener('click', () => {
@@ -512,7 +585,11 @@ export class HudController {
     });
 
     this.nextStageBtn.addEventListener('click', () => {
-      if (this.pendingDungeonId) {
+      if (this.pendingTowerFloorId) {
+        this.callbacks.onStartTower?.(this.pendingTowerFloorId);
+      } else if (this.pendingRoguelikeNext) {
+        this.callbacks.onAdvanceRoguelike?.(this.selectedBlessingId, this.chkGreedPact.checked);
+      } else if (this.pendingDungeonId) {
         this.callbacks.onStartDungeon(this.pendingDungeonId);
       } else if (this.pendingNextStageId) {
         this.callbacks.onNextStage(this.pendingNextStageId, this.selectedBlessingId);
@@ -643,13 +720,46 @@ export class HudController {
     this.renderShopModal();
     this.renderDungeonModal();
     this.renderCampPanel();
-    const hasClaimableBounty = store.getBountyStates().some((b) => b.done && !b.claimed);
-    this.dungeonBountyDot.classList.toggle('visible', hasClaimableBounty);
+    this.dungeonBountyDot.classList.toggle('visible', store.hasAnyClaimableReward());
   }
 
   openDungeon(): void {
+    this.openTrialsHub();
+  }
+
+  openTrialsHub(tab?: 'tower' | 'roguelike' | 'dungeon'): void {
+    if (tab) this.activeTrialsTab = tab;
+    this.setTrialsTab(this.activeTrialsTab);
     this.renderDungeonModal();
     this.dungeonOverlay.classList.add('visible');
+  }
+
+  private setTrialsTab(tab: 'tower' | 'roguelike' | 'dungeon'): void {
+    this.activeTrialsTab = tab;
+    for (const btn of this.trialsTabBtns) {
+      btn.classList.toggle('active', btn.dataset.trialsTab === tab);
+    }
+    this.trialsPaneTower.classList.toggle('active', tab === 'tower');
+    this.trialsPaneRoguelike.classList.toggle('active', tab === 'roguelike');
+    this.trialsPaneDungeon.classList.toggle('active', tab === 'dungeon');
+  }
+
+  private renderDifficultyBar(container: HTMLElement): void {
+    const store = this.saveStore;
+    if (!store) return;
+    const active = store.getSelectedDifficulty();
+    container.innerHTML = '';
+    for (const d of DIFFICULTY_TIERS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `diff-seg-btn diff-${d.id}${active === d.id ? ' active' : ''}`;
+      btn.title = `${d.label}：${d.badge}`;
+      btn.textContent = d.shortLabel;
+      btn.addEventListener('click', () => {
+        this.callbacks.onSetDifficulty?.(d.id);
+      });
+      container.appendChild(btn);
+    }
   }
 
   closeDungeon(): void {
@@ -682,6 +792,73 @@ export class HudController {
     this.dungeonPowerPill.textContent = `剑道战力 ${power}`;
     this.dungeonPityPill.textContent = `极品保底 ${pity}/5`;
     this.dungeonPityPill.classList.toggle('ready', pity >= 4);
+    this.renderDifficultyBar(this.trialsDiffBar);
+
+    // 1. Spiral Abyss 9-Floor Tower Pane
+    const totalTowerStars = store.getTotalTowerStars();
+    this.towerStarsPill.textContent = `★ ${totalTowerStars} / 27`;
+    this.towerChestBar.innerHTML = '';
+    for (const ch of TOWER_STAR_CHESTS) {
+      const claimed = store.isTowerChestClaimed(ch.starsReq);
+      const ready = !claimed && totalTowerStars >= ch.starsReq;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `chest-pill${ready ? ' ready' : ''}${claimed ? ' claimed' : ''}`;
+      btn.disabled = !ready;
+      btn.textContent = claimed ? `✓ ${ch.label}` : ready ? `领取 ${ch.label}` : `${ch.starsReq}★ ${ch.label}`;
+      btn.addEventListener('click', () => {
+        const res = this.callbacks.onClaimTowerChest?.(ch.starsReq);
+        if (res) {
+          this.showDungeonToast(res.reason, res.ok);
+          this.syncCampaignProgress(store, this.selectedStage);
+        }
+      });
+      this.towerChestBar.appendChild(btn);
+    }
+
+    this.towerFloorGrid.innerHTML = '';
+    for (const fl of TOWER_FLOORS) {
+      const stars = store.getTowerStars(fl.id);
+      const affix = LEYLINE_AFFIX_MAP[fl.stageDef.leylineAffix ?? 'none'];
+      const modeName = STAGE_MODE_LABELS[fl.stageDef.stageMode ?? 'exterminate'];
+      const metPower = power >= fl.recommendedPower;
+      const starHtml = [1, 2, 3].map((n) => `<span class="sc-star${n <= stars ? ' lit' : ''}">★</span>`).join('');
+      const card = document.createElement('div');
+      card.className = `tower-card tier-${fl.tier}`;
+      card.innerHTML = `
+        <div class="tw-top">
+          <span class="tw-tier">${fl.tierLabel}</span>
+          <span class="tw-mode">${modeName}</span>
+          <div class="tw-stars">${starHtml}</div>
+        </div>
+        <div class="tw-name">${fl.name}</div>
+        <div class="tw-affix" style="color:${affix.colorHex}">词缀：${affix.name}</div>
+        <div class="tw-sub">${fl.subtitle}</div>
+        <div class="tw-foot">
+          <span class="dg-power ${metPower ? 'met' : 'warn'}">推荐 ${fl.recommendedPower}</span>
+          <button type="button" class="xianxia-btn primary tw-enter-btn">${stars > 0 ? `再战 ◆+${fl.repeatJade}` : `首通 ◆+${fl.firstClearJade}`}</button>
+        </div>
+      `;
+      card.querySelector('.tw-enter-btn')?.addEventListener('click', () => {
+        this.closeDungeon();
+        this.callbacks.onStartTower?.(fl.id);
+      });
+      this.towerFloorGrid.appendChild(card);
+    }
+
+    // 2. Roguelike 3-Path Synergy Pane
+    this.roguelikeRecordText.textContent = `最高深处 ${store.getRoguelikeBestFloor()} / 6 境 · 累计通关 ${store.getRoguelikeClears()} 次`;
+    this.roguelikePathsGrid.innerHTML = ROGUELIKE_PATHS.map(
+      (p) => `
+      <div class="rl-path-card" style="--rl-accent:${p.accentHex}">
+        <div class="rl-path-head">
+          <strong>${p.name}</strong>
+          <span>${p.tag}</span>
+        </div>
+        <div class="rl-res-box"><b>${p.res2Title}</b><span>${p.res2Desc}</span></div>
+        <div class="rl-res-box prime"><b>${p.res3Title}</b><span>${p.res3Desc}</span></div>
+      </div>`,
+    ).join('');
 
     this.dungeonCardGrid.innerHTML = '';
     for (const d of DUNGEON_LIST) {
@@ -1266,10 +1443,31 @@ export class HudController {
       this.chapterTabsEl.appendChild(btn);
     }
 
-    // 2. Chapter Lore Strip
+    // 2. Chapter Lore Strip + Chapter Star Chests + Difficulty Switch
     const activeCh = getChapterDef(this.activeChapter);
     this.chapterLoreEl.style.setProperty('--ch-accent', activeCh.accentHex);
     this.chapterLoreEl.innerHTML = `<b>${activeCh.roman} · ${activeCh.name}（第 ${activeCh.stageRange[0]}–${activeCh.stageRange[1]} 关）</b><span>${activeCh.lore}</span>`;
+
+    this.renderDifficultyBar(this.campaignDiffBar);
+    const chStarsNow = store?.getChapterStars(this.activeChapter) ?? 0;
+    this.chapterChestBar.innerHTML = '';
+    for (const cDef of CHAPTER_STAR_CHESTS.filter((c) => c.chapter === this.activeChapter)) {
+      const claimed = store?.isChapterChestClaimed(cDef.id) ?? false;
+      const ready = !claimed && chStarsNow >= cDef.starsReq;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `chest-pill${ready ? ' ready' : ''}${claimed ? ' claimed' : ''}`;
+      btn.disabled = !ready;
+      btn.textContent = claimed ? `✓ ${cDef.label}` : ready ? `领取 ${cDef.label}` : `${cDef.label}`;
+      btn.addEventListener('click', () => {
+        const res = this.callbacks.onClaimChapterChest?.(cDef.id);
+        if (res && store) {
+          this.showShopToast(res.reason, res.ok);
+          this.syncCampaignProgress(store, this.selectedStage);
+        }
+      });
+      this.chapterChestBar.appendChild(btn);
+    }
 
     // 3. Render 5 Stage Cards for Active Chapter
     this.stageGridEl.innerHTML = '';
@@ -1287,6 +1485,10 @@ export class HudController {
         .map((n) => `<span class="sc-star${n <= earned ? ' lit' : ''}">★</span>`)
         .join('');
       const hazardChip = st.hazardLabel ? `<span class="sc-hazard">${st.hazardLabel}</span>` : '';
+      const modeChip =
+        st.stageMode && st.stageMode !== 'exterminate'
+          ? `<span class="sc-mode">${STAGE_MODE_LABELS[st.stageMode]}</span>`
+          : '';
       const recTag = isRec ? '<span class="sc-rec">推荐</span>' : '';
       card.innerHTML = `
         <div class="sc-top">
@@ -1298,6 +1500,7 @@ export class HudController {
         <div class="sc-sub">${st.subtitle}</div>
         <div class="sc-tags">
           <span class="sc-biome biome-${st.biome}">[${BIOME_LABELS[st.biome]}]</span>
+          ${modeChip}
           <span class="sc-wave">${st.waves.length}波</span>
           <span class="sc-time">${st.parTimeSec}s</span>
           ${hazardChip}
@@ -1439,6 +1642,11 @@ export class HudController {
       this.tSlotQ.classList.remove('q2-ready');
       this.slotR.classList.remove('combo-ready');
       this.tSlotR.classList.remove('combo-ready');
+      this.monolithBar.classList.remove('visible');
+      this.stageModBar.innerHTML = '';
+    } else if (mode !== 'playing') {
+      this.monolithBar.classList.remove('visible');
+      this.stageModBar.innerHTML = '';
     }
   }
 
@@ -1494,27 +1702,44 @@ export class HudController {
 
     const stageDef = opts?.stageDef;
     const dungeonDef = opts?.dungeonDef;
-    const isFinalWin = victory && !dungeonDef && stageDef?.id === 20;
+    const towerFloor = opts?.towerFloor;
+    const rlChamber = opts?.roguelikeChamber;
+    const rlTotal = opts?.roguelikeTotalChambers ?? 6;
+    const isFinalWin = victory && !dungeonDef && !towerFloor && !rlChamber && stageDef?.id === 20;
     this.resultModalCard.classList.toggle('win', victory);
     this.resultModalCard.classList.toggle('lose', !victory);
-    this.resultStageTag.textContent = dungeonDef
-      ? `${dungeonDef.name} · 秘境打宝`
-      : stageDef
-        ? `第 ${stageDef.id} 关 · ${stageDef.name}`
-        : victory
-          ? '剑台凯旋'
-          : '剑势折戟';
+    this.resultStageTag.textContent = towerFloor
+      ? `锁妖九重塔 · 第 ${towerFloor.id} 层`
+      : rlChamber
+        ? `幻境肉鸽 · 第 ${rlChamber}/${rlTotal} 境`
+        : dungeonDef
+          ? `${dungeonDef.name} · 秘境打宝`
+          : stageDef
+            ? `第 ${stageDef.id} 关 · ${stageDef.name}`
+            : victory
+              ? '剑台凯旋'
+              : '剑势折戟';
     this.resultTitle.textContent =
       opts?.customTitle ??
-      (dungeonDef
+      (towerFloor
         ? victory
-          ? `${dungeonDef.name} · 破阵凯旋`
-          : '秘 境 折 戟'
-        : isFinalWin
-          ? '二 十 劫 破 · 剑 圣 加 冕'
-          : victory
-            ? `第 ${stageDef?.id ?? ''} 关 凯 旋`
-            : '身 陨 剑 台');
+          ? `第 ${towerFloor.id} 层 破 塔 凯 旋`
+          : `第 ${towerFloor.id} 层 试 炼 折 戟`
+        : rlChamber
+          ? victory
+            ? rlChamber >= rlTotal
+              ? '幻 境 通 幽 · 剑 圣 圆满'
+              : `第 ${rlChamber} 境 破 阵`
+            : '幻 境 迷 失'
+          : dungeonDef
+            ? victory
+              ? `${dungeonDef.name} · 破阵凯旋`
+              : '秘 境 折 戟'
+            : isFinalWin
+              ? '二 十 劫 破 · 剑 圣 加 冕'
+              : victory
+                ? `第 ${stageDef?.id ?? ''} 关 凯 旋`
+                : '身 陨 剑 台');
     this.resultTitle.className = victory ? 'result-title win' : 'result-title lose';
     this.resultStoryLine.textContent =
       opts?.customSub ??
@@ -1522,6 +1747,15 @@ export class HudController {
         ? stageDef?.victoryLine ?? ''
         : '剑心未泯，暂返云来剑庐吐纳温酒，重整旗鼓再破妖阵。');
     this.resultEpilogueBtn.style.display = isFinalWin ? 'inline-flex' : 'none';
+
+    if (opts?.combatRank) {
+      this.resultRankBadge.style.display = 'inline-flex';
+      this.resultRankBadge.textContent = `评级 ${opts.combatRank.rank} · ${opts.combatRank.title}`;
+      this.resultRankBadge.style.color = opts.combatRank.colorHex;
+      this.resultRankBadge.style.borderColor = opts.combatRank.colorHex;
+    } else {
+      this.resultRankBadge.style.display = 'none';
+    }
 
     // 3-Star Seal Display
     if (victory && opts?.starResult) {
@@ -1565,18 +1799,29 @@ export class HudController {
       this.resultJadeGain.style.display = 'none';
     }
 
-    // 3-Pick-1 Xianxia Blessing Cards when advancing to next stage
+    // 3-Pick-1 Xianxia / Roguelike Blessing Cards when advancing
     this.pendingDungeonId = victory && dungeonDef ? dungeonDef.id : null;
-    this.pendingNextStageId = !dungeonDef && victory && opts?.nextStageId ? opts.nextStageId : null;
-    const choices = victory && this.pendingNextStageId ? opts?.blessingChoices ?? [] : [];
+    this.pendingTowerFloorId = victory && towerFloor && opts?.nextTowerFloorId ? opts.nextTowerFloorId : null;
+    this.pendingRoguelikeNext = Boolean(
+      victory && rlChamber && rlChamber < rlTotal && opts?.roguelikeBlessings?.length,
+    );
+    this.pendingNextStageId =
+      !dungeonDef && !towerFloor && !rlChamber && victory && opts?.nextStageId ? opts.nextStageId : null;
+
+    const rlChoices = this.pendingRoguelikeNext ? opts?.roguelikeBlessings ?? [] : [];
+    const regularChoices = victory && this.pendingNextStageId ? opts?.blessingChoices ?? [] : [];
+    const choices = rlChoices.length > 0 ? rlChoices : regularChoices;
     if (choices.length > 0) {
       this.selectedBlessingId = choices[0].id;
       this.resultBlessingWrap.style.display = 'block';
+      this.resultBlessingHeader.textContent =
+        rlChoices.length > 0 ? '幻境赐福 · 三选一激活流派共鸣' : '剑阁赐福 · 择一随行';
       this.resultBlessingGrid.innerHTML = '';
       for (const b of choices) {
+        const pathId = (b as Partial<RoguelikeBlessingDef>).path;
         const card = document.createElement('button');
         card.type = 'button';
-        card.className = `blessing-card${b.id === this.selectedBlessingId ? ' active' : ''}`;
+        card.className = `blessing-card${pathId ? ` path-${pathId}` : ''}${b.id === this.selectedBlessingId ? ' active' : ''}`;
         card.innerHTML = `
           <span class="bl-tag">${b.tag}</span>
           <strong class="bl-name">${b.name}</strong>
@@ -1591,12 +1836,24 @@ export class HudController {
         });
         this.resultBlessingGrid.appendChild(card);
       }
+      this.resultGreedRow.style.display = this.pendingRoguelikeNext ? 'flex' : 'none';
+      this.chkGreedPact.checked = false;
     } else {
       this.selectedBlessingId = undefined;
       this.resultBlessingWrap.style.display = 'none';
+      this.resultGreedRow.style.display = 'none';
+      this.chkGreedPact.checked = false;
     }
 
-    if (this.pendingDungeonId) {
+    if (this.pendingTowerFloorId) {
+      this.nextStageBtn.style.display = 'inline-flex';
+      this.nextStageBtn.textContent = `下一层 · 第 ${this.pendingTowerFloorId} 层`;
+      this.retryBtn.classList.remove('primary');
+    } else if (this.pendingRoguelikeNext && rlChamber) {
+      this.nextStageBtn.style.display = 'inline-flex';
+      this.nextStageBtn.textContent = `深入第 ${rlChamber + 1} 境`;
+      this.retryBtn.classList.remove('primary');
+    } else if (this.pendingDungeonId) {
       this.nextStageBtn.style.display = 'inline-flex';
       this.nextStageBtn.textContent = '再刷秘境';
       this.retryBtn.classList.remove('primary');
@@ -1766,21 +2023,55 @@ export class HudController {
     if (hero.comboCount >= 2 && hero.comboDecayTimer > 0) {
       this.comboBox.classList.add('visible');
       this.comboNum.textContent = `${hero.comboCount}`;
-      const rank =
-        hero.comboCount >= 45
-          ? '剑圣'
-          : hero.comboCount >= 30
-            ? '天'
-            : hero.comboCount >= 20
-              ? '地'
-              : hero.comboCount >= 12
-                ? '玄'
-                : hero.comboCount >= 6
-                  ? '灵'
-                  : '凡';
+      const cr = tactical?.combatRank;
+      const rank = cr ? cr.rank : hero.comboCount >= 30 ? 'S' : hero.comboCount >= 18 ? 'A' : hero.comboCount >= 8 ? 'B' : 'C';
       this.comboRank.textContent = rank;
+      this.comboRank.className = `combo-rank${
+        rank === 'SSS' ? ' rank-sss' : rank === 'SS' ? ' rank-ss' : rank === 'S' ? ' rank-s' : ''
+      }`;
     } else {
       this.comboBox.classList.remove('visible');
+    }
+
+    // Active Stage Modifiers + Defend Monolith Bar
+    if (this.currentScreenMode === 'playing' && tactical) {
+      const chips: string[] = [];
+      if (tactical.difficultyShort && tactical.difficultyShort !== '普通') {
+        chips.push(`<span class="mod-chip diff">${tactical.difficultyShort}</span>`);
+      }
+      if (tactical.leylineAffix && tactical.leylineAffix !== 'none') {
+        const af = LEYLINE_AFFIX_MAP[tactical.leylineAffix];
+        chips.push(`<span class="mod-chip" style="border-color:${af.colorHex};color:${af.colorHex}">${af.name}</span>`);
+      }
+      if (tactical.leylineZoneActive) {
+        chips.push(
+          `<span class="mod-chip zone${tactical.heroInLeylineZone ? ' active' : ''}">${tactical.heroInLeylineZone ? '灵脉增幅+30%伤' : '进阵领+30%伤'}</span>`,
+        );
+      }
+      if (tactical.roguelikePaths) {
+        for (const p of ROGUELIKE_PATHS) {
+          const cnt = tactical.roguelikePaths[p.id] ?? 0;
+          if (cnt > 0) {
+            chips.push(
+              `<span class="mod-chip" style="border-color:${p.accentHex};color:${p.accentHex}">${p.name.slice(0, 2)}×${cnt}</span>`,
+            );
+          }
+        }
+      }
+      this.stageModBar.innerHTML = chips.join('');
+
+      if (tactical.stageMode === 'defend' && (tactical.monolithMaxHp ?? 0) > 0) {
+        const mRatio = clamp((tactical.monolithHp ?? 0) / Math.max(1, tactical.monolithMaxHp ?? 1), 0, 1);
+        this.monolithBar.classList.add('visible');
+        this.monolithBar.classList.toggle('danger', mRatio < 0.35);
+        this.monolithFill.style.width = `${(mRatio * 100).toFixed(1)}%`;
+        this.monolithLabel.textContent = `蜀山灵脉 ${Math.ceil(tactical.monolithHp ?? 0)} / ${tactical.monolithMaxHp ?? 0} (${Math.round(mRatio * 100)}%)`;
+      } else {
+        this.monolithBar.classList.remove('visible');
+      }
+    } else {
+      this.stageModBar.innerHTML = '';
+      this.monolithBar.classList.remove('visible');
     }
   }
 

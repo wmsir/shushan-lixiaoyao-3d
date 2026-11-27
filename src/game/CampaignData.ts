@@ -21,6 +21,15 @@ import {
 import type { WorldBiome } from '../world/ShushanArena';
 import type { BossArchetype } from '../entities/CharacterRig';
 import { EPISODE_STORY_SCRIPTS } from './StoryScripts';
+import {
+  CHAPTER_STAR_CHESTS,
+  type DifficultyTierId,
+  type LeylineAffixId,
+  type RoguelikeBlessingDef,
+  type RoguelikePathId,
+  type StageMode,
+  TOWER_STAR_CHESTS,
+} from './EndgameData';
 
 export const BIOME_LABELS: Record<WorldBiome, string> = {
   bamboo_canyon: '翠竹云溪',
@@ -77,6 +86,10 @@ export interface StageDef {
   episodeNum: number;
   biome: WorldBiome;
   stageLayout?: 'corridor' | 'pillars' | 'islands';
+  stageMode?: StageMode;
+  leylineAffix?: LeylineAffixId;
+  surviveSec?: number;
+  monolithHp?: number;
   name: string;
   subtitle: string;
   badge: string;
@@ -114,6 +127,10 @@ export interface RunBlessingState {
   cdMult: number;
   ultGainMult: number;
   extraGourds: number;
+  critRateBonus: number;
+  critDmgBonus: number;
+  lifestealBonus: number;
+  pathCounts: Record<RoguelikePathId, number>;
 }
 
 export interface StageClearRecord {
@@ -127,6 +144,10 @@ export interface CampaignSaveStats {
   totalParries: number;
   totalDungeons: number;
   totalForges: number;
+  totalTowerClears: number;
+  totalRoguelikeClears: number;
+  totalWorldBosses: number;
+  totalDefendWins: number;
 }
 
 export interface CampaignSaveData {
@@ -148,6 +169,12 @@ export interface CampaignSaveData {
   worldChests?: string[];
   worldOrbs?: string[];
   worldBossKills?: Record<string, number>;
+  claimedChapterChests?: string[];
+  towerStars?: Record<number, 1 | 2 | 3>;
+  claimedTowerChests?: number[];
+  roguelikeBestFloor?: number;
+  roguelikeClears?: number;
+  selectedDifficulty?: DifficultyTierId;
 }
 
 export interface CultivationRealmStep {
@@ -470,15 +497,19 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 1,
     episodeNum: 4,
     biome: 'bamboo_canyon',
+    stageLayout: 'pillars',
+    stageMode: 'defend',
+    leylineAffix: 'parry_nova',
+    monolithHp: 580,
     name: '残碑铁骑',
-    subtitle: '血甲都尉 · 弹反初试',
-    badge: '精英试炼',
+    subtitle: '守护灵脉 · 惊雷弹反',
+    badge: '守护灵脉',
     isBossStage: false,
     parTimeSec: 98,
     recommendedRealm: '筑基剑修',
     hazard: 'none',
-    introLine: '血甲都尉亲自督战，抓准其蓄力红光完美弹反破势！',
-    victoryLine: '血甲都尉折戟残碑，山门大阵已近收复。',
+    introLine: '血甲都尉攻打蜀山灵脉水晶！主动拉怪并抓准红光弹反触发惊雷！',
+    victoryLine: '灵脉安然，血甲都尉折戟残碑！',
     waves: [
       {
         label: '铁骑护卫',
@@ -617,15 +648,19 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 2,
     episodeNum: 8,
     biome: 'sword_graveyard',
+    stageLayout: 'pillars',
+    stageMode: 'survive',
+    leylineAffix: 'rapid_cooldown',
+    surviveSec: 42,
     name: '血甲双煞',
-    subtitle: '左右护法 · 双将夹击',
-    badge: '双精英战',
+    subtitle: '限时生存 42 秒 · 瞬息剑域',
+    badge: '限时突围',
     isBossStage: false,
-    parTimeSec: 112,
+    parTimeSec: 72,
     recommendedRealm: '金丹剑客',
     hazard: 'none',
-    introLine: '剑冢左右双护法齐出，万剑诀控场逐一击破！',
-    victoryLine: '血甲双煞尽斩剑下，威震古剑冢！',
+    introLine: '剑冢双煞引妖潮合围！此地冷却大减，借助法阵熬过 42 秒突围！',
+    victoryLine: '血战 42 秒突围成功，血甲双煞闻风丧胆！',
     waves: [
       {
         label: '血甲双煞联阵',
@@ -773,9 +808,13 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 3,
     episodeNum: 12,
     biome: 'lava_abyss',
+    stageLayout: 'islands',
+    stageMode: 'defend',
+    leylineAffix: 'blood_pact',
+    monolithHp: 700,
     name: '嗜血狂潮',
-    subtitle: '嗜血词缀 · 弹反克制',
-    badge: '嗜血魔甲',
+    subtitle: '守护灵脉 · 血煞契约',
+    badge: '守护魔潮',
     isBossStage: false,
     parTimeSec: 112,
     recommendedRealm: '元婴剑尊',
@@ -783,8 +822,8 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     hazardLabel: '深渊地火',
     hazardIntervalSec: 4.7,
     hazardDamage: 28,
-    introLine: '此层魔众皆具【嗜血】词缀，被其击中将回血，务必弹反闪避！',
-    victoryLine: '剑光如电滴血不沾，嗜血狂潮彻底瓦解！',
+    introLine: '【血煞契约】激活，边守住镇狱灵脉边借吸血续航杀退嗜血魔潮！',
+    victoryLine: '剑光如电血气难侵，灵脉与狂潮一并定鼎！',
     waves: [
       {
         label: '嗜血魔阵',
@@ -965,18 +1004,22 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     chapter: 4,
     episodeNum: 17,
     biome: 'celestial_sanctum',
+    stageLayout: 'islands',
+    stageMode: 'survive',
+    leylineAffix: 'glass_cannon',
+    surviveSec: 45,
     name: '剑意试炼',
-    subtitle: '极速剑道 · 生死一念',
-    badge: '极速试炼',
+    subtitle: '极限生存 45 秒 · 绝命问剑',
+    badge: '绝命生存',
     isBossStage: false,
-    parTimeSec: 105,
+    parTimeSec: 75,
     recommendedRealm: '化神剑仙',
     hazard: 'abyss',
     hazardLabel: '九幽天劫',
     hazardIntervalSec: 3.7,
     hazardDamage: 34,
-    introLine: '极速剑道试炼：敌众身轻如电而攻势凌厉，一剑定生死！',
-    victoryLine: '天下武功唯快不破，极速试炼完美通关！',
+    introLine: '绝命问剑词缀下双方爆发剧增！利用灵晶与天剑在 45 秒血斗中生还！',
+    victoryLine: '死地生还！极速剑意已达化神巅峰！',
     waves: [
       {
         label: '影煞三剑',
@@ -1002,9 +1045,11 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     episodeNum: 18,
     biome: 'celestial_sanctum',
     stageLayout: 'islands',
+    stageMode: 'bossRush',
+    leylineAffix: 'titan_armor',
     name: '魔将车轮',
-    subtitle: '三连首领 · 绝地突围',
-    badge: '三波车轮',
+    subtitle: '连斩首领 · 玄铁镇域',
+    badge: '连斩魔将',
     isBossStage: false,
     parTimeSec: 145,
     recommendedRealm: '化神剑仙',
@@ -1012,7 +1057,7 @@ export const CAMPAIGN_STAGES: StageDef[] = [
     hazardLabel: '九幽天劫',
     hazardIntervalSec: 3.8,
     hazardDamage: 36,
-    introLine: '九幽三魔将轮番出战，善用掉落灵葫与大招维持巅峰战力！',
+    introLine: '九幽三魔将车轮连斩！玄铁镇域下破势处决伤害翻倍！',
     victoryLine: '连斩三员魔将，九幽绝巅已无阻隔！',
     waves: [
       {
@@ -1276,7 +1321,67 @@ export const DUNGEON_LIST: DungeonDef[] = [
           label: '九幽魔尊亲临',
           enemies: [
             { kind: 'elite', x: -4.8, z: -4.8, name: '魔尊护法', hpMult: 2.03, poiseMult: 1.2, dmgMult: 1.61, affix: 'swift' },
-            { kind: 'boss', x: 0.0, z: -5.4, name: '九幽魔尊', bossArchetype: 'inferno', hpMult: 2.64, poiseMult: 1.7, dmgMult: 1.77, affix: 'storm', scaleMult: 1.06 },
+          {
+            kind: 'boss',
+            x: 0.0,
+            z: -5.4,
+            name: '九幽魔尊',
+            bossArchetype: 'inferno',
+            hpMult: 2.64,
+            poiseMult: 1.7,
+            dmgMult: 1.77,
+            affix: 'storm',
+            scaleMult: 1.06,
+          },
+        ],
+      },
+      ],
+    },
+  },
+  {
+    id: 'dg_taixu',
+    name: '太虚剑墟',
+    subtitle: '终极车轮 · 仙品高爆',
+    tier: 3,
+    recommendedPower: 1650,
+    dropRateText: '玄品55% · 仙品45%（双首领双爆）',
+    guaranteedMinRarity: 'epic',
+    bossTitle: '太虚双魔尊',
+    jadeReward: 520,
+    stageDef: {
+      id: 104,
+      chapter: 4,
+      episodeNum: 104,
+      biome: 'celestial_sanctum',
+      stageLayout: 'islands',
+      stageMode: 'bossRush',
+      leylineAffix: 'flying_surge',
+      name: '太虚剑墟',
+      subtitle: '终极车轮 · 仙品高爆',
+      badge: '双尊高爆',
+      isBossStage: true,
+      bossCutscene: true,
+      parTimeSec: 155,
+      recommendedRealm: '蜀山剑圣',
+      hazard: 'abyss',
+      hazardLabel: '灭世天劫',
+      hazardIntervalSec: 3.5,
+      hazardDamage: 35,
+      introLine: '凡人也敢来太虚剑墟争夺仙品？连本尊与星穹雷帝两关都过不去！',
+      victoryLine: '太虚双魔尊伏诛！金色太初仙品冲天而起！',
+      waves: [
+        {
+          label: '第一尊 · 太虚劫影',
+          enemies: [
+            { kind: 'elite', x: -4.6, z: -4.6, name: '星墟护卫', hpMult: 2.1, poiseMult: 1.25, dmgMult: 1.62, affix: 'swift' },
+            { kind: 'boss', x: 0, z: -5.4, name: '太虚魔尊 · 劫影', bossArchetype: 'phantom', hpMult: 2.45, poiseMult: 1.65, dmgMult: 1.72, affix: 'swift' },
+          ],
+        },
+        {
+          label: '终尊 · 星穹雷帝',
+          subtitle: '太虚星环震裂，第二尊星穹雷帝踏雷降临！',
+          enemies: [
+            { kind: 'boss', x: 0, z: -5.2, name: '星穹雷帝 · 太虚', bossArchetype: 'celestial', hpMult: 2.8, poiseMult: 1.82, dmgMult: 1.82, affix: 'storm', scaleMult: 1.08 },
           ],
         },
       ],
@@ -1323,6 +1428,42 @@ export const BOUNTY_LIST: BountyDef[] = [
     target: 1,
     rewardJade: 150,
   },
+  {
+    id: 'b_tower',
+    title: '锁妖登塔',
+    desc: '通关 1 层锁妖九重塔',
+    statKey: 'totalTowerClears',
+    target: 1,
+    rewardJade: 260,
+    rewardRarity: 'epic',
+  },
+  {
+    id: 'b_roguelike',
+    title: '幻境探幽',
+    desc: '打通 1 次幻境六境肉鸽',
+    statKey: 'totalRoguelikeClears',
+    target: 1,
+    rewardJade: 300,
+    rewardRarity: 'epic',
+  },
+  {
+    id: 'b_worldboss',
+    title: '九州荡魔',
+    desc: '在大世界斩杀 1 尊野外首领',
+    statKey: 'totalWorldBosses',
+    target: 1,
+    rewardJade: 240,
+    rewardRarity: 'rare',
+  },
+  {
+    id: 'b_defend',
+    title: '守护灵脉',
+    desc: '完成 1 次灵脉守护关卡',
+    statKey: 'totalDefendWins',
+    target: 1,
+    rewardJade: 220,
+    rewardRarity: 'rare',
+  },
 ];
 
 export function getChapterDef(chapterId: number): ChapterDef {
@@ -1338,18 +1479,34 @@ export function createEmptyBlessings(): RunBlessingState {
     cdMult: 1.0,
     ultGainMult: 1.0,
     extraGourds: 0,
+    critRateBonus: 0,
+    critDmgBonus: 0,
+    lifestealBonus: 0,
+    pathCounts: { lotus: 0, thunder: 0, blood: 0 },
   };
 }
 
-export function applyBlessingToRun(state: RunBlessingState, blessing: BlessingDef): RunBlessingState {
+export function applyBlessingToRun(
+  state: RunBlessingState,
+  blessing: BlessingDef | RoguelikeBlessingDef,
+): RunBlessingState {
+  const rl = blessing as Partial<RoguelikeBlessingDef>;
+  const pathCounts = { ...state.pathCounts };
+  if (rl.path && pathCounts[rl.path] !== undefined) {
+    pathCounts[rl.path] += 1;
+  }
   const next: RunBlessingState = {
     ids: [...state.ids, blessing.id],
     dmgMult: Number((state.dmgMult + (blessing.dmgBonus ?? 0)).toFixed(3)),
     maxHpBonus: state.maxHpBonus + (blessing.hpBonus ?? 0),
-    speedMult: Number(Math.min(1.42, state.speedMult + (blessing.speedBonus ?? 0)).toFixed(3)),
-    cdMult: Number(Math.max(0.5, state.cdMult * (1 - (blessing.cdReduce ?? 0))).toFixed(3)),
+    speedMult: Number(Math.min(1.48, state.speedMult + (blessing.speedBonus ?? 0)).toFixed(3)),
+    cdMult: Number(Math.max(0.42, state.cdMult * (1 - (blessing.cdReduce ?? 0))).toFixed(3)),
     ultGainMult: Number((state.ultGainMult + (blessing.ultBonus ?? 0)).toFixed(3)),
     extraGourds: state.extraGourds + (blessing.gourdBonus ?? 0),
+    critRateBonus: Number((state.critRateBonus + (rl.critRateBonus ?? 0)).toFixed(3)),
+    critDmgBonus: Number((state.critDmgBonus + (rl.critDmgBonus ?? 0)).toFixed(3)),
+    lifestealBonus: Number((state.lifestealBonus + (rl.lifestealBonus ?? 0)).toFixed(3)),
+    pathCounts,
   };
   return next;
 }
@@ -1515,18 +1672,30 @@ export function evaluateStageStars(
   elapsedSec: number,
   hpRatio: number,
   parryCount: number,
+  monolithRatio = 1,
 ): { stars: 1 | 2 | 3; checks: [boolean, boolean, boolean]; labels: [string, string, string] } {
   const c1 = true;
   const c2 = elapsedSec <= stage.parTimeSec;
-  const c3 = hpRatio >= 0.5 || parryCount >= 2;
+  const c3 =
+    stage.stageMode === 'defend'
+      ? monolithRatio >= 0.65 || parryCount >= 2
+      : stage.stageMode === 'survive'
+        ? hpRatio >= 0.45 || parryCount >= 2
+        : hpRatio >= 0.5 || parryCount >= 2;
   const stars = (1 + (c2 ? 1 : 0) + (c3 ? 1 : 0)) as 1 | 2 | 3;
+  const c3Label =
+    stage.stageMode === 'defend'
+      ? `灵脉余血 ≥ 65%（${Math.round(monolithRatio * 100)}%）或 弹反 ≥ 2 次`
+      : stage.stageMode === 'survive'
+        ? '生还余血 ≥ 45% 或 弹反 ≥ 2 次'
+        : '剩余气血 ≥ 50% 或 弹反 ≥ 2 次';
   return {
     stars,
     checks: [c1, c2, c3],
     labels: [
       `通关「${stage.name}」`,
       `用时 ≤ ${stage.parTimeSec} 秒（实测 ${Math.round(elapsedSec)} 秒）`,
-      `剩余气血 ≥ 50% 或 弹反 ≥ 2 次`,
+      c3Label,
     ],
   };
 }
@@ -1850,6 +2019,10 @@ export class CampaignSaveStore {
             totalParries: Math.max(0, Math.floor(Number(rawStats?.totalParries) || 0)),
             totalDungeons: Math.max(0, Math.floor(Number(rawStats?.totalDungeons) || 0)),
             totalForges: Math.max(0, Math.floor(Number(rawStats?.totalForges) || 0)),
+            totalTowerClears: Math.max(0, Math.floor(Number(rawStats?.totalTowerClears) || 0)),
+            totalRoguelikeClears: Math.max(0, Math.floor(Number(rawStats?.totalRoguelikeClears) || 0)),
+            totalWorldBosses: Math.max(0, Math.floor(Number(rawStats?.totalWorldBosses) || 0)),
+            totalDefendWins: Math.max(0, Math.floor(Number(rawStats?.totalDefendWins) || 0)),
           };
           const dungeonClears: Record<string, number> = {};
           if (parsed.dungeonClears && typeof parsed.dungeonClears === 'object') {
@@ -1858,6 +2031,17 @@ export class CampaignSaveStore {
               if (n > 0) dungeonClears[k] = n;
             }
           }
+          const towerStars: Record<number, 1 | 2 | 3> = {};
+          if (parsed.towerStars && typeof parsed.towerStars === 'object') {
+            for (const [k, v] of Object.entries(parsed.towerStars)) {
+              const fl = Math.floor(Number(k));
+              const st = Math.max(1, Math.min(3, Math.floor(Number(v) || 0))) as 1 | 2 | 3;
+              if (fl >= 1 && fl <= 9 && Number(v) > 0) towerStars[fl] = st;
+            }
+          }
+          const rawDiff = parsed.selectedDifficulty;
+          const selectedDifficulty: DifficultyTierId =
+            rawDiff === 'hard' || rawDiff === 'nightmare' ? rawDiff : 'normal';
           const maxCultLv = CULTIVATION_STEPS.length - 1;
           const cultivationLevel = Math.max(
             0,
@@ -1867,7 +2051,7 @@ export class CampaignSaveStore {
           const activeMealId =
             rawMealId && CAMP_MEALS.some((m) => m.id === rawMealId) ? rawMealId : null;
           return {
-            version: 4,
+            version: 6,
             cleared: parsed.cleared,
             lastPlayedStage: Math.max(1, Math.min(20, Number(parsed.lastPlayedStage || 1))),
             jade,
@@ -1896,6 +2080,16 @@ export class CampaignSaveStore {
               parsed.worldBossKills && typeof parsed.worldBossKills === 'object'
                 ? (parsed.worldBossKills as Record<string, number>)
                 : {},
+            claimedChapterChests: Array.isArray(parsed.claimedChapterChests)
+              ? parsed.claimedChapterChests.filter((id): id is string => typeof id === 'string')
+              : [],
+            towerStars,
+            claimedTowerChests: Array.isArray(parsed.claimedTowerChests)
+              ? parsed.claimedTowerChests.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+              : [],
+            roguelikeBestFloor: Math.max(0, Math.min(6, Math.floor(Number(parsed.roguelikeBestFloor) || 0))),
+            roguelikeClears: Math.max(0, Math.floor(Number(parsed.roguelikeClears) || 0)),
+            selectedDifficulty,
           };
         }
       }
@@ -1903,7 +2097,7 @@ export class CampaignSaveStore {
       // ignore storage failure in private mode
     }
     return {
-      version: 5,
+      version: 6,
       cleared: {},
       lastPlayedStage: 1,
       jade: DEFAULT_STARTER_JADE,
@@ -1913,7 +2107,16 @@ export class CampaignSaveStore {
       inventory: [],
       pityCounter: 0,
       dungeonClears: {},
-      stats: { totalKills: 0, totalParries: 0, totalDungeons: 0, totalForges: 0 },
+      stats: {
+        totalKills: 0,
+        totalParries: 0,
+        totalDungeons: 0,
+        totalForges: 0,
+        totalTowerClears: 0,
+        totalRoguelikeClears: 0,
+        totalWorldBosses: 0,
+        totalDefendWins: 0,
+      },
       claimedBounties: [],
       cultivationLevel: 0,
       activeMealId: null,
@@ -1921,6 +2124,12 @@ export class CampaignSaveStore {
       worldChests: [],
       worldOrbs: [],
       worldBossKills: {},
+      claimedChapterChests: [],
+      towerStars: {},
+      claimedTowerChests: [],
+      roguelikeBestFloor: 0,
+      roguelikeClears: 0,
+      selectedDifficulty: 'normal',
     };
   }
 
@@ -2334,6 +2543,7 @@ export class CampaignSaveStore {
   recordWorldBossKill(bossId: string): void {
     if (!this.data.worldBossKills) this.data.worldBossKills = {};
     this.data.worldBossKills[bossId] = (this.data.worldBossKills[bossId] ?? 0) + 1;
+    this.data.stats.totalWorldBosses = (this.data.stats.totalWorldBosses ?? 0) + 1;
     this.persist();
   }
 
@@ -2343,5 +2553,133 @@ export class CampaignSaveStore {
     const bosses = Object.keys(this.data.worldBossKills ?? {}).length;
     const orbs = (this.data.worldOrbs ?? []).length;
     return { waypoints, chests, bosses, orbs };
+  }
+
+  getSelectedDifficulty(): DifficultyTierId {
+    return this.data.selectedDifficulty ?? 'normal';
+  }
+
+  setSelectedDifficulty(diff: DifficultyTierId): void {
+    this.data.selectedDifficulty = diff;
+    this.persist();
+  }
+
+  getChapterStars(chapterId: 1 | 2 | 3 | 4): number {
+    const ch = getChapterDef(chapterId);
+    let sum = 0;
+    for (let s = ch.stageRange[0]; s <= ch.stageRange[1]; s++) {
+      sum += this.data.cleared[s]?.stars ?? 0;
+    }
+    return sum;
+  }
+
+  isChapterChestClaimed(id: string): boolean {
+    return (this.data.claimedChapterChests ?? []).includes(id);
+  }
+
+  claimChapterChest(id: string): { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string } {
+    const def = CHAPTER_STAR_CHESTS.find((c) => c.id === id);
+    if (!def) return { ok: false, jade: 0, reason: '宝箱不存在' };
+    if (this.isChapterChestClaimed(id)) return { ok: false, jade: 0, reason: '该章节星匣已领取' };
+    if (this.getChapterStars(def.chapter) < def.starsReq) {
+      return { ok: false, jade: 0, reason: `需本章累计 ${def.starsReq} ★` };
+    }
+    if (!this.data.claimedChapterChests) this.data.claimedChapterChests = [];
+    this.data.claimedChapterChests.push(id);
+    this.data.jade += def.jade;
+    let droppedItem: RolledGearItem | undefined;
+    if (def.rarity) {
+      const tier: 1 | 2 | 3 = def.chapter >= 3 ? 3 : def.chapter >= 2 ? 2 : 1;
+      droppedItem = rollEquipmentDrop({
+        tier,
+        guaranteedMinRarity: def.rarity,
+        source: `章节星匣·${def.label}`,
+      });
+      this.addRolledItem(droppedItem);
+    }
+    this.persist();
+    return {
+      ok: true,
+      jade: def.jade,
+      droppedItem,
+      reason: droppedItem ? `开启星匣：+◆${def.jade} +【${droppedItem.name}】` : `开启星匣：+◆${def.jade} 灵石`,
+    };
+  }
+
+  getTowerStars(floorNum: number): number {
+    return this.data.towerStars?.[floorNum] ?? 0;
+  }
+
+  getTotalTowerStars(): number {
+    let sum = 0;
+    for (const v of Object.values(this.data.towerStars ?? {})) {
+      sum += Number(v) || 0;
+    }
+    return sum;
+  }
+
+  recordTowerClear(floorNum: number, stars: 1 | 2 | 3): { firstClear: boolean } {
+    if (!this.data.towerStars) this.data.towerStars = {};
+    const prev: number = this.data.towerStars[floorNum] ?? 0;
+    this.data.towerStars[floorNum] = Math.max(prev, stars) as 1 | 2 | 3;
+    this.data.stats.totalTowerClears = (this.data.stats.totalTowerClears ?? 0) + 1;
+    this.persist();
+    return { firstClear: prev === 0 };
+  }
+
+  isTowerChestClaimed(starsReq: number): boolean {
+    return (this.data.claimedTowerChests ?? []).includes(starsReq);
+  }
+
+  claimTowerChest(starsReq: number): { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string } {
+    const def = TOWER_STAR_CHESTS.find((c) => c.starsReq === starsReq);
+    if (!def) return { ok: false, jade: 0, reason: '塔星匣不存在' };
+    if (this.isTowerChestClaimed(starsReq)) return { ok: false, jade: 0, reason: '该星匣已领取' };
+    if (this.getTotalTowerStars() < def.starsReq) {
+      return { ok: false, jade: 0, reason: `需锁妖塔累计 ${def.starsReq} ★` };
+    }
+    if (!this.data.claimedTowerChests) this.data.claimedTowerChests = [];
+    this.data.claimedTowerChests.push(starsReq);
+    this.data.jade += def.jade;
+    const droppedItem = rollEquipmentDrop({
+      tier: 3,
+      guaranteedMinRarity: def.rarity,
+      source: `锁妖塔·${def.label}`,
+    });
+    this.addRolledItem(droppedItem);
+    this.persist();
+    return {
+      ok: true,
+      jade: def.jade,
+      droppedItem,
+      reason: `开启${def.label}：+◆${def.jade} +【${droppedItem.name}】`,
+    };
+  }
+
+  getRoguelikeBestFloor(): number {
+    return this.data.roguelikeBestFloor ?? 0;
+  }
+
+  getRoguelikeClears(): number {
+    return this.data.roguelikeClears ?? 0;
+  }
+
+  recordRoguelikeProgress(chamber: number, clearedAll: boolean): void {
+    this.data.roguelikeBestFloor = Math.max(this.data.roguelikeBestFloor ?? 0, Math.min(6, Math.max(0, chamber)));
+    if (clearedAll) {
+      this.data.roguelikeClears = (this.data.roguelikeClears ?? 0) + 1;
+      this.data.stats.totalRoguelikeClears = (this.data.stats.totalRoguelikeClears ?? 0) + 1;
+    }
+    this.persist();
+  }
+
+  hasAnyClaimableReward(): boolean {
+    if (this.getBountyStates().some((b) => b.done && !b.claimed)) return true;
+    const totalTower = this.getTotalTowerStars();
+    if (TOWER_STAR_CHESTS.some((c) => totalTower >= c.starsReq && !this.isTowerChestClaimed(c.starsReq))) return true;
+    if (CHAPTER_STAR_CHESTS.some((c) => this.getChapterStars(c.chapter) >= c.starsReq && !this.isChapterChestClaimed(c.id))) {
+      return true;
+    }
+    return false;
   }
 }

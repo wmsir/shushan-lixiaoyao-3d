@@ -147,6 +147,19 @@ export class ShushanArena {
     light: THREE.PointLight;
     used: boolean;
   }> = [];
+  private readonly monolithGroup = new THREE.Group();
+  private readonly monolithPos = new THREE.Vector3(0, 0, -1.5);
+  private monolithCore!: THREE.Mesh;
+  private monolithCoreMat!: THREE.MeshStandardMaterial;
+  private monolithRing!: THREE.Mesh;
+  private monolithDome!: THREE.Mesh;
+  private monolithDomeMat!: THREE.MeshBasicMaterial;
+  private monolithLight!: THREE.PointLight;
+  private readonly leylineZoneGroup = new THREE.Group();
+  private leylineRingMat!: THREE.MeshBasicMaterial;
+  private leylineDiscMat!: THREE.MeshBasicMaterial;
+  private leylineWisps: THREE.Mesh[] = [];
+  private leylineHeroInside = false;
   private readonly openWorldGroup = new THREE.Group();
   private readonly openWorldObstacles: CircleObstacle[] = [];
   private readonly waypointVisuals = new Map<
@@ -415,6 +428,7 @@ export class ShushanArena {
     this.openWorldGroup.visible = false;
     this.group.add(this.pillarsLayoutGroup, this.islandsLayoutGroup, this.openWorldGroup);
     this.buildSpecialStageLayouts(carvedTex);
+    this.buildMonolithAndLeylineProps(carvedTex);
     this.buildOpenWorld(carvedTex, lacquerTex);
 
     this.applyBiomeVisuals();
@@ -3535,6 +3549,141 @@ export class ShushanArena {
     }
   }
 
+  private buildMonolithAndLeylineProps(carvedTex: THREE.CanvasTexture): void {
+    // 1) Spirit Monolith for Defend-the-Crystal stages (placed slightly north of spawn)
+    this.monolithGroup.position.copy(this.monolithPos);
+    this.monolithGroup.visible = false;
+
+    const pedMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#5f7e8e',
+      roughness: 0.65,
+      metalness: 0.22,
+    });
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.25, 0.48, 8), pedMat);
+    ped.position.y = 0.24;
+    ped.castShadow = true;
+    ped.receiveShadow = true;
+
+    this.monolithCoreMat = new THREE.MeshStandardMaterial({
+      color: '#6fffe8',
+      emissive: new THREE.Color('#1fd8b8'),
+      emissiveIntensity: 1.35,
+      roughness: 0.16,
+      metalness: 0.28,
+    });
+    this.monolithCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.68, 0), this.monolithCoreMat);
+    this.monolithCore.scale.set(0.9, 1.85, 0.9);
+    this.monolithCore.position.y = 2.1;
+
+    this.monolithRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.15, 0.045, 8, 28),
+      new THREE.MeshBasicMaterial({ color: '#8efcf0', transparent: true, opacity: 0.8 }),
+    );
+    this.monolithRing.position.y = 2.1;
+
+    this.monolithDomeMat = new THREE.MeshBasicMaterial({
+      color: '#46f5d8',
+      transparent: true,
+      opacity: 0.22,
+      wireframe: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.monolithDome = new THREE.Mesh(new THREE.SphereGeometry(1.75, 16, 10), this.monolithDomeMat);
+    this.monolithDome.position.y = 1.65;
+
+    const baseRingMat = new THREE.MeshBasicMaterial({
+      color: '#46f5d8',
+      transparent: true,
+      opacity: 0.56,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const baseRing = new THREE.Mesh(new THREE.RingGeometry(1.42, 1.72, 28), baseRingMat);
+    baseRing.rotation.x = -Math.PI / 2;
+    baseRing.position.y = 0.085;
+
+    this.monolithLight = new THREE.PointLight('#46f5d8', 11.0, 14.0, 1.7);
+    this.monolithLight.position.y = 2.25;
+
+    this.monolithGroup.add(ped, this.monolithCore, this.monolithRing, this.monolithDome, baseRing, this.monolithLight);
+    this.group.add(this.monolithGroup);
+
+    // 2) Tactical Leyline Buff Zone (3.2m golden-cyan rune circle)
+    this.leylineZoneGroup.visible = false;
+    this.leylineRingMat = new THREE.MeshBasicMaterial({
+      color: '#63e8d8',
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    this.leylineDiscMat = new THREE.MeshBasicMaterial({
+      color: '#ffd878',
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const outerRing = new THREE.Mesh(new THREE.RingGeometry(2.85, 3.25, 36), this.leylineRingMat);
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.y = 0.095;
+    const innerDisc = new THREE.Mesh(new THREE.CircleGeometry(2.85, 32), this.leylineDiscMat);
+    innerDisc.rotation.x = -Math.PI / 2;
+    innerDisc.position.y = 0.088;
+    this.leylineZoneGroup.add(outerRing, innerDisc);
+
+    const wispGeo = new THREE.OctahedronGeometry(0.16, 0);
+    for (let i = 0; i < 3; i++) {
+      const wisp = new THREE.Mesh(wispGeo, this.leylineRingMat);
+      wisp.position.set(Math.cos((i / 3) * Math.PI * 2) * 2.95, 0.75, Math.sin((i / 3) * Math.PI * 2) * 2.95);
+      this.leylineWisps.push(wisp);
+      this.leylineZoneGroup.add(wisp);
+    }
+    this.group.add(this.leylineZoneGroup);
+  }
+
+  setMonolithVisible(visible: boolean): void {
+    this.monolithGroup.visible = visible;
+  }
+
+  getMonolithPos(): THREE.Vector3 {
+    return this.monolithPos;
+  }
+
+  setMonolithHealthRatio(ratio: number): void {
+    const r = clamp(ratio, 0, 1);
+    const colHex = r > 0.6 ? '#46f5d8' : r > 0.3 ? '#ffb84c' : '#ff4558';
+    this.monolithCoreMat.color.set(colHex);
+    this.monolithCoreMat.emissive.set(colHex);
+    this.monolithLight.color.set(colHex);
+    this.monolithDomeMat.color.set(colHex);
+    this.monolithDome.visible = r >= 0.25;
+  }
+
+  setLeylineZone(active: boolean, x = 0, z = 0, heroInside = false): void {
+    this.leylineZoneGroup.visible = active;
+    this.leylineHeroInside = heroInside;
+    if (active) {
+      this.leylineZoneGroup.position.set(x, 0, z);
+      this.leylineRingMat.opacity = heroInside ? 0.94 : 0.65;
+      this.leylineRingMat.color.set(heroInside ? '#ffe384' : '#63e8d8');
+      this.leylineDiscMat.opacity = heroInside ? 0.28 : 0.14;
+    }
+  }
+
   private buildOpenWorld(carvedTex: THREE.CanvasTexture, lacquerTex: THREE.CanvasTexture): void {
     const ow = this.openWorldGroup;
 
@@ -4461,6 +4610,25 @@ export class ShushanArena {
           c.ring.rotation.x = Math.PI / 2 + Math.sin(elapsed * 1.9) * 0.25;
           c.ring.rotation.z = elapsed * 0.9;
         }
+      }
+    }
+
+    if (this.monolithGroup.visible) {
+      this.monolithCore.position.y = 2.1 + Math.sin(elapsed * 2.2) * 0.14;
+      this.monolithCore.rotation.y = elapsed * 1.1;
+      this.monolithRing.position.y = this.monolithCore.position.y;
+      this.monolithRing.rotation.x = Math.PI / 2 + Math.sin(elapsed * 1.6) * 0.22;
+      this.monolithRing.rotation.z = elapsed * 1.05;
+      this.monolithDome.rotation.y = -elapsed * 0.35;
+    }
+
+    if (this.leylineZoneGroup.visible) {
+      const spd = this.leylineHeroInside ? 2.4 : 1.15;
+      for (let wi = 0; wi < this.leylineWisps.length; wi++) {
+        const w = this.leylineWisps[wi];
+        const a = (wi / this.leylineWisps.length) * Math.PI * 2 + elapsed * spd;
+        w.position.set(Math.cos(a) * 2.95, 0.72 + Math.sin(elapsed * 3.1 + wi) * 0.2, Math.sin(a) * 2.95);
+        w.rotation.y = elapsed * 2.5;
       }
     }
 

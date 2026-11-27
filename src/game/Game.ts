@@ -61,6 +61,19 @@ import {
   getEquippedWeaponVisual,
   rollEquipmentDrop,
 } from './EquipmentData';
+import {
+  getDifficultyTier,
+  evaluateCombatRank,
+  getTowerFloorDef,
+  LEYLINE_AFFIX_MAP,
+  pickRoguelikeBlessings,
+  ROGUELIKE_BLESSINGS,
+  ROGUELIKE_CHAMBERS,
+  TOWER_FLOORS,
+  type DifficultyTierId,
+  type LeylineAffixId,
+  type TowerFloorDef,
+} from './EndgameData';
 import { APP_VERSION } from '../version';
 import {
   MultiplayerClient,
@@ -204,6 +217,27 @@ export class Game {
   private readonly worldGuideArrow = new THREE.Group();
   private worldGuideCategory: 'auto' | 'waypoint' | 'chest' | 'orb' | 'boss' = 'auto';
   private worldAutoNav = false;
+
+  private activeTowerFloor: TowerFloorDef | null = null;
+  private roguelikeState: {
+    active: boolean;
+    chamberIdx: number;
+    greedNext: boolean;
+    totalJade: number;
+  } | null = null;
+  private monolithHp = 0;
+  private monolithMaxHp = 0;
+  private surviveRemainSec = 0;
+  private surviveSpawnTimer = 0;
+  private leylineZoneActive = false;
+  private leylineZonePos = new THREE.Vector3(0, 0, 2.5);
+  private leylineZoneTimer = 0;
+  private heroInLeylineZone = false;
+  private combatStyleScore = 0;
+  private combatStylePeak = 0;
+  private combatStyleDecayTimer = 0;
+  private lastStyleAction = '';
+  private lotusProcCooldown = 0;
 
   private frame = 0;
   private elapsed = 0;
@@ -474,6 +508,10 @@ export class Game {
             this.mp.mode === 'solo' ? 20 : this.currentStageId,
             this.peer.name,
           );
+        } else if (this.activeTowerFloor) {
+          this.startTowerFloor(this.activeTowerFloor.id);
+        } else if (this.roguelikeState?.active) {
+          this.startRoguelikeRun();
         } else if (this.activeDungeon) {
           this.startDungeon(this.activeDungeon.id, true);
         } else {
@@ -607,6 +645,39 @@ export class Game {
       onCastComboUlt: () => {
         this.tryCastComboUlt();
       },
+      onStartTower: (floorNum) => {
+        this.startTowerFloor(floorNum);
+      },
+      onStartRoguelike: () => {
+        this.startRoguelikeRun();
+      },
+      onAdvanceRoguelike: (blessingId, greedPact) => {
+        this.advanceRoguelikeChamber(blessingId, greedPact);
+      },
+      onSetDifficulty: (diff: DifficultyTierId) => {
+        this.saveStore.setSelectedDifficulty(diff);
+        this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      },
+      onClaimChapterChest: (chestId: string) => {
+        const res = this.saveStore.claimChapterChest(chestId);
+        if (res.ok) {
+          if (res.droppedItem) this.audio.playGearDropChime(res.droppedItem.rarity);
+          else this.audio.playDropChime('spirit');
+          triggerHaptic('medium');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
+      onClaimTowerChest: (starsReq: number) => {
+        const res = this.saveStore.claimTowerChest(starsReq);
+        if (res.ok) {
+          if (res.droppedItem) this.audio.playGearDropChime(res.droppedItem.rarity);
+          else this.audio.playDropChime('spirit');
+          triggerHaptic('heavy');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return res;
+      },
     });
 
     this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
@@ -716,7 +787,56 @@ export class Game {
   }
 
   private getActiveStageDef(): StageDef {
+    if (this.activeTowerFloor) return this.activeTowerFloor.stageDef;
+    if (this.roguelikeState?.active) {
+      const ch = ROGUELIKE_CHAMBERS[clamp(this.roguelikeState.chamberIdx, 0, ROGUELIKE_CHAMBERS.length - 1)];
+      if (ch) return ch.stageDef;
+    }
     return this.activeDungeon ? this.activeDungeon.stageDef : getStageDef(this.currentStageId);
+  }
+
+  private resetEndgameStageState(): void {
+    this.monolithHp = 0;
+    this.monolithMaxHp = 0;
+    this.surviveRemainSec = 0;
+    this.surviveSpawnTimer = 0;
+    this.leylineZoneActive = false;
+    this.leylineZoneTimer = 0;
+    this.heroInLeylineZone = false;
+    this.combatStyleScore = 0;
+    this.combatStylePeak = 0;
+    this.combatStyleDecayTimer = 0;
+    this.lastStyleAction = '';
+    this.lotusProcCooldown = 0;
+    this.arena.setMonolithVisible(false);
+    this.arena.setLeylineZone(false);
+  }
+
+  private getActiveLeylineAffix(): LeylineAffixId {
+    if (this.mode === 'world' || this.mode === 'camp' || this.mp.mode !== 'offline') return 'none';
+    return this.getActiveStageDef().leylineAffix ?? 'none';
+  }
+
+  private getCdMult(): number {
+    const loadout = this.getLoadoutStats();
+    const affixMult = this.getActiveLeylineAffix() === 'rapid_cooldown' ? 0.68 : 1.0;
+    return this.blessings.cdMult * loadout.cdMult * affixMult;
+  }
+
+  private getEffectiveUltGainMult(): number {
+    const loadout = this.getLoadoutStats();
+    const rank = evaluateCombatRank(this.combatStyleScore);
+    const affixBonus = this.getActiveLeylineAffix() === 'glass_cannon' ? 0.4 : 0;
+    return this.blessings.ultGainMult * loadout.ultGainMult * (1 + rank.ultGainBonusPct + affixBonus);
+  }
+
+  private addCombatStyle(points: number, actionKey: string): void {
+    if (this.mode !== 'playing') return;
+    const gain = actionKey === this.lastStyleAction ? points * 0.55 : points;
+    this.lastStyleAction = actionKey;
+    this.combatStyleScore = clamp(this.combatStyleScore + gain, 0, 190);
+    this.combatStylePeak = Math.max(this.combatStylePeak, this.combatStyleScore);
+    this.combatStyleDecayTimer = 3.6;
   }
 
   private getLoadoutStats(): HeroLoadoutStats {
@@ -807,6 +927,9 @@ export class Game {
     this.clearCombatEntities();
     this.setCampNpcsVisible(false);
     this.activeDungeon = null;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.stageDroppedGear = [];
     this.corridorMode = false;
     this.healingShrineCollected = false;
@@ -837,6 +960,9 @@ export class Game {
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.clearCombatEntities();
     this.setCampNpcsVisible(false);
     this.corridorMode = false;
@@ -874,6 +1000,9 @@ export class Game {
     this.hud.setHeroName('李逍遥');
     this.clearCombatEntities();
     this.activeDungeon = null;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
     this.activeDialogueDef = null;
@@ -973,6 +1102,9 @@ export class Game {
     this.clearCombatEntities();
     this.setCampNpcsVisible(false);
     this.activeDungeon = null;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
     this.activeDialogueDef = null;
@@ -1543,6 +1675,9 @@ export class Game {
     this.audio.unlock();
     this.clearCombatEntities();
     this.activeDungeon = null;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.stageDroppedGear = [];
     if (!keepBlessings) {
       this.blessings = createEmptyBlessings();
@@ -1584,6 +1719,9 @@ export class Game {
     this.audio.unlock();
     this.clearCombatEntities();
     this.activeDungeon = dungeon;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
     this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
@@ -1608,6 +1746,119 @@ export class Game {
 
     this.enterStage(dungeon.stageDef.id, true, true, false, !skipDialogue);
     this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
+  }
+
+  startTowerFloor(floorNum: number): void {
+    this.mp.leave();
+    this.clearPeerHero();
+    this.hud.setMpHudBadge('');
+    this.hud.setHeroName('李逍遥');
+    const floor = getTowerFloorDef(floorNum);
+    this.audio.unlock();
+    this.clearCombatEntities();
+    this.activeDungeon = null;
+    this.roguelikeState = null;
+    this.activeTowerFloor = floor;
+    this.resetEndgameStageState();
+    this.stageDroppedGear = [];
+    this.blessings = createEmptyBlessings();
+    this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    const meal = this.saveStore.consumeActiveMeal();
+    if (meal) {
+      this.activeMealBuff = {
+        hpBonus: meal.hpBonus,
+        dmgBonus: meal.dmgBonus,
+        speedBonus: meal.speedBonus,
+        ultBonus: meal.ultBonus,
+      };
+    }
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
+    this.resetHero(new THREE.Vector3(0, 0, 8.6), Math.PI);
+    this.applyCurrentLoadoutVisuals();
+    this.hero.rig.setWeaponDrawn(true);
+    this.runElapsed = 0;
+    this.timeScale = 1;
+    this.slowMoTimer = 0;
+    this.coopDowned = false;
+    this.pvpResultDecided = false;
+
+    this.enterStage(floor.stageDef.id, true, true, false, false);
+    const affix = LEYLINE_AFFIX_MAP[floor.stageDef.leylineAffix ?? 'none'];
+    this.hud.showStageBanner(`锁妖九重塔 · 第 ${floor.id} 层`, `${floor.name} · ${affix.name}`, 2.6);
+    this.showStorySubtitle(floor.stageDef.introLine, 3.0);
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
+  }
+
+  startRoguelikeRun(): void {
+    this.mp.leave();
+    this.clearPeerHero();
+    this.hud.setMpHudBadge('');
+    this.hud.setHeroName('李逍遥');
+    this.audio.unlock();
+    this.clearCombatEntities();
+    this.activeDungeon = null;
+    this.activeTowerFloor = null;
+    this.roguelikeState = { active: true, chamberIdx: 0, greedNext: false, totalJade: 0 };
+    this.resetEndgameStageState();
+    this.stageDroppedGear = [];
+    this.blessings = createEmptyBlessings();
+    this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
+    this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
+    this.resetHero(new THREE.Vector3(0, 0, 8.6), Math.PI);
+    this.applyCurrentLoadoutVisuals();
+    this.hero.rig.setWeaponDrawn(true);
+    this.runElapsed = 0;
+    this.timeScale = 1;
+    this.slowMoTimer = 0;
+    this.coopDowned = false;
+    this.pvpResultDecided = false;
+
+    const ch = ROGUELIKE_CHAMBERS[0];
+    this.enterStage(ch.stageDef.id, true, true, false, false);
+    this.hud.showStageBanner('幻境肉鸽 · 六境远征', ch.title, 2.6);
+    this.showStorySubtitle(ch.stageDef.introLine, 3.0);
+    this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+    this.cameraRig.snapTo(this.hero.pos);
+    this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
+  }
+
+  advanceRoguelikeChamber(selectedBlessingId?: string, greedPact = false): void {
+    if (!this.roguelikeState?.active) return;
+    if (selectedBlessingId) {
+      const b =
+        ROGUELIKE_BLESSINGS.find((x) => x.id === selectedBlessingId) ??
+        BLESSINGS.find((x) => x.id === selectedBlessingId);
+      if (b) {
+        this.blessings = applyBlessingToRun(this.blessings, b);
+      }
+    }
+    this.roguelikeState.chamberIdx = Math.min(ROGUELIKE_CHAMBERS.length - 1, this.roguelikeState.chamberIdx + 1);
+    this.roguelikeState.greedNext = greedPact;
+
+    const prevHpRatio = clamp(this.hero.hp / Math.max(1, this.hero.maxHp), 0.1, 1);
+    const prevUlt = this.hero.ult;
+    const prevGourds = this.hero.gourds;
+    this.clearCombatEntities();
+    this.resetEndgameStageState();
+    this.stageDroppedGear = [];
+    this.resetHero(new THREE.Vector3(0, 0, 8.6), Math.PI);
+    this.syncLiveHeroCapsFromLoadout();
+    this.hero.hp = Math.min(this.hero.maxHp, Math.round(this.hero.maxHp * Math.min(1, prevHpRatio + 0.35)));
+    this.hero.delayedHp = this.hero.hp;
+    this.hero.ult = prevUlt;
+    this.hero.gourds = Math.max(1, Math.min(this.hero.maxGourds, prevGourds + 1));
+    this.applyCurrentLoadoutVisuals();
+    this.hero.rig.setWeaponDrawn(true);
+    this.runElapsed = 0;
+
+    const ch = ROGUELIKE_CHAMBERS[this.roguelikeState.chamberIdx];
+    this.enterStage(ch.stageDef.id, true, true, false, false);
+    this.hud.showStageBanner(`幻境肉鸽 · 第 ${ch.chamber}/6 境`, ch.title + (greedPact ? '【贪狼赌契】' : ''), 2.6);
+    this.showStorySubtitle(ch.stageDef.introLine, 3.0);
     this.cameraRig.snapTo(this.hero.pos);
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
   }
@@ -1730,6 +1981,9 @@ export class Game {
     this.setCampNpcsVisible(false);
     this.clearPeerHero();
     this.activeDungeon = null;
+    this.activeTowerFloor = null;
+    this.roguelikeState = null;
+    this.resetEndgameStageState();
     this.stageDroppedGear = [];
     this.blessings = createEmptyBlessings();
     this.activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
@@ -1827,7 +2081,14 @@ export class Game {
     this.setCampNpcsVisible(false);
     this.campDialogueFocusPos = null;
     this.dialogueContext = 'preStage';
-    this.currentStageId = this.activeDungeon ? this.activeDungeon.stageDef.id : clamp(Math.floor(stageId), 1, 20);
+    this.resetEndgameStageState();
+    this.currentStageId = this.activeTowerFloor
+      ? this.activeTowerFloor.stageDef.id
+      : this.roguelikeState?.active
+        ? this.getActiveStageDef().id
+        : this.activeDungeon
+          ? this.activeDungeon.stageDef.id
+          : clamp(Math.floor(stageId), 1, 20);
     const stageDef = this.getActiveStageDef();
     const chDef = getChapterDef(stageDef.chapter);
     this.currentWaveIdx = jumpLastWave ? stageDef.waves.length - 1 : 0;
@@ -1839,15 +2100,35 @@ export class Game {
     this.activeDialogueDef = null;
     this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
 
-    const isCorridor = this.mp.mode !== 'solo';
+    const isDefend = stageDef.stageMode === 'defend' && this.mp.mode === 'offline';
+    const isCorridor = !isDefend && this.mp.mode !== 'solo';
     const customArenaLayout = this.mp.mode === 'offline' ? stageDef.stageLayout : undefined;
     const maxZone: 0 | 1 | 2 = stageDef.waves.length >= 3 ? 2 : 1;
-    if (customArenaLayout && customArenaLayout !== 'corridor') {
+    if (isDefend && (!customArenaLayout || customArenaLayout === 'corridor')) {
+      this.corridorMode = false;
+      this.arena.setArenaLayout('pillars', 0);
+    } else if (customArenaLayout && customArenaLayout !== 'corridor') {
       this.corridorMode = false;
       this.arena.setArenaLayout(customArenaLayout, 0);
     } else {
       this.corridorMode = isCorridor;
       this.arena.setArenaLayout(isCorridor ? 'corridor' : 'arena', maxZone);
+    }
+    if (isDefend) {
+      this.monolithMaxHp = stageDef.monolithHp ?? 620;
+      this.monolithHp = this.monolithMaxHp;
+      this.arena.setMonolithVisible(true);
+      this.arena.setMonolithHealthRatio(1);
+    }
+    if (stageDef.stageMode === 'survive' && this.mp.mode === 'offline') {
+      this.surviveRemainSec = stageDef.surviveSec ?? 45;
+      this.surviveSpawnTimer = 6.5;
+    }
+    if (
+      this.mp.mode === 'offline' &&
+      (stageDef.stageMode === 'survive' || Boolean(this.activeTowerFloor) || Boolean(this.roguelikeState?.active))
+    ) {
+      this.leylineZoneTimer = 4.0;
     }
     const startZone = this.getZoneForWave(stageDef, this.currentWaveIdx);
     this.arena.setUnlockedZone(startZone);
@@ -2070,7 +2351,24 @@ export class Game {
     if (forcedId !== undefined && forcedId >= this.nextEntityId) {
       this.nextEntityId = forcedId + 1;
     }
-    const enemy = createEnemy(id, kind, pos, this.rng, overrides);
+    let finalOverrides = overrides ? { ...overrides } : {};
+    if (this.mode !== 'world' && this.mode !== 'camp' && this.mp.mode === 'offline' && !forcedId) {
+      const diff = getDifficultyTier(this.saveStore.getSelectedDifficulty());
+      const greedHp = this.roguelikeState?.active && this.roguelikeState.greedNext ? 1.25 : 1.0;
+      const greedDmg = this.roguelikeState?.active && this.roguelikeState.greedNext ? 1.15 : 1.0;
+      const affix = this.getActiveLeylineAffix();
+      const affixSpeed = affix === 'flying_surge' ? 1.15 : affix === 'rapid_cooldown' ? 1.18 : 1.0;
+      const affixPoise = affix === 'titan_armor' ? 1.35 : 1.0;
+      const affixDmg = affix === 'glass_cannon' ? 1.35 : 1.0;
+      finalOverrides = {
+        ...finalOverrides,
+        hpMult: (finalOverrides.hpMult ?? 1) * diff.enemyHpMult * greedHp,
+        dmgMult: (finalOverrides.dmgMult ?? 1) * diff.enemyDmgMult * greedDmg * affixDmg,
+        poiseMult: (finalOverrides.poiseMult ?? 1) * affixPoise,
+        speedMult: (finalOverrides.speedMult ?? 1) * affixSpeed,
+      };
+    }
+    const enemy = createEnemy(id, kind, pos, this.rng, finalOverrides);
     enemy.yaw = Math.atan2(this.hero.pos.x - pos.x, this.hero.pos.z - pos.z);
     enemy.rig.root.rotation.y = enemy.yaw;
     this.scene.add(enemy.rig.root);
@@ -2127,6 +2425,15 @@ export class Game {
     }
     if (this.stagePhase === 'done') {
       return `波次 ${stageDef.waves.length}/${stageDef.waves.length} · 已清`;
+    }
+    if (stageDef.stageMode === 'defend' && this.monolithMaxHp > 0) {
+      const mPct = Math.round(clamp(this.monolithHp / this.monolithMaxHp, 0, 1) * 100);
+      const alive = this.enemies.filter((e) => e.aiState !== 'dead').length;
+      return `守护灵脉 ${mPct}% · 波次 ${this.currentWaveIdx + 1}/${stageDef.waves.length} · 剩 ${alive}`;
+    }
+    if (stageDef.stageMode === 'survive') {
+      const sec = Math.max(0, Math.ceil(this.surviveRemainSec));
+      return `坚守限时 ${sec}s · 已清 ${this.enemies.filter((e) => e.aiState === 'dead').length} 敌`;
     }
     const alive = this.enemies.filter((e) => e.aiState !== 'dead').length;
     return `波次 ${this.currentWaveIdx + 1}/${stageDef.waves.length} · 剩 ${alive}`;
@@ -2516,11 +2823,64 @@ export class Game {
       if (h.comboDecayTimer <= 0) h.comboCount = 0;
     }
 
+    this.lotusProcCooldown = Math.max(0, this.lotusProcCooldown - dt);
+    if (this.combatStyleDecayTimer > 0) {
+      this.combatStyleDecayTimer -= dt;
+    } else if (this.combatStyleScore > 0) {
+      this.combatStyleScore = Math.max(0, this.combatStyleScore - dt * 5.5);
+    }
+
+    // Periodic Tactical Leyline Zone (survive / Tower / Roguelike)
+    if (this.mode === 'playing' && this.mp.mode === 'offline' && this.leylineZoneTimer > 0) {
+      this.leylineZoneTimer -= dt;
+      if (this.leylineZoneTimer <= 0) {
+        if (!this.leylineZoneActive) {
+          this.leylineZoneActive = true;
+          this.leylineZoneTimer = 11.0;
+          const ang = this.rng() * Math.PI * 2;
+          const rad = 3.5 + this.rng() * 5.0;
+          this.leylineZonePos.set(Math.cos(ang) * rad, 0, Math.sin(ang) * rad - 2.0);
+          this.arena.constrainPosition(this.leylineZonePos, 3.2);
+          this.spawnWorldCallout('灵脉法阵降临!', this.leylineZonePos, 'info');
+        } else {
+          this.leylineZoneActive = false;
+          this.leylineZoneTimer = 5.0;
+          this.heroInLeylineZone = false;
+          this.arena.setLeylineZone(false);
+        }
+      }
+      if (this.leylineZoneActive) {
+        this.heroInLeylineZone =
+          Math.hypot(h.pos.x - this.leylineZonePos.x, h.pos.z - this.leylineZonePos.z) <= 3.35;
+        this.arena.setLeylineZone(true, this.leylineZonePos.x, this.leylineZonePos.z, this.heroInLeylineZone);
+      }
+    } else if (this.leylineZoneActive) {
+      this.leylineZoneActive = false;
+      this.heroInLeylineZone = false;
+      this.arena.setLeylineZone(false);
+    }
+
+    // Leyline Affix: Blood Pact gradual drain while combat is active
+    if (
+      this.mode === 'playing' &&
+      this.stagePhase === 'combat' &&
+      this.getActiveLeylineAffix() === 'blood_pact' &&
+      h.state !== 'dead' &&
+      this.enemies.some((e) => e.aiState !== 'dead') &&
+      !this.godMode
+    ) {
+      h.hp = Math.max(1, h.hp - h.maxHp * 0.015 * dt);
+    }
+
     const cultivation = this.saveStore.getCultivationBonus();
     const campRegenMult = this.mode === 'camp' ? 3.5 : 1.0;
+    const leylineSpiritBonus = this.heroInLeylineZone ? 18 : 0;
     h.spirit = Math.min(
       h.maxSpirit,
-      h.spirit + dt * 6.5 * realm.spiritRegenMult * loadout.spiritRegenMult * (1 + cultivation.spiritRegenPct) * campRegenMult,
+      h.spirit +
+        dt *
+          (6.5 * realm.spiritRegenMult * loadout.spiritRegenMult * (1 + cultivation.spiritRegenPct) * campRegenMult +
+            leylineSpiritBonus),
     );
     if (h.state !== 'block' && h.state !== 'dodge') {
       h.stamina = Math.min(h.maxStamina, h.stamina + dt * 28);
@@ -2851,11 +3211,24 @@ export class Game {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
     const cultivation = this.saveStore.getCultivationBonus();
+    const affix = this.getActiveLeylineAffix();
+    const leylineZoneMult = this.heroInLeylineZone ? 1.3 : 1.0;
+    const affixBonus = affix === 'blood_pact' ? 0.28 : affix === 'glass_cannon' ? 0.35 : 0;
+    const blood2Bonus = this.blessings.pathCounts.blood >= 2 ? 0.22 : 0;
+    const missingHpRatio = clamp(1 - this.hero.hp / Math.max(1, this.hero.maxHp), 0, 1);
+    const blood3Bonus = this.blessings.pathCounts.blood >= 3 ? missingHpRatio * 0.6 : 0;
     return (
       realm.dmgMult *
       loadout.dmgMult *
       this.blessings.dmgMult *
-      (1 + cultivation.atkPct + this.activeMealBuff.dmgBonus + this.episodeChoiceBuff.dmgBonus)
+      leylineZoneMult *
+      (1 +
+        cultivation.atkPct +
+        this.activeMealBuff.dmgBonus +
+        this.episodeChoiceBuff.dmgBonus +
+        affixBonus +
+        blood2Bonus +
+        blood3Bonus)
     );
   }
 
@@ -3356,10 +3729,10 @@ export class Game {
 
   private startSkillQ(): void {
     const h = this.hero;
-    const loadout = this.getLoadoutStats();
+    const cdMult = this.getCdMult();
     if (this.mountMode === 'sword') {
       h.spirit -= 20;
-      h.cdQ = 3.5 * this.blessings.cdMult * loadout.cdMult;
+      h.cdQ = 3.5 * cdMult;
       const aimYaw = this.getAimYaw();
       const tgt = this.findCombatTarget(20, aimYaw);
       h.yaw = tgt ? Math.atan2(tgt.x - h.pos.x, tgt.z - h.pos.z) : aimYaw;
@@ -3379,7 +3752,7 @@ export class Game {
     }
     if (this.mountMode !== 'none') this.setMountMode('none', true);
     h.spirit -= 20;
-    h.cdQ = 3.5 * this.blessings.cdMult * loadout.cdMult;
+    h.cdQ = 3.5 * cdMult;
     h.state = 'skillQ';
     h.stateTime = 0;
     h.stateDuration = 0.34;
@@ -3400,7 +3773,6 @@ export class Game {
   private startSkillQ2(): void {
     const h = this.hero;
     if (this.mountMode !== 'none') this.setMountMode('none', true);
-    const loadout = this.getLoadoutStats();
     h.q2ReadyTimer = 0;
     const preferredId = h.q2TargetId;
     h.q2TargetId = null;
@@ -3452,7 +3824,7 @@ export class Game {
     this.vfx.spawnAfterimage(h.pos, h.yaw, new THREE.Color(0.95, 2.25, 2.2), h.rig.root);
     this.vfx.spawnShockRing(h.pos, new THREE.Color(0.55, 2.2, 2.3), 0.25, 2.6, 0.35);
 
-    h.ult = Math.min(100, h.ult + 20 * this.blessings.ultGainMult * loadout.ultGainMult);
+    h.ult = Math.min(100, h.ult + 20 * this.getEffectiveUltGainMult());
     h.cdE = Math.max(0, h.cdE - 1.5);
 
     this.q2AttackActive = true;
@@ -3482,9 +3854,8 @@ export class Game {
   private startSkillE(): void {
     const h = this.hero;
     if (this.mountMode !== 'none') this.setMountMode('none', true);
-    const loadout = this.getLoadoutStats();
     h.spirit -= 45;
-    h.cdE = 7.5 * this.blessings.cdMult * loadout.cdMult;
+    h.cdE = 7.5 * this.getCdMult();
     h.state = 'skillE';
     h.stateTime = 0;
     h.stateDuration = 0.52;
@@ -3503,9 +3874,8 @@ export class Game {
   private startSkillR(): void {
     const h = this.hero;
     if (this.mountMode !== 'none') this.setMountMode('none', true);
-    const loadout = this.getLoadoutStats();
     h.ult = 0;
-    h.cdR = 12.0 * this.blessings.cdMult * loadout.cdMult;
+    h.cdR = 12.0 * this.getCdMult();
     h.state = 'skillR';
     h.stateTime = 0;
     h.stateDuration = 0.85;
@@ -3953,10 +4323,22 @@ export class Game {
     const hasWindupArmor = e.aiState === 'windup' && windupProg >= 0.45 && isLightM1;
     const interrupted = e.aiState === 'windup' && windupProg >= 0.45 && !isLightM1;
 
-    const rolledCrit = isCrit || (fromLocalHero && this.rng() < loadout.critRate);
-    const critScale = rolledCrit ? loadout.critMult : 1.0;
-    const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0) * critScale);
+    const rolledCrit = isCrit || (fromLocalHero && this.rng() < loadout.critRate + this.blessings.critRateBonus);
+    const lotusCritBonus = this.blessings.pathCounts.lotus >= 3 ? 0.5 : 0;
+    const critScale = rolledCrit ? loadout.critMult + this.blessings.critDmgBonus + lotusCritBonus : 1.0;
+
+    const affix = this.getActiveLeylineAffix();
+    const flyingSurgeMult = affix === 'flying_surge' && (skill === 'skillQ' || skill === 'skillE') ? 1.4 : 1.0;
+    const staggerMult =
+      e.aiState === 'stagger' || skill === 'parryCounter'
+        ? (affix === 'titan_armor' ? 2.1 : 1.0) * (this.blessings.pathCounts.thunder >= 3 ? 1.8 : 1.0)
+        : 1.0;
+
+    const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0) * critScale * flyingSurgeMult * staggerMult);
     const scaledPoise = poiseGain * (interrupted ? 1.6 : 1.0) * (fromLocalHero ? loadout.poiseMult : 1.0);
+    if (fromLocalHero) {
+      e.aggroHeroTimer = 5.5;
+    }
     if (e.isDummy) {
       e.hp = Math.max(1, e.hp - dmg);
       e.stateTime = 0;
@@ -3970,14 +4352,29 @@ export class Game {
     if (isSkillE && allowFeedback) this.lastSkillEFeedbackAt = this.elapsed;
 
     if (fromLocalHero) {
-      h.spirit = Math.min(h.maxSpirit, h.spirit + (heavy ? 12 : 7));
-      h.ult = Math.min(100, h.ult + (heavy ? 12 : 6) * this.blessings.ultGainMult * loadout.ultGainMult);
+      h.spirit = Math.min(h.maxSpirit, h.spirit + (heavy ? 12 : 7) + (rolledCrit && this.blessings.pathCounts.lotus >= 3 ? 12 : 0));
+      h.ult = Math.min(100, h.ult + (heavy ? 12 : 6) * this.getEffectiveUltGainMult());
       h.comboCount += 1;
       h.comboDecayTimer = 3.2;
       h.maxCombo = Math.max(h.maxCombo, h.comboCount);
       h.totalDamage += dmg;
-      if (loadout.lifesteal > 0 && h.hp > 0 && h.hp < h.maxHp) {
-        h.hp = Math.min(h.maxHp, h.hp + Math.max(1, Math.round(dmg * loadout.lifesteal)));
+      this.addCombatStyle(
+        (heavy || rolledCrit ? 9 : 5) + (interrupted ? 10 : 0),
+        skill ?? (heavy ? 'heavy' : 'light'),
+      );
+      const totalLifesteal =
+        loadout.lifesteal +
+        this.blessings.lifestealBonus +
+        (this.blessings.pathCounts.blood >= 2 ? 0.07 : 0) +
+        (affix === 'blood_pact' ? 0.09 : 0);
+      if (totalLifesteal > 0 && h.hp > 0 && h.hp < h.maxHp) {
+        h.hp = Math.min(h.maxHp, h.hp + Math.max(1, Math.round(dmg * totalLifesteal)));
+      }
+      if (rolledCrit && this.blessings.pathCounts.lotus >= 2 && this.lotusProcCooldown <= 0 && skill !== 'lotusProc') {
+        this.lotusProcCooldown = 1.0;
+        const procYaw = Math.atan2(e.pos.x - h.pos.x, e.pos.z - h.pos.z);
+        this.spawnFlyingSwordProjectile(h.pos, procYaw, true, false);
+        this.spawnWorldCallout('莲华追剑!', h.pos, 'info');
       }
       if (allowFeedback) {
         triggerHaptic(heavy || interrupted || rolledCrit ? 'medium' : 'light');
@@ -4106,6 +4503,17 @@ export class Game {
       this.spawnWorldCallout(`嗜血 +${heal}`, this.hero.pos, 'heal');
     }
 
+    if (this.blessings.pathCounts.blood >= 3 && this.mode === 'playing') {
+      const burstDmg = Math.round(85 * this.getHeroDamageScale());
+      this.vfx.spawnShockRing(e.pos, new THREE.Color(2.2, 0.24, 0.45), 0.35, 4.6, 0.42);
+      this.spawnWorldCallout('修罗血爆!', e.pos, 'crit');
+      for (const other of this.enemies) {
+        if (other.id !== e.id && other.aiState !== 'dead' && Math.hypot(other.pos.x - e.pos.x, other.pos.z - e.pos.z) <= 4.5 + other.radius) {
+          this.damageEnemy(other, burstDmg, true, e.yaw, 25, false, true, 'bloodExplosion');
+        }
+      }
+    }
+
     if (this.mp.mode === 'offline') {
       const baseJade = e.kind === 'boss' ? 120 : e.kind === 'elite' ? 45 : e.kind === 'caster' ? 24 : 14;
       const jadeDrop = baseJade + Math.min(18, Math.floor(this.hero.comboCount * 0.5));
@@ -4169,12 +4577,20 @@ export class Game {
       const stageDef = this.getActiveStageDef();
       const tier: 1 | 2 | 3 = this.activeDungeon
         ? this.activeDungeon.tier
-        : stageDef.chapter >= 3
-          ? 3
-          : stageDef.chapter >= 2
-            ? 2
-            : 1;
-      const sourceLabel = this.activeDungeon ? `秘境·${this.activeDungeon.name}` : `第${stageDef.id}关·${stageDef.name}`;
+        : this.activeTowerFloor
+          ? this.activeTowerFloor.tier
+          : stageDef.chapter >= 3
+            ? 3
+            : stageDef.chapter >= 2
+              ? 2
+              : 1;
+      const sourceLabel = this.activeTowerFloor
+        ? `锁妖塔第${this.activeTowerFloor.id}层`
+        : this.roguelikeState?.active
+          ? `幻境肉鸽·第${this.roguelikeState.chamberIdx + 1}境`
+          : this.activeDungeon
+            ? `秘境·${this.activeDungeon.name}`
+            : `第${stageDef.id}关·${stageDef.name}`;
       if (e.kind === 'elite') {
         const dropChance = this.activeDungeon ? 0.65 : 0.35;
         if (this.rng() < dropChance) {
@@ -4188,7 +4604,11 @@ export class Game {
           this.audio.playGearDropChime(item.rarity);
         }
       } else if (e.kind === 'boss') {
-        const isFirstClear = !this.activeDungeon && !this.saveStore.getStageRecord(stageDef.id);
+        const isFirstClear =
+          !this.activeDungeon &&
+          !this.activeTowerFloor &&
+          !this.roguelikeState?.active &&
+          !this.saveStore.getStageRecord(stageDef.id);
         const dropCount = this.activeDungeon
           ? this.activeDungeon.tier === 3
             ? 3
@@ -4241,7 +4661,16 @@ export class Game {
     }
   }
 
-  private getEnemyAggroTarget(enemyPos: THREE.Vector3): THREE.Vector3 {
+  private getEnemyAggroTarget(enemyPos: THREE.Vector3, enemy?: EnemyEntity): THREE.Vector3 {
+    const stageDef = this.getActiveStageDef();
+    if (
+      this.mode === 'playing' &&
+      stageDef.stageMode === 'defend' &&
+      this.monolithHp > 0 &&
+      (enemy?.aggroHeroTimer ?? 0) <= 0
+    ) {
+      return this.arena.getMonolithPos();
+    }
     if (this.mp.mode === 'coop' && this.peer && !this.peer.dead) {
       if (this.hero.state === 'dead') return this.peer.pos;
       const dHero = enemyPos.distanceToSquared(this.hero.pos);
@@ -4627,11 +5056,14 @@ export class Game {
       }
 
       e.attackCooldown = Math.max(0, e.attackCooldown - dt * e.speedMult);
+      if (e.aggroHeroTimer && e.aggroHeroTimer > 0) {
+        e.aggroHeroTimer = Math.max(0, e.aggroHeroTimer - dt);
+      }
       if (e.swordMarkTimer && e.swordMarkTimer > 0) {
         e.swordMarkTimer = Math.max(0, e.swordMarkTimer - dt);
       }
       const prevPos = this.tmpVec2.copy(e.pos);
-      const targetPos = this.getEnemyAggroTarget(e.pos);
+      const targetPos = this.getEnemyAggroTarget(e.pos, e);
       const dx = targetPos.x - e.pos.x;
       const dz = targetPos.z - e.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -5188,6 +5620,60 @@ export class Game {
         this.spawnWorldCallout(`+${leech}`, e.pos, 'heal');
       }
     }
+
+    const stageDef = this.getActiveStageDef();
+    if (
+      this.mode === 'playing' &&
+      stageDef.stageMode === 'defend' &&
+      this.monolithHp > 0 &&
+      (e.aggroHeroTimer ?? 0) <= 0
+    ) {
+      const monoPos = this.arena.getMonolithPos();
+      const dMono = Math.hypot(e.pos.x - monoPos.x, e.pos.z - monoPos.z);
+      if (dMono <= e.moveRange + 1.8) {
+        const monoDmg = Math.max(8, Math.round(e.moveDamage * 0.85));
+        this.damageMonolith(monoDmg);
+      }
+    }
+  }
+
+  private damageMonolith(dmg: number): void {
+    if (this.monolithHp <= 0 || this.mode !== 'playing' || this.godMode) return;
+    this.monolithHp = Math.max(0, this.monolithHp - dmg);
+    const ratio = this.monolithHp / Math.max(1, this.monolithMaxHp);
+    this.arena.setMonolithHealthRatio(ratio);
+    const monoPos = this.arena.getMonolithPos();
+    this.vfx.spawnShockRing(monoPos, new THREE.Color(2.2, 0.3, 0.42), 0.35, 2.5, 0.38);
+    this.spawnWorldCallout(`灵脉受击 -${dmg}`, monoPos, 'crit');
+    if (this.monolithHp <= 0) {
+      this.mode = 'defeat';
+      this.hud.setMode('defeat');
+      this.hud.showResult(false, this.runElapsed, this.hero, {
+        stageDef: this.getActiveStageDef(),
+        dungeonDef: this.activeDungeon ?? undefined,
+        towerFloor: this.activeTowerFloor ?? undefined,
+        combatRank: evaluateCombatRank(this.combatStylePeak),
+        customTitle: '灵 脉 崩 毁',
+        customSub: '蜀山灵脉水晶被妖众击碎！主动出剑拉住仇恨，配合完美弹反惊雷护阵！',
+      });
+    }
+  }
+
+  private triggerParryThunderNova(): void {
+    const hasAffix = this.getActiveLeylineAffix() === 'parry_nova';
+    const hasPath = this.blessings.pathCounts.thunder >= 2;
+    if (!hasAffix && !hasPath) return;
+    const novaDmg = Math.round(140 * this.getHeroDamageScale());
+    this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(1.4, 0.5, 2.4), 0.45, 6.2, 0.5);
+    this.spawnWorldCallout('天雷破招!', this.hero.pos, 'parry');
+    this.audio.playSkillE();
+    for (const enemy of this.enemies) {
+      if (enemy.aiState === 'dead') continue;
+      if (Math.hypot(enemy.pos.x - this.hero.pos.x, enemy.pos.z - this.hero.pos.z) <= 6.2 + enemy.radius) {
+        const y = Math.atan2(enemy.pos.x - this.hero.pos.x, enemy.pos.z - this.hero.pos.z);
+        this.damageEnemy(enemy, novaDmg, true, y, 45, true, true, 'parry');
+      }
+    }
   }
 
   private tryHitHero(
@@ -5208,13 +5694,19 @@ export class Game {
         h.dodgeEmpowerTimer = 3.0;
         this.recordComboSigil('D');
         h.spirit = Math.min(h.maxSpirit, h.spirit + 22);
-        h.ult = Math.min(100, h.ult + 14 * this.blessings.ultGainMult * loadout.ultGainMult);
+        h.ult = Math.min(100, h.ult + 14 * this.getEffectiveUltGainMult());
+        this.addCombatStyle(20, 'perfectDodge');
+        if (this.blessings.pathCounts.thunder >= 3) {
+          h.cdQ = 0;
+          this.spawnWorldCallout('雷尊步虚 · 重置Q!', h.pos, 'info');
+        }
         this.timeScale = 0.28;
         this.slowMoTimer = 0.34;
         this.audio.playDodge(true);
         this.triggerHeroVoice('dodge');
         this.vfx.spawnShockRing(h.pos, new THREE.Color(0.45, 2.1, 2.2), 0.25, 2.6, 0.35);
         this.spawnWorldCallout('极限闪避 · 流云蓄势!', h.pos, 'info');
+        this.triggerParryThunderNova();
         triggerHaptic('medium');
       }
       return false;
@@ -5245,7 +5737,8 @@ export class Game {
             this.saveStore.incrementStat('totalParries', 1);
           }
           h.spirit = Math.min(h.maxSpirit, h.spirit + 24 + loadout.parrySpiritBonus);
-          h.ult = Math.min(100, h.ult + 22 * this.blessings.ultGainMult * loadout.ultGainMult);
+          h.ult = Math.min(100, h.ult + 22 * this.getEffectiveUltGainMult());
+          this.addCombatStyle(24, 'perfectParry');
           if (loadout.parryHeal > 0) {
             h.hp = Math.min(h.maxHp, h.hp + loadout.parryHeal);
           }
@@ -5256,6 +5749,7 @@ export class Game {
           const sparkPos = h.pos.clone().add(new THREE.Vector3(Math.sin(h.yaw) * 0.7, 1.25, Math.cos(h.yaw) * 0.7));
           this.vfx.spawnParryBurst(sparkPos);
           this.spawnWorldCallout('完美弹反!', h.pos, 'parry');
+          this.triggerParryThunderNova();
           this.mp.sendAction('parry', { x: sparkPos.x, z: sparkPos.z });
 
           if (attacker) {
@@ -5311,6 +5805,7 @@ export class Game {
     }
     h.hurtInvuln = 0.48;
     h.comboCount = 0;
+    this.combatStyleScore = Math.max(0, this.combatStyleScore - 26);
     h.rig.triggerHitFlash(1.0);
     this.audio.playHit(true);
     this.cameraRig.addShake(0.36);
@@ -5341,6 +5836,8 @@ export class Game {
         this.hud.showResult(false, this.runElapsed, h, {
           stageDef: this.getActiveStageDef(),
           dungeonDef: this.activeDungeon ?? undefined,
+          towerFloor: this.activeTowerFloor ?? undefined,
+          combatRank: evaluateCombatRank(this.combatStylePeak),
         });
       }
     } else if (h.state !== 'skillR') {
@@ -5557,6 +6054,48 @@ export class Game {
     const stageDef = this.getActiveStageDef();
 
     if (this.stagePhase === 'combat') {
+      if (stageDef.stageMode === 'survive' && this.mp.mode === 'offline') {
+        this.surviveRemainSec = Math.max(0, this.surviveRemainSec - dt);
+        this.surviveSpawnTimer -= dt;
+        const aliveList = this.enemies.filter((e) => e.aiState !== 'dead');
+        if (this.surviveSpawnTimer <= 0 && aliveList.length < 5) {
+          this.surviveSpawnTimer = 8.2;
+          const packCount = aliveList.length <= 1 ? 3 : 2;
+          for (let k = 0; k < packCount; k++) {
+            const ang = (k / packCount) * Math.PI * 2 + this.rng() * 0.8;
+            const sx = Math.cos(ang) * 9.5;
+            const sz = Math.sin(ang) * 8.5 - 2.0;
+            const kind = k === 0 && stageDef.chapter >= 3 ? 'elite' : k % 2 === 1 ? 'caster' : 'bladesman';
+            const spawned = this.spawnEnemy(kind, sx, sz, undefined, {
+              hpMult: 1.15 + stageDef.chapter * 0.14,
+              dmgMult: 1.1 + stageDef.chapter * 0.12,
+              affix: k === 0 ? 'swift' : 'storm',
+            });
+            spawned.aiState = 'orbit';
+          }
+          this.spawnWorldCallout('援军杀至!', this.hero.pos, 'info');
+        }
+        if (this.surviveRemainSec <= 0) {
+          for (const rem of this.enemies) {
+            if (rem.aiState !== 'dead') {
+              this.vfx.spawnShockRing(rem.pos, new THREE.Color(2.2, 1.85, 0.55), 0.35, 3.2, 0.45);
+              rem.aiState = 'dead';
+              rem.deathTimer = 0;
+              rem.telegraph?.dispose();
+              rem.telegraph = null;
+              rem.hpBarGroup.visible = false;
+            }
+          }
+          this.stagePhase = 'done';
+          this.stageTimer = 1.05;
+          this.audio.setMood('victory');
+          if (stageDef.victoryLine) {
+            this.showStorySubtitle(stageDef.victoryLine, 2.8);
+          }
+        }
+        return;
+      }
+
       const anyAlive = this.enemies.some((e) => e.aiState !== 'dead');
       if (anyAlive) return;
 
@@ -5601,13 +6140,120 @@ export class Game {
       this.stageDroppedGear.push(gear);
     }
 
+    const diff = getDifficultyTier(this.saveStore.getSelectedDifficulty());
+    const combatRank = evaluateCombatRank(this.combatStylePeak);
+    const rewardMult = diff.jadeMult * (1 + combatRank.jadeBonusPct);
+    const curStageDef = this.getActiveStageDef();
+    if (curStageDef.stageMode === 'defend' && this.mp.mode === 'offline') {
+      this.saveStore.incrementStat('totalDefendWins', 1);
+    }
+    const monoRatio = this.monolithMaxHp > 0 ? this.monolithHp / this.monolithMaxHp : 1;
+
+    if (this.activeTowerFloor) {
+      const floor = this.activeTowerFloor;
+      const starResult = evaluateStageStars(
+        floor.stageDef,
+        this.runElapsed,
+        this.hero.hp / Math.max(1, this.hero.maxHp),
+        this.hero.parryCount,
+        monoRatio,
+      );
+      const { firstClear } = this.saveStore.recordTowerClear(floor.id, starResult.stars);
+      const clearBonus = Math.round((firstClear ? floor.firstClearJade : floor.repeatJade) * rewardMult);
+      this.hero.stageJadeEarned += clearBonus;
+      this.saveStore.addJade(clearBonus);
+
+      if (firstClear || diff.bonusGearDrop) {
+        const dropTier: 1 | 2 | 3 = floor.tier;
+        const pity = this.saveStore.advancePityAndCheck();
+        const item = rollEquipmentDrop({
+          tier: dropTier,
+          guaranteedMinRarity: diff.bonusGearDrop && floor.guaranteedMinRarity === 'rare' ? 'epic' : floor.guaranteedMinRarity,
+          pityTriggered: pity,
+          source: `锁妖塔第${floor.id}层`,
+          rng: this.rng,
+        });
+        this.saveStore.addRolledItem(item);
+        this.stageDroppedGear.push(item);
+      }
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      this.mode = 'victory';
+      this.hud.clearSubtitle();
+      this.hud.setMode('victory');
+      this.audio.playHeroVoice('victory');
+      const nextFloorId = floor.id < TOWER_FLOORS.length ? floor.id + 1 : null;
+      this.hud.showResult(true, this.runElapsed, this.hero, {
+        stageDef: floor.stageDef,
+        towerFloor: floor,
+        nextTowerFloorId: nextFloorId,
+        starResult,
+        combatRank,
+        droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
+        jadeEarned: this.hero.stageJadeEarned,
+      });
+      return;
+    }
+
+    if (this.roguelikeState?.active) {
+      const chIdx = clamp(this.roguelikeState.chamberIdx, 0, ROGUELIKE_CHAMBERS.length - 1);
+      const ch = ROGUELIKE_CHAMBERS[chIdx];
+      const isFinal = chIdx >= ROGUELIKE_CHAMBERS.length - 1;
+      const greedBonus = this.roguelikeState.greedNext ? 120 : 0;
+      const clearBonus = Math.round((ch.rewardJade + greedBonus) * rewardMult);
+      this.hero.stageJadeEarned += clearBonus;
+      this.roguelikeState.totalJade += clearBonus;
+      this.saveStore.addJade(clearBonus);
+      this.saveStore.recordRoguelikeProgress(ch.chamber, isFinal);
+
+      if (ch.chamber >= 2 || this.roguelikeState.greedNext || isFinal) {
+        const dropTier: 1 | 2 | 3 = ch.chamber >= 5 ? 3 : ch.chamber >= 3 ? 2 : 1;
+        const item = rollEquipmentDrop({
+          tier: dropTier,
+          guaranteedMinRarity: this.roguelikeState.greedNext ? 'epic' : ch.guaranteedMinRarity,
+          pityTriggered: isFinal || this.saveStore.advancePityAndCheck(),
+          source: `幻境肉鸽·第${ch.chamber}境`,
+          rng: this.rng,
+        });
+        this.saveStore.addRolledItem(item);
+        this.stageDroppedGear.push(item);
+      }
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      this.mode = 'victory';
+      this.hud.clearSubtitle();
+      this.hud.setMode('victory');
+      this.audio.playHeroVoice('victory');
+      const rlChoices = !isFinal ? pickRoguelikeBlessings(this.rng, this.blessings.ids, 3) : undefined;
+      this.hud.showResult(true, this.runElapsed, this.hero, {
+        stageDef: ch.stageDef,
+        roguelikeChamber: ch.chamber,
+        roguelikeTotalChambers: ROGUELIKE_CHAMBERS.length,
+        roguelikeBlessings: rlChoices,
+        roguelikePaths: { ...this.blessings.pathCounts },
+        combatRank,
+        droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
+        jadeEarned: this.hero.stageJadeEarned,
+      });
+      return;
+    }
+
     if (this.activeDungeon) {
       const dungeon = this.activeDungeon;
       this.saveStore.recordDungeonClear(dungeon.id);
       this.saveStore.incrementStat('totalDungeons', 1);
-      const clearBonus = dungeon.jadeReward;
+      const clearBonus = Math.round(dungeon.jadeReward * rewardMult);
       this.hero.stageJadeEarned += clearBonus;
       this.saveStore.addJade(clearBonus);
+      if (diff.bonusGearDrop) {
+        const bonusGear = rollEquipmentDrop({
+          tier: dungeon.tier,
+          guaranteedMinRarity: 'epic',
+          pityTriggered: this.saveStore.advancePityAndCheck(),
+          source: `噩梦·${dungeon.name}`,
+          rng: this.rng,
+        });
+        this.saveStore.addRolledItem(bonusGear);
+        this.stageDroppedGear.push(bonusGear);
+      }
       this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
 
       this.mode = 'victory';
@@ -5617,6 +6263,7 @@ export class Game {
       const opts: ResultDisplayOptions = {
         stageDef: dungeon.stageDef,
         dungeonDef: dungeon,
+        combatRank,
         droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
         nextStageId: null,
         jadeEarned: this.hero.stageJadeEarned,
@@ -5631,11 +6278,23 @@ export class Game {
       this.runElapsed,
       this.hero.hp / Math.max(1, this.hero.maxHp),
       this.hero.parryCount,
+      monoRatio,
     );
     const { firstClear } = this.saveStore.recordClear(stageDef.id, starResult.stars, this.runElapsed, this.hero.maxCombo);
-    const clearBonus = 60 + stageDef.id * 16 + starResult.stars * 30 + (firstClear ? 90 : 0);
+    const baseBonus = 60 + stageDef.id * 16 + starResult.stars * 30 + (firstClear ? 90 : 0);
+    const clearBonus = Math.round(baseBonus * rewardMult);
     this.hero.stageJadeEarned += clearBonus;
     this.saveStore.addJade(clearBonus);
+    if (diff.bonusGearDrop && this.mp.mode === 'offline') {
+      const bonusGear = rollEquipmentDrop({
+        tier: stageDef.chapter >= 3 ? 3 : stageDef.chapter >= 2 ? 2 : 1,
+        guaranteedMinRarity: 'epic',
+        source: `噩梦第${stageDef.id}关`,
+        rng: this.rng,
+      });
+      this.saveStore.addRolledItem(bonusGear);
+      this.stageDroppedGear.push(bonusGear);
+    }
     this.hud.syncCampaignProgress(this.saveStore, stageDef.id < 20 ? stageDef.id + 1 : 20);
 
     const nextStageId = stageDef.id < 20 ? stageDef.id + 1 : null;
@@ -5644,6 +6303,7 @@ export class Game {
     const opts: ResultDisplayOptions = {
       stageDef,
       starResult,
+      combatRank,
       nextStageId: this.mp.mode === 'offline' ? nextStageId : null,
       blessingChoices,
       droppedGear: this.stageDroppedGear.length > 0 ? [...this.stageDroppedGear] : undefined,
@@ -6231,6 +6891,16 @@ export class Game {
         arenaLayout: this.arena.getLayout(),
         worldRegion: this.mode === 'world' ? getWorldRegionAt(this.hero.pos.x, this.hero.pos.z).name : '',
         worldGuide: this.mode === 'world' ? this.resolveWorldGuideTarget() : null,
+        stageMode: this.getActiveStageDef().stageMode ?? 'exterminate',
+        leylineAffix: this.getActiveLeylineAffix(),
+        difficulty: this.saveStore.getSelectedDifficulty(),
+        monolithHp: this.monolithHp,
+        monolithMaxHp: this.monolithMaxHp,
+        surviveRemainSec: Number(this.surviveRemainSec.toFixed(2)),
+        roguelikeChamber: this.roguelikeState?.active ? this.roguelikeState.chamberIdx + 1 : 0,
+        roguelikePaths: { ...this.blessings.pathCounts },
+        combatRank: evaluateCombatRank(this.combatStylePeak).rank,
+        towerStars: this.saveStore.getTotalTowerStars(),
         bossArchetypes: this.enemies
           .filter((e) => e.kind === 'boss' && e.aiState !== 'dead')
           .map((b) => b.bossArchetype ?? 'default'),
@@ -6387,6 +7057,60 @@ export class Game {
           this.publishDiagnostics();
           return true;
         }
+        if (action.startsWith('startTower:')) {
+          const fl = clamp(Math.round(Number(action.slice('startTower:'.length))), 1, TOWER_FLOORS.length);
+          this.startTowerFloor(fl);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action === 'startRoguelike') {
+          this.startRoguelikeRun();
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action.startsWith('advanceRoguelike')) {
+          const greed = action.includes(':greed');
+          const firstBlessing = ROGUELIKE_BLESSINGS[0]?.id;
+          this.advanceRoguelikeChamber(firstBlessing, greed);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action.startsWith('setDifficulty:')) {
+          const d = action.slice('setDifficulty:'.length) as DifficultyTierId;
+          if (d !== 'normal' && d !== 'hard' && d !== 'nightmare') return false;
+          this.saveStore.setSelectedDifficulty(d);
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+          return true;
+        }
+        if (action.startsWith('claimChapterChest:')) {
+          const cid = action.slice('claimChapterChest:'.length);
+          const res = this.saveStore.claimChapterChest(cid);
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+          return res.ok;
+        }
+        if (action.startsWith('claimTowerChest:')) {
+          const req = Math.round(Number(action.slice('claimTowerChest:'.length)));
+          const res = this.saveStore.claimTowerChest(req);
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+          return res.ok;
+        }
+        if (action.startsWith('openTrialsHub:')) {
+          const tab = action.slice('openTrialsHub:'.length) as 'tower' | 'roguelike' | 'dungeon';
+          this.hud.openTrialsHub(tab === 'roguelike' || tab === 'dungeon' ? tab : 'tower');
+          return true;
+        }
+        if (action === 'forceWinStage') {
+          for (const e of this.enemies) {
+            if (e.aiState !== 'dead') e.aiState = 'dead';
+          }
+          this.completeCurrentStage(true);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
         if (action === 'hitDummy') {
           const dummy = this.enemies.find((e) => e.isDummy && e.aiState !== 'dead');
           if (!dummy) return false;
@@ -6485,7 +7209,7 @@ export class Game {
           .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
         const diffPass = stage1Hp >= 1200 && stage20Hp > stage1Hp;
 
-        const allStoryIds = [...CAMPAIGN_STAGES.map((s) => s.id), 101, 102, 103];
+        const allStoryIds = [...CAMPAIGN_STAGES.map((s) => s.id), 101, 102, 103, 104];
         const scriptsPresent = allStoryIds.every((id) => {
           const sc = EPISODE_STORY_SCRIPTS[id];
           return (
@@ -6513,6 +7237,18 @@ export class Game {
           bossArchetypes.size >= 4 &&
           stageLayouts.has('pillars') &&
           stageLayouts.has('islands');
+
+        const stageModesSeen = new Set(
+          [...CAMPAIGN_STAGES, ...TOWER_FLOORS.map((f) => f.stageDef), ...ROGUELIKE_CHAMBERS.map((c) => c.stageDef)]
+            .map((s) => s.stageMode ?? 'exterminate'),
+        );
+        const commercialModesOk =
+          TOWER_FLOORS.length === 9 &&
+          ROGUELIKE_CHAMBERS.length === 6 &&
+          ROGUELIKE_BLESSINGS.length >= 12 &&
+          stageModesSeen.has('defend') &&
+          stageModesSeen.has('survive') &&
+          stageModesSeen.has('bossRush');
 
         return {
           biomesDistinct: {
@@ -6542,6 +7278,10 @@ export class Game {
           mountsAndOpenWorldValid: {
             pass: mountsAndOpenWorldOk,
             detail: `wp=${WORLD_WAYPOINTS.length}, chests=${WORLD_CHESTS.length}, orbs=${WORLD_SPIRIT_ORBS.length}, wb=${WORLD_BOSS_SPAWNS.length}, archetypes=${bossArchetypes.size}`,
+          },
+          commercialModesValid: {
+            pass: commercialModesOk,
+            detail: `tower=${TOWER_FLOORS.length}, rlChambers=${ROGUELIKE_CHAMBERS.length}, rlBlessings=${ROGUELIKE_BLESSINGS.length}, modes=[${Array.from(stageModesSeen).join(',')}]`,
           },
         };
       },
@@ -6627,6 +7367,17 @@ export class Game {
       comboSigils: [...h.comboSigils],
       comboUltReady: h.comboUltReady,
       comboUltTimer: h.comboUltTimer,
+      stageMode: this.getActiveStageDef().stageMode ?? 'exterminate',
+      leylineAffix: this.getActiveLeylineAffix(),
+      difficultyShort: getDifficultyTier(this.saveStore.getSelectedDifficulty()).shortLabel,
+      monolithHp: this.monolithHp,
+      monolithMaxHp: this.monolithMaxHp,
+      surviveRemainSec: this.surviveRemainSec,
+      heroInLeylineZone: this.heroInLeylineZone,
+      leylineZoneActive: this.leylineZoneActive,
+      roguelikePaths: { ...this.blessings.pathCounts },
+      combatStyleScore: this.combatStyleScore,
+      combatRank: evaluateCombatRank(this.combatStyleScore),
     };
   }
 

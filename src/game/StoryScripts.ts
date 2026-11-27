@@ -1076,6 +1076,53 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
     bossCutsceneTaunt: '九幽魔尊：「仙品重宝就在本尊身后——跨过我的尸身再拿吧！」',
     bossEnrageLine: '九幽魔尊：「魔殿焚毁亦不让此宝落入蜀山之手！受死！」',
   },
+  104: {
+    lines: [
+      {
+        speaker: '师尊 · 酒剑仙',
+        role: 'elder',
+        seal: '酒',
+        text: '「太虚剑墟乃上古仙兵埋骨之地，星穹双魔尊轮流镇守墟门，此战有飞剑共鸣助阵，善用御剑与万剑破局！」',
+      },
+      {
+        speaker: '太虚魔尊 · 劫影',
+        role: 'enemy',
+        seal: '墟',
+        text: '「凡人也敢来太虚剑墟争夺仙品？连本尊与星穹雷帝两关都过不去！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「飞剑如虹贯太虚！今日便连斩双尊，取太初仙兵凯旋！」',
+      },
+    ],
+    choices: [
+      {
+        id: 'ep104_star_burst',
+        title: '星穹破阵 · 飞剑狂飙',
+        subtitle: '剑伤 +20% · 开局剑意 +45',
+        storyHint: '乘飞剑共鸣之威速斩太虚双尊',
+        heroReply: '「剑意已满贯太虚，且看我连斩双魔尊！」',
+        battleCallout: '太虚剑开 · 万剑朝宗！',
+        dmgBonus: 0.2,
+        ultBonus: 45,
+      },
+      {
+        id: 'ep104_star_guard',
+        title: '星盾护心 · 稳取仙宝',
+        subtitle: '气血 +80 · 灵葫 +1 · 移速 +10%',
+        storyHint: '提升容错扛过九霄雷劫连斩双王',
+        heroReply: '「稳住身法化解灭世天劫，仙品神兵必归蜀山！」',
+        battleCallout: '步踏七星 · 力克双尊！',
+        hpBonus: 80,
+        extraGourd: 1,
+        speedBonus: 0.1,
+      },
+    ],
+    bossCutsceneTaunt: '太虚魔尊：「区区蜀山剑修，能连破我与雷帝联手算你本事！」',
+    bossEnrageLine: '星穹雷帝：「九霄劫雷降世！留在这里化为剑墟尘埃吧！」',
+  },
 };
 
 export const STAGE_20_EPILOGUE: StageDialogueDef = {
