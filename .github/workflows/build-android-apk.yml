@@ -69,7 +69,8 @@ jobs:
               echo "ANDROID_KEY_ALIAS=${CLEAN_KEY_ALIAS}"
               echo "ANDROID_KEY_PASSWORD=${CLEAN_KEY_PASS}"
             } >> "$GITHUB_ENV"
-            keytool -list -keystore "$KS_FILE" -storepass "$CLEAN_STORE_PASS" -alias "$CLEAN_KEY_ALIAS" | grep -i -E "Alias|SHA256"
+            KT_OUT=$(keytool -v -list -keystore "$KS_FILE" -storepass "$CLEAN_STORE_PASS" -alias "$CLEAN_KEY_ALIAS")
+            printf '%s\n' "$KT_OUT" | grep -i -E "Alias|Entry type|SHA-?256" || true
           else
             echo "::error::Missing ANDROID_KEYSTORE_BASE64 secret! Refusing to generate ephemeral keystore that breaks overwrite installs."
             exit 1
