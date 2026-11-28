@@ -95,6 +95,17 @@ export class GameInput {
     this.pressed.clear();
   }
 
+  resetState(): void {
+    this.keys.clear();
+    this.pressed.clear();
+    this.actionBuffer.clear();
+    this.rmbHeld = false;
+    this.rmbClickQueued = false;
+    this.touchBlockHeld = false;
+    this.touchMove.x = 0;
+    this.touchMove.z = 0;
+  }
+
   getMoveVector(out: { x: number; z: number }): void {
     let x = 0;
     let z = 0;

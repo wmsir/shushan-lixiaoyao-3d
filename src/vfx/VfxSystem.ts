@@ -1546,6 +1546,10 @@ export class VfxSystem {
     this.drops.push(drop);
   }
 
+  getPendingGearDropCount(): number {
+    return this.drops.filter((d) => d.kind === 'gear' && !d.collected).length;
+  }
+
   collectAllGearDrops(): RolledGearItem[] {
     const collected: RolledGearItem[] = [];
     for (let i = this.drops.length - 1; i >= 0; i--) {

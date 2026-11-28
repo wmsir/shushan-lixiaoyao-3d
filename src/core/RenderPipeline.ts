@@ -2,7 +2,45 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const FilmicGradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uContrast: { value: 1.055 },
+    uVignette: { value: 0.16 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uContrast;
+    uniform float uVignette;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 tex = texture2D(tDiffuse, vUv);
+      vec3 col = tex.rgb;
+      float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      // Subtle Xianxia split-toning: cool moonlight slate shadows, warm golden-jade highlights
+      vec3 shadowTint = vec3(0.95, 1.01, 1.07);
+      vec3 highTint = vec3(1.04, 1.01, 0.96);
+      col *= mix(shadowTint, highTint, smoothstep(0.12, 0.72, lum));
+      col = (col - 0.5) * uContrast + 0.5;
+      col = max(col, vec3(0.0));
+      float d = length(vUv - vec2(0.5));
+      float vig = smoothstep(0.92, 0.32, d);
+      col *= mix(1.0 - uVignette, 1.0, vig);
+      gl_FragColor = vec4(col, tex.a);
+    }
+  `,
+};
 
 export interface SceneRenderStats {
   calls: number;
@@ -16,7 +54,9 @@ export class RenderPipeline {
   readonly composer: EffectComposer;
   readonly bloomPass: UnrealBloomPass;
   private readonly renderPass: RenderPass;
+  private readonly gradePass: ShaderPass;
   private readonly outputPass: OutputPass;
+  private envRenderTarget: THREE.WebGLRenderTarget | null = null;
   private userMaxDpr: number | null = null;
   private adaptiveDprScale = 1.0;
   private emaDt = 1 / 60;
@@ -44,7 +84,7 @@ export class RenderPipeline {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const w = Math.max(1, canvas.clientWidth || window.innerWidth);
     const h = Math.max(1, canvas.clientHeight || window.innerHeight);
@@ -56,10 +96,76 @@ export class RenderPipeline {
     // Tuned HDR bloom (threshold 1.18, strength 0.24, radius 0.32): crisp gold/jade/crimson VFX & Legend pillars without blowing out skin, stone, or UI
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.24, 0.32, 1.18);
     this.composer.addPass(this.bloomPass);
+    this.gradePass = new ShaderPass(FilmicGradeShader);
+    this.composer.addPass(this.gradePass);
     this.outputPass = new OutputPass();
     this.composer.addPass(this.outputPass);
 
     this.resize(true);
+  }
+
+  /** Synthesizes a moonlit Xianxia studio + mountain IBL environment map for metallic/armor reflections. */
+  buildMoonlitEnvironment(): THREE.Texture {
+    if (this.envRenderTarget) return this.envRenderTarget.texture;
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    pmrem.compileEquirectangularShader();
+
+    const envScene = new THREE.Scene();
+    const skyGeo = new THREE.SphereGeometry(24, 24, 16);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      vertexShader: `
+        varying vec3 vPos;
+        void main() {
+          vPos = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vPos;
+        void main() {
+          vec3 d = normalize(vPos);
+          vec3 zenith = vec3(0.08, 0.16, 0.34);
+          vec3 horizon = vec3(0.28, 0.46, 0.62);
+          vec3 ground = vec3(0.11, 0.14, 0.18);
+          vec3 col = d.y >= 0.0
+            ? mix(horizon, zenith, smoothstep(0.0, 0.65, d.y))
+            : mix(horizon, ground, smoothstep(0.0, -0.45, d.y));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    envScene.add(skyMesh);
+
+    const panelGeo = new THREE.PlaneGeometry(10, 6);
+    const moonMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 2.8, 3.4), side: THREE.DoubleSide });
+    const moonPanel = new THREE.Mesh(panelGeo, moonMat);
+    moonPanel.position.set(-10, 12, -12);
+    moonPanel.lookAt(0, 0, 0);
+
+    const warmMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.55, 0.92), side: THREE.DoubleSide });
+    const warmPanel = new THREE.Mesh(panelGeo, warmMat);
+    warmPanel.position.set(11, 6, 10);
+    warmPanel.lookAt(0, 0, 0);
+
+    const jadeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.55, 1.85, 1.75), side: THREE.DoubleSide });
+    const jadePanel = new THREE.Mesh(panelGeo, jadeMat);
+    jadePanel.position.set(0, -6, 12);
+    jadePanel.lookAt(0, 0, 0);
+
+    envScene.add(moonPanel, warmPanel, jadePanel);
+    this.envRenderTarget = pmrem.fromScene(envScene, 0.04);
+
+    skyGeo.dispose();
+    skyMat.dispose();
+    panelGeo.dispose();
+    moonMat.dispose();
+    warmMat.dispose();
+    jadeMat.dispose();
+    pmrem.dispose();
+
+    return this.envRenderTarget.texture;
   }
 
   setBloomEnabled(enabled: boolean): void {
@@ -170,7 +276,9 @@ export class RenderPipeline {
     this.disposed = true;
     this.renderPass.dispose();
     this.bloomPass.dispose();
+    this.gradePass.dispose();
     this.outputPass.dispose();
+    this.envRenderTarget?.dispose();
     this.composer.dispose();
     this.renderer.dispose();
   }

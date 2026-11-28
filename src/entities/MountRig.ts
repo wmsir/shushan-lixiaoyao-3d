@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, damp } from '../utils/math';
+import { createDamascusBladeMaps, createHorseCoatMaps } from '../world/Materials';
 
 export type MountMode = 'none' | 'horse' | 'sword';
 
@@ -57,15 +58,23 @@ export class MountRig {
   }
 
   private buildHorse(): void {
+    const furMaps = createHorseCoatMaps();
     const coatMat = new THREE.MeshStandardMaterial({
-      color: '#732419',
-      roughness: 0.44,
-      metalness: 0.08,
+      map: furMaps.map,
+      bumpMap: furMaps.bumpMap,
+      bumpScale: 0.018,
+      roughnessMap: furMaps.roughnessMap,
+      color: '#9c3626',
+      roughness: 0.48,
+      metalness: 0.06,
     });
     const coatDarkMat = new THREE.MeshStandardMaterial({
-      color: '#4e1610',
-      roughness: 0.5,
-      metalness: 0.08,
+      map: furMaps.map,
+      bumpMap: furMaps.bumpMap,
+      bumpScale: 0.015,
+      color: '#6b2016',
+      roughness: 0.54,
+      metalness: 0.06,
     });
     const whiteSockMat = new THREE.MeshStandardMaterial({
       color: '#f2eee6',
@@ -367,13 +376,19 @@ export class MountRig {
   }
 
   private buildFlyingSword(): { outer: THREE.Mesh; inner: THREE.Mesh } {
+    const damascus = createDamascusBladeMaps();
     const steelMat = new THREE.MeshPhysicalMaterial({
-      color: '#dcebf7',
+      map: damascus.map,
+      bumpMap: damascus.bumpMap,
+      bumpScale: 0.012,
+      roughnessMap: damascus.roughnessMap,
+      color: '#e2effa',
       emissive: new THREE.Color('#134f68'),
       emissiveIntensity: 0.28,
-      roughness: 0.16,
-      metalness: 0.94,
-      clearcoat: 0.85,
+      roughness: 0.26,
+      metalness: 0.92,
+      envMapIntensity: 1.35,
+      clearcoat: 0.88,
       clearcoatRoughness: 0.12,
     });
     const spineGoldMat = new THREE.MeshStandardMaterial({

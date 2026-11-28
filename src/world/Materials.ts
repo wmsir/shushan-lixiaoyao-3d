@@ -69,10 +69,20 @@ export function createCourtyardStoneMaps(): {
       bCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
       bCtx.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
 
-      // Disciplined stone roughness (184..240 -> roughness 0.72..0.94) prevents whiteout glare
-      const rVal = Math.floor(184 + h * 56);
+      // Disciplined stone roughness (172..242 -> roughness 0.67..0.95) with subtle mineral flecks
+      const rVal = Math.floor(172 + h * 70);
       rCtx.fillStyle = `rgb(${rVal},${rVal},${rVal})`;
       rCtx.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
+
+      if (h > 0.42) {
+        aCtx.strokeStyle = 'rgba(12, 18, 26, 0.36)';
+        aCtx.lineWidth = 1.3;
+        aCtx.beginPath();
+        aCtx.moveTo(x + 12, y + rowH * (0.28 + (h * 0.35)));
+        aCtx.lineTo(x + colW * 0.56, y + rowH * 0.55);
+        aCtx.lineTo(x + colW - 14, y + rowH * 0.72);
+        aCtx.stroke();
+      }
 
       aCtx.strokeStyle = '#111720';
       aCtx.lineWidth = 5;
@@ -475,10 +485,18 @@ export function createShushanSkyDome(panoramaUrl?: string): THREE.Mesh {
         }
 
         float mDot = max(dot(d, normalize(uMoonDir)), 0.0);
-        float moonHalo = pow(mDot, 16.0) * 0.40 + pow(mDot, 90.0) * 0.56;
+        float moonHalo = pow(mDot, 16.0) * 0.44 + pow(mDot, 90.0) * 0.58;
         float moonDisc = smoothstep(0.9968, 0.9984, mDot);
         col += vec3(0.52, 0.75, 0.88) * moonHalo;
         col = mix(col, vec3(1.06, 1.05, 0.94), moonDisc);
+
+        // Crisp twinkling night starfield in upper celestial dome
+        if (d.y > 0.10) {
+          vec2 starUv = floor(d.xz / (d.y + 0.35) * 95.0);
+          float sh = hash(starUv);
+          float star = smoothstep(0.9945, 0.9995, sh) * (0.55 + 0.45 * sin(uTime * 2.2 + sh * 62.0));
+          col += vec3(0.75, 0.88, 1.05) * star * smoothstep(0.10, 0.45, d.y);
+        }
 
         if (uHasPanorama > 0.5) {
           vec3 pano = texture2D(uPanorama, vUv).rgb;
@@ -732,4 +750,278 @@ export function createCampWoodTexture(): THREE.CanvasTexture {
   tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+/**
+ * Mossy Shushan mountain soil, scattered alpine turf & pebble PBR maps for Open World Kyushu.
+ */
+export function createOpenWorldTerrainMaps(): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const size = 512;
+  const albedoC = document.createElement('canvas');
+  const bumpC = document.createElement('canvas');
+  const roughC = document.createElement('canvas');
+  albedoC.width = bumpC.width = roughC.width = size;
+  albedoC.height = bumpC.height = roughC.height = size;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const bCtx = bumpC.getContext('2d')!;
+  const rCtx = roughC.getContext('2d')!;
+
+  aCtx.fillStyle = '#253533';
+  aCtx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#7c7c7c';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#e0e0e0';
+  rCtx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 650; i++) {
+    const px = hash2(i, 1.9) * size;
+    const py = hash2(i, 6.7) * size;
+    const rad = 10 + hash2(i, 4.3) * 28;
+    const moss = hash2(i, 9.1);
+    aCtx.fillStyle =
+      moss > 0.52
+        ? `rgba(38, 68, 54, ${(0.24 + moss * 0.22).toFixed(2)})`
+        : `rgba(28, 39, 44, ${(0.22 + moss * 0.2).toFixed(2)})`;
+    aCtx.beginPath();
+    aCtx.arc(px, py, rad, 0, Math.PI * 2);
+    aCtx.fill();
+
+    const bv = Math.floor(110 + moss * 60);
+    bCtx.fillStyle = `rgba(${bv},${bv},${bv},0.34)`;
+    bCtx.beginPath();
+    bCtx.arc(px, py, rad * 0.85, 0, Math.PI * 2);
+    bCtx.fill();
+  }
+
+  for (let i = 0; i < 1400; i++) {
+    const px = hash2(i, 2.5) * size;
+    const py = hash2(i, 8.9) * size;
+    const len = 3 + hash2(i, 5.1) * 7;
+    aCtx.strokeStyle = hash2(i, 7.2) > 0.5 ? 'rgba(66, 108, 78, 0.35)' : 'rgba(22, 34, 32, 0.38)';
+    aCtx.lineWidth = 1.4;
+    aCtx.beginPath();
+    aCtx.moveTo(px, py);
+    aCtx.lineTo(px + (hash2(i, 3.8) - 0.5) * 4, py - len);
+    aCtx.stroke();
+  }
+
+  for (let i = 0; i < 240; i++) {
+    const px = hash2(i, 12.1) * size;
+    const py = hash2(i, 15.7) * size;
+    const rx = 2 + hash2(i, 4.9) * 5;
+    aCtx.fillStyle = 'rgba(72, 86, 94, 0.55)';
+    aCtx.beginPath();
+    aCtx.ellipse(px, py, rx, rx * 0.72, hash2(i, 2.1) * Math.PI, 0, Math.PI * 2);
+    aCtx.fill();
+    bCtx.fillStyle = '#cfcfcf';
+    bCtx.beginPath();
+    bCtx.ellipse(px, py, rx, rx * 0.72, 0, 0, Math.PI * 2);
+    bCtx.fill();
+    rCtx.fillStyle = '#b6b6b6';
+    rCtx.beginPath();
+    rCtx.ellipse(px, py, rx, rx * 0.72, 0, 0, Math.PI * 2);
+    rCtx.fill();
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(18, 18);
+    tex.anisotropy = 8;
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+  return { map: wrap(albedoC, true), bumpMap: wrap(bumpC, false), roughnessMap: wrap(roughC, false) };
+}
+
+/**
+ * Volcanically cracked basalt crust with glowing molten lava vein emissive map.
+ */
+export function createLavaCrustMaps(): {
+  map: THREE.CanvasTexture;
+  emissiveMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const size = 256;
+  const albedoC = document.createElement('canvas');
+  const emC = document.createElement('canvas');
+  const rC = document.createElement('canvas');
+  albedoC.width = emC.width = rC.width = size;
+  albedoC.height = emC.height = rC.height = size;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const eCtx = emC.getContext('2d')!;
+  const rCtx = rC.getContext('2d')!;
+
+  aCtx.fillStyle = '#1b1011';
+  aCtx.fillRect(0, 0, size, size);
+  eCtx.fillStyle = '#180502';
+  eCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#d4d4d4';
+  rCtx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 36; i++) {
+    let x = hash2(i, 1.1) * size;
+    let y = hash2(i, 4.7) * size;
+    eCtx.strokeStyle = i % 3 === 0 ? '#ffbe42' : '#ff4d14';
+    eCtx.lineWidth = 2 + hash2(i, 2.8) * 3.5;
+    aCtx.strokeStyle = '#ff6a22';
+    aCtx.lineWidth = eCtx.lineWidth + 1.5;
+    rCtx.strokeStyle = '#626262';
+    rCtx.lineWidth = eCtx.lineWidth;
+
+    aCtx.beginPath();
+    eCtx.beginPath();
+    rCtx.beginPath();
+    aCtx.moveTo(x, y);
+    eCtx.moveTo(x, y);
+    rCtx.moveTo(x, y);
+    for (let s = 0; s < 5; s++) {
+      x += (hash2(i * 11 + s, 3.2) - 0.5) * 64;
+      y += (hash2(i * 11 + s, 8.6) - 0.5) * 64;
+      aCtx.lineTo(x, y);
+      eCtx.lineTo(x, y);
+      rCtx.lineTo(x, y);
+    }
+    aCtx.stroke();
+    eCtx.stroke();
+    rCtx.stroke();
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+  return { map: wrap(albedoC, true), emissiveMap: wrap(emC, true), roughnessMap: wrap(rC, false) };
+}
+
+/**
+ * Fine directional chestnut fur strand grain for realistic Red Hare warhorse coat.
+ */
+export function createHorseCoatMaps(): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const size = 256;
+  const albedoC = document.createElement('canvas');
+  const bumpC = document.createElement('canvas');
+  const roughC = document.createElement('canvas');
+  albedoC.width = bumpC.width = roughC.width = size;
+  albedoC.height = bumpC.height = roughC.height = size;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const bCtx = bumpC.getContext('2d')!;
+  const rCtx = roughC.getContext('2d')!;
+
+  aCtx.fillStyle = '#cf9e8e';
+  aCtx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#808080';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#8e8e8e';
+  rCtx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 2400; i++) {
+    const px = hash2(i, 2.3) * size;
+    const py = hash2(i, 9.7) * size;
+    const len = 5 + hash2(i, 4.1) * 10;
+    const h = hash2(i, 7.5);
+    aCtx.strokeStyle = h > 0.5 ? 'rgba(255, 224, 210, 0.16)' : 'rgba(54, 18, 12, 0.22)';
+    aCtx.lineWidth = 1.1;
+    aCtx.beginPath();
+    aCtx.moveTo(px, py);
+    aCtx.lineTo(px + len, py + (h - 0.5) * 2.2);
+    aCtx.stroke();
+
+    const bv = Math.floor(110 + h * 70);
+    bCtx.strokeStyle = `rgb(${bv},${bv},${bv})`;
+    bCtx.lineWidth = 1;
+    bCtx.beginPath();
+    bCtx.moveTo(px, py);
+    bCtx.lineTo(px + len, py);
+    bCtx.stroke();
+
+    const rv = Math.floor(118 + h * 64);
+    rCtx.strokeStyle = `rgb(${rv},${rv},${rv})`;
+    rCtx.lineWidth = 1;
+    rCtx.beginPath();
+    rCtx.moveTo(px, py);
+    rCtx.lineTo(px + len, py);
+    rCtx.stroke();
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+  return { map: wrap(albedoC, true), bumpMap: wrap(bumpC, false), roughnessMap: wrap(roughC, false) };
+}
+
+/**
+ * Folded Chinese Damascus steel pattern maps for the flying Xianxia Jian blade.
+ */
+export function createDamascusBladeMaps(): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const size = 256;
+  const albedoC = document.createElement('canvas');
+  const bumpC = document.createElement('canvas');
+  const roughC = document.createElement('canvas');
+  albedoC.width = bumpC.width = roughC.width = size;
+  albedoC.height = bumpC.height = roughC.height = size;
+
+  const aCtx = albedoC.getContext('2d')!;
+  const bCtx = bumpC.getContext('2d')!;
+  const rCtx = roughC.getContext('2d')!;
+
+  aCtx.fillStyle = '#ddebf8';
+  aCtx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#808080';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#484848';
+  rCtx.fillRect(0, 0, size, size);
+
+  for (let y = 0; y < size; y += 4) {
+    aCtx.strokeStyle = y % 8 === 0 ? 'rgba(130, 178, 214, 0.34)' : 'rgba(255, 255, 255, 0.25)';
+    aCtx.lineWidth = 1.6;
+    bCtx.strokeStyle = y % 8 === 0 ? '#686868' : '#a8a8a8';
+    bCtx.lineWidth = 1.4;
+    rCtx.strokeStyle = y % 8 === 0 ? '#686868' : '#343434';
+    rCtx.lineWidth = 1.6;
+    for (const ctx of [aCtx, bCtx, rCtx]) {
+      ctx.beginPath();
+      for (let x = 0; x <= size; x += 12) {
+        const yy = y + Math.sin(x * 0.08 + y * 0.05) * 4.5;
+        if (x === 0) ctx.moveTo(x, yy);
+        else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  const wrap = (c: HTMLCanvasElement, srgb: boolean) => {
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, 6);
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+  return { map: wrap(albedoC, true), bumpMap: wrap(bumpC, false), roughnessMap: wrap(roughC, false) };
 }

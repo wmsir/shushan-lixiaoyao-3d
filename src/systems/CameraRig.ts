@@ -100,6 +100,31 @@ export class CameraRig {
     this.camera.lookAt(this.currentLook);
   }
 
+  /** Live 3D Skin & Weapon Dressing-Room Preview Camera: frames Li Xiaoyao cleanly beside the shop card. */
+  updateShopPreview(heroPos: THREE.Vector3, heroYaw: number, yawOffset: number, isPortrait: boolean): void {
+    const dist = isPortrait ? 4.9 : 4.25;
+    const camY = heroPos.y + (isPortrait ? 1.56 : 1.52);
+    const lookY = heroPos.y + (isPortrait ? 0.65 : 1.18);
+    const orbitYaw = heroYaw + yawOffset;
+    const camX = heroPos.x + Math.sin(orbitYaw) * dist;
+    const camZ = heroPos.z + Math.cos(orbitYaw) * dist;
+
+    // Offset look target along camera right vector so hero stands centered in left (landscape) or top (portrait) stage
+    let lookX = heroPos.x;
+    let lookZ = heroPos.z;
+    if (!isPortrait) {
+      const rightX = Math.cos(orbitYaw);
+      const rightZ = -Math.sin(orbitYaw);
+      lookX += rightX * 0.92;
+      lookZ += rightZ * 0.92;
+    }
+
+    this.currentPos.set(camX, camY, camZ);
+    this.currentLook.set(lookX, lookY, lookZ);
+    this.camera.position.copy(this.currentPos);
+    this.camera.lookAt(this.currentLook);
+  }
+
   updateGameplay(
     dt: number,
     elapsed: number,

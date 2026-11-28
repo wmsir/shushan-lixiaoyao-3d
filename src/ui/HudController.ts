@@ -53,6 +53,7 @@ import {
   RARITY_LABELS,
   type RolledGearItem,
   SHOP_ITEMS,
+  SHOP_ITEM_MAP,
   computeCombatPower,
   computeHeroLoadoutStats,
   getRolledUpgradeCost,
@@ -164,6 +165,9 @@ export interface HudCallbacks {
   onClaimChapterChest?: (chestId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
   onClaimTowerChest?: (starsReq: number) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
   onReplayStory?: (kind: 'episode' | 'epilogue', id: number) => void;
+  onShopPreview?: (active: boolean, skinId?: string | null, weaponId?: string | null) => void;
+  onShopPreviewRotate?: (deltaYaw: number) => void;
+  onShopPreviewToggleSpin?: () => boolean;
 }
 
 export interface ResultDisplayOptions {
@@ -417,6 +421,17 @@ export class HudController {
   private readonly worldGuideToggleBtn = this.q('#btn-world-guide-toggle');
   private readonly worldAutoNavBtn = this.q('#btn-world-auto-nav');
   private worldToastTimer: number | null = null;
+  private worldGuidePulseTimer: number | null = null;
+
+  private readonly shopPreviewStage = this.q('#shop-preview-stage');
+  private readonly shopPreviewName = this.q('#shop-preview-name');
+  private readonly shopPreviewSub = this.q('#shop-preview-sub');
+  private readonly shopPreviewSpinBtn = this.q('#btn-preview-spin');
+  private readonly shopPreviewActionBtn = this.q('#btn-preview-action') as HTMLButtonElement;
+  private previewSkinId: string | null = null;
+  private previewWeaponId: string | null = null;
+  private previewDragPointerId: number | null = null;
+  private previewDragLastX = 0;
 
   private readonly mapRealmPill = this.q('#map-realm-pill');
   private readonly mapRealmBuff = this.q('#map-realm-buff');
@@ -553,6 +568,69 @@ export class HudController {
     });
     this.q('#btn-close-campaign').addEventListener('click', () => this.closeCampaignMap());
     this.q('#btn-close-shop').addEventListener('click', () => this.closeShop());
+    this.q('#btn-preview-rot-l').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.callbacks.onShopPreviewRotate?.(-0.55);
+    });
+    this.q('#btn-preview-rot-r').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.callbacks.onShopPreviewRotate?.(0.55);
+    });
+    this.shopPreviewSpinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const on = this.callbacks.onShopPreviewToggleSpin?.() ?? false;
+      this.shopPreviewSpinBtn.textContent = on ? '自动旋转: 开' : '自动旋转: 关';
+    });
+    this.q('#btn-preview-reset').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.previewSkinId = null;
+      this.previewWeaponId = null;
+      this.renderShopModal();
+    });
+    this.shopPreviewActionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const store = this.saveStore;
+      const targetId =
+        this.activeShopCategory === 'skin'
+          ? (this.previewSkinId ?? store?.getEquipped().skin)
+          : this.activeShopCategory === 'weapon'
+            ? (this.previewWeaponId ?? store?.getEquipped().weapon)
+            : null;
+      if (!store || !targetId) return;
+      const item = SHOP_ITEM_MAP[targetId];
+      if (!item) return;
+      if (!store.isOwned(item.id)) {
+        const res = this.callbacks.onShopBuy(item.id);
+        this.showShopToast(res.ok ? `已购入并穿戴「${item.name}」` : res.reason, res.ok);
+      } else if (store.getEquipped()[item.category] !== item.id) {
+        const ok = this.callbacks.onShopEquip(item.id);
+        if (ok) this.showShopToast(`已换装「${item.name}」`, true);
+      }
+      this.renderShopModal();
+    });
+    this.shopPreviewStage.addEventListener('pointerdown', (e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      this.previewDragPointerId = e.pointerId;
+      this.previewDragLastX = e.clientX;
+      this.shopPreviewStage.setPointerCapture(e.pointerId);
+    });
+    this.shopPreviewStage.addEventListener('pointermove', (e) => {
+      if (this.previewDragPointerId !== e.pointerId) return;
+      const dx = e.clientX - this.previewDragLastX;
+      this.previewDragLastX = e.clientX;
+      if (Math.abs(dx) > 0.5) {
+        this.callbacks.onShopPreviewRotate?.(dx * 0.015);
+      }
+    });
+    const endPreviewDrag = (e: PointerEvent) => {
+      if (this.previewDragPointerId !== e.pointerId) return;
+      this.previewDragPointerId = null;
+      if (this.shopPreviewStage.hasPointerCapture(e.pointerId)) {
+        this.shopPreviewStage.releasePointerCapture(e.pointerId);
+      }
+    };
+    this.shopPreviewStage.addEventListener('pointerup', endPreviewDrag);
+    this.shopPreviewStage.addEventListener('pointercancel', endPreviewDrag);
     this.shopBattleBtn.addEventListener('click', () => {
       this.closeShop();
       if (this.currentScreenMode === 'paused') {
@@ -1095,12 +1173,14 @@ export class HudController {
 
   openShop(cat?: EquipCategory | 'bag'): void {
     if (cat) this.activeShopCategory = cat;
-    this.renderShopModal();
     this.shopOverlay.classList.add('visible');
+    this.renderShopModal();
   }
 
   closeShop(): void {
     this.shopOverlay.classList.remove('visible');
+    this.shopOverlay.classList.remove('preview-active');
+    this.callbacks.onShopPreview?.(false);
     if (this.currentScreenMode === 'camp') {
       this.renderCampPanel();
     }
@@ -1367,6 +1447,36 @@ export class HudController {
 
     this.shopGridEl.innerHTML = '';
 
+    const isPreviewTab = this.activeShopCategory === 'skin' || this.activeShopCategory === 'weapon';
+    const isShopVisible = this.shopOverlay.classList.contains('visible');
+    this.shopOverlay.classList.toggle('preview-active', isShopVisible && isPreviewTab);
+    if (isShopVisible && isPreviewTab) {
+      const targetId =
+        this.activeShopCategory === 'skin'
+          ? (this.previewSkinId ?? equipped.skin)
+          : (this.previewWeaponId ?? equipped.weapon);
+      const pvItem = SHOP_ITEM_MAP[targetId];
+      if (pvItem) {
+        const pvOwned = store.isOwned(pvItem.id);
+        const pvEquipped = equipped[pvItem.category] === pvItem.id;
+        this.shopPreviewName.textContent = `3D 实时试穿 · ${pvItem.name}${pvEquipped ? '（已穿戴）' : pvOwned ? '（已拥有）' : '（未购入试穿中）'}`;
+        this.shopPreviewSub.textContent = `${pvItem.desc} · 拖动人物可 360° 观赏`;
+        if (pvEquipped) {
+          this.shopPreviewActionBtn.textContent = '已穿戴';
+          this.shopPreviewActionBtn.disabled = true;
+        } else if (pvOwned) {
+          this.shopPreviewActionBtn.textContent = '穿戴此装';
+          this.shopPreviewActionBtn.disabled = false;
+        } else {
+          this.shopPreviewActionBtn.textContent = `购入并穿戴 ◆${pvItem.price}`;
+          this.shopPreviewActionBtn.disabled = jade < pvItem.price;
+        }
+      }
+      this.callbacks.onShopPreview?.(true, this.previewSkinId ?? equipped.skin, this.previewWeaponId ?? equipped.weapon);
+    } else if (!isShopVisible || !isPreviewTab) {
+      this.callbacks.onShopPreview?.(false);
+    }
+
     if (this.activeShopCategory === 'bag') {
       const equippedSet = new Set(Object.values(equipped));
       const hasSalvageableLow = inventory.some(
@@ -1491,11 +1601,19 @@ export class HudController {
 
       const lvTag = item.category !== 'skin' && lv > 0 ? `<span class="forge-lv">+${lv}</span>` : '';
       const eqTag = isEquipped ? '<span class="eq-pill">已穿戴</span>' : '';
+      const isPreviewing =
+        (item.category === 'skin' && (this.previewSkinId ?? equipped.skin) === item.id) ||
+        (item.category === 'weapon' && (this.previewWeaponId ?? equipped.weapon) === item.id);
+      if (isPreviewing) card.classList.add('previewing');
 
       let actionsHtml = '';
+      const tryOnBtn =
+        item.category === 'skin' || item.category === 'weapon'
+          ? `<button type="button" class="shop-act-btn preview" data-act="preview" data-id="${item.id}">${isPreviewing ? '试穿中' : '试穿'}</button>`
+          : '';
       if (!owned) {
         const afford = jade >= item.price;
-        actionsHtml = `<button type="button" class="shop-act-btn buy${afford ? '' : ' locked'}" data-act="buy" data-id="${item.id}"${afford ? '' : ' disabled'}>购入 ◆${item.price}</button>`;
+        actionsHtml = `${tryOnBtn}<button type="button" class="shop-act-btn buy${afford ? '' : ' locked'}" data-act="buy" data-id="${item.id}"${afford ? '' : ' disabled'}>购入 ◆${item.price}</button>`;
       } else {
         const equipBtn = isEquipped
           ? '<span class="shop-done-lbl">生效中</span>'
@@ -1507,7 +1625,7 @@ export class HudController {
             : lv >= MAX_FORGE_LEVEL
               ? '<span class="shop-done-lbl max">满阶 +5</span>'
               : `<button type="button" class="shop-act-btn forge${canAffordForge ? '' : ' locked'}" data-act="upgrade" data-id="${item.id}"${canAffordForge ? '' : ' disabled'}>淬炼 ◆${forgeCost}</button>`;
-        actionsHtml = `${equipBtn}${forgeBtn}`;
+        actionsHtml = `${tryOnBtn}${equipBtn}${forgeBtn}`;
       }
 
       card.innerHTML = `
@@ -1524,16 +1642,40 @@ export class HudController {
         <div class="shop-card-actions">${actionsHtml}</div>
       `;
 
+      if (item.category === 'skin' || item.category === 'weapon') {
+        card.addEventListener('click', (e) => {
+          if ((e.target as HTMLElement).closest('button[data-act]:not([data-act="preview"])')) return;
+          if (item.category === 'skin') this.previewSkinId = item.id;
+          else this.previewWeaponId = item.id;
+          this.renderShopModal();
+        });
+      }
+
       for (const btn of Array.from(card.querySelectorAll<HTMLButtonElement>('button[data-act]'))) {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (e) => {
           const act = btn.dataset.act;
           const id = btn.dataset.id ?? '';
+          if (act === 'preview') {
+            e.stopPropagation();
+            if (item.category === 'skin') this.previewSkinId = id;
+            else if (item.category === 'weapon') this.previewWeaponId = id;
+            this.renderShopModal();
+            return;
+          }
           if (act === 'buy') {
             const res = this.callbacks.onShopBuy(id);
+            if (res.ok) {
+              if (item.category === 'skin') this.previewSkinId = id;
+              else if (item.category === 'weapon') this.previewWeaponId = id;
+            }
             this.showShopToast(res.ok ? `已购入并穿戴「${item.name}」` : res.reason, res.ok);
           } else if (act === 'equip') {
             const ok = this.callbacks.onShopEquip(id);
-            if (ok) this.showShopToast(`已换装「${item.name}」`, true);
+            if (ok) {
+              if (item.category === 'skin') this.previewSkinId = id;
+              else if (item.category === 'weapon') this.previewWeaponId = id;
+              this.showShopToast(`已换装「${item.name}」`, true);
+            }
           } else if (act === 'upgrade') {
             const res = this.callbacks.onShopUpgrade(id);
             this.showShopToast(res.ok ? `「${item.name}」淬炼至 +${res.level}` : res.reason, res.ok);
@@ -2369,12 +2511,26 @@ export class HudController {
     this.worldProgressPill.textContent = `锚点 ${waypoints}/4 · 宝箱 ${chests}/6 · 灵瞳 ${orbs}/6 · 首领 ${bosses}/4`;
   }
 
-  setWorldGuide(title: string, dirText: string, howto: string, autoNavActive: boolean): void {
+  setWorldGuide(title: string, dirText: string, howto: string, autoNavActive: boolean, resumeLabel?: string): void {
     this.worldGuideGoal.textContent = title;
     this.worldGuideDir.textContent = dirText;
     this.worldGuideHowto.textContent = howto;
     this.worldAutoNavBtn.classList.toggle('active', autoNavActive);
-    this.worldAutoNavBtn.textContent = autoNavActive ? '停止寻路' : '自动寻路';
+    this.worldAutoNavBtn.classList.toggle('resume-pulse', !autoNavActive && Boolean(resumeLabel));
+    this.worldAutoNavBtn.textContent = autoNavActive ? '停止寻路' : (resumeLabel ?? '自动寻路');
+  }
+
+  flashWorldGuideNextStep(summaryText: string): void {
+    this.worldGuideCard.classList.remove('collapsed');
+    this.worldGuideToggleBtn.textContent = '▾';
+    this.worldGuideToggleBtn.setAttribute('aria-expanded', 'true');
+    this.worldGuideHowto.textContent = summaryText;
+    this.worldGuideCard.classList.add('next-pulse');
+    if (this.worldGuidePulseTimer !== null) window.clearTimeout(this.worldGuidePulseTimer);
+    this.worldGuidePulseTimer = window.setTimeout(() => {
+      this.worldGuideCard.classList.remove('next-pulse');
+      this.worldGuidePulseTimer = null;
+    }, 4200);
   }
 
   setWorldInteractPrompt(label: string | null): void {
@@ -2386,7 +2542,7 @@ export class HudController {
     this.worldInteractBtn.classList.add('visible');
   }
 
-  showWorldToast(text: string, ok = true): void {
+  showWorldToast(text: string, ok = true, durationMs = 2800): void {
     this.worldToastEl.textContent = text;
     this.worldToastEl.classList.toggle('err', !ok);
     this.worldToastEl.classList.add('visible');
@@ -2394,7 +2550,7 @@ export class HudController {
     this.worldToastTimer = window.setTimeout(() => {
       this.worldToastEl.classList.remove('visible');
       this.worldToastTimer = null;
-    }, 2600);
+    }, durationMs);
   }
 
   renderWorldTeleportList(): void {

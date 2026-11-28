@@ -2627,6 +2627,7 @@ body,
 .shop-act-btn:disabled {
   opacity: 0.44;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .shop-done-lbl {
@@ -3230,8 +3231,8 @@ body,
 /* ===== Mount & Flying Sword Bar + Open World HUD ===== */
 .mount-bar {
   position: fixed;
-  left: calc(50% + 168px);
-  bottom: 26px;
+  left: 18px;
+  bottom: 24px;
   display: flex;
   gap: 8px;
   pointer-events: auto;
@@ -3286,10 +3287,10 @@ body,
 
 #app.mobile-mode .mount-bar,
 #app.force-wheel .mount-bar {
-  left: auto;
-  right: 10px;
-  top: 48px;
-  bottom: auto;
+  left: max(10px, env(safe-area-inset-left));
+  right: auto;
+  top: auto;
+  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 206px);
   gap: 6px;
 }
 
@@ -3953,12 +3954,17 @@ body,
   #app.world-mode .top-right-stack {
     top: 98px;
   }
-  .mount-bar {
-    left: auto;
-    right: 8px;
-    top: 52px;
-    bottom: auto;
-    gap: 6px;
+  .mount-bar,
+  #app.mobile-mode .mount-bar,
+  #app.force-wheel .mount-bar,
+  #app.world-mode .mount-bar {
+    left: max(8px, env(safe-area-inset-left));
+    right: auto;
+    top: auto;
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 208px);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
   }
   .mount-key {
     display: none;
@@ -3967,12 +3973,8 @@ body,
     padding: 5px 10px;
     font-size: 12px;
   }
-  #app.world-mode .mount-bar {
-    top: 132px;
-    right: 8px;
-  }
   .world-guide-card {
-    top: 168px;
+    top: 132px;
     right: 8px;
     width: 212px;
     padding: 6px 8px;
@@ -4383,7 +4385,7 @@ body,
   }
   #subtitle-banner,
   #app.mobile-mode #subtitle-banner {
-    bottom: 14px;
+    bottom: 46px;
     left: 50%;
     transform: translateX(-50%);
     max-width: min(320px, 36vw);
@@ -4487,13 +4489,20 @@ body,
   #app.camp-mode .top-right-stack {
     top: 46px;
   }
+  .mount-bar,
   #app.mobile-mode .mount-bar,
-  #app.force-wheel .mount-bar {
-    top: 82px;
-    right: 8px;
+  #app.force-wheel .mount-bar,
+  #app.world-mode .mount-bar {
+    left: 50%;
+    right: auto;
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    flex-direction: row;
+    gap: 6px;
   }
   .world-guide-card {
-    top: 116px;
+    top: 50px;
     right: 8px;
     width: 204px;
     padding: 5px 8px;
@@ -5730,5 +5739,152 @@ body,
   }
   .codex-karma-card {
     padding: 6px 10px;
+  }
+}
+
+/* ==================== Live 3D Skin & Weapon Shop Preview + World Next-Step Glow ==================== */
+.world-guide-card.next-pulse {
+  border-color: #ffe278;
+  box-shadow: 0 0 22px rgba(255, 212, 88, 0.55), 0 12px 30px rgba(0, 0, 0, 0.58);
+}
+
+.world-autonav-btn.resume-pulse {
+  border-color: #ffe278;
+  color: #fff6cf;
+  background: linear-gradient(180deg, rgba(164, 96, 20, 0.9), rgba(92, 46, 8, 0.95));
+  box-shadow: 0 0 12px rgba(255, 206, 78, 0.55);
+}
+
+.shop-preview-stage {
+  display: none;
+  position: relative;
+  flex: 1 1 46%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.shop-preview-stage:active {
+  cursor: grabbing;
+}
+
+#shop-overlay.preview-active {
+  background: linear-gradient(90deg, rgba(4, 9, 16, 0.08) 0%, rgba(4, 9, 16, 0.24) 44%, rgba(4, 9, 16, 0.88) 64%);
+  backdrop-filter: none;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+#shop-overlay.preview-active .shop-preview-stage {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+#shop-overlay.preview-active .shop-modal {
+  width: min(520px, 52%);
+  flex-shrink: 0;
+}
+
+.shop-preview-hud {
+  width: min(390px, 96%);
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(10, 18, 32, 0.88), rgba(7, 13, 24, 0.94));
+  border: 1px solid rgba(104, 232, 255, 0.45);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+}
+
+.preview-name {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffe8a6;
+}
+
+.preview-sub {
+  font-size: 11px;
+  color: #8ee8df;
+}
+
+.preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.preview-actions .util-btn {
+  padding: 4px 9px;
+  font-size: 11.5px;
+}
+
+.preview-actions .preview-buy-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.shop-card.previewing {
+  border-color: #68e8ff;
+  box-shadow: 0 0 0 1px rgba(104, 232, 255, 0.6), 0 8px 22px rgba(76, 217, 208, 0.28);
+}
+
+.shop-act-btn.preview {
+  border-color: rgba(104, 232, 255, 0.58);
+  color: #a8f4ff;
+  background: rgba(16, 54, 78, 0.72);
+}
+
+@media (max-width: 820px) {
+  #shop-overlay.preview-active {
+    flex-direction: column;
+    justify-content: flex-end;
+    background: linear-gradient(180deg, rgba(4, 9, 16, 0.06) 0%, rgba(4, 9, 16, 0.25) 36%, rgba(4, 9, 16, 0.92) 54%);
+    gap: 6px;
+  }
+  #shop-overlay.preview-active .shop-preview-stage {
+    flex: 0 0 38dvh;
+    width: 100%;
+    height: 38dvh;
+    padding-bottom: 2px;
+  }
+  #shop-overlay.preview-active .shop-modal {
+    width: 100%;
+    max-height: calc(58dvh - 14px);
+    flex: 1 1 auto;
+  }
+  .shop-preview-hud {
+    width: 100%;
+    padding: 6px 10px;
+    gap: 3px;
+  }
+  .preview-name {
+    font-size: 13px;
+  }
+  .preview-sub {
+    display: none;
+  }
+}
+
+@media (max-height: 460px) {
+  #shop-overlay.preview-active .shop-modal {
+    width: min(460px, 56%);
+  }
+  .shop-preview-hud {
+    padding: 6px 8px;
+  }
+  .preview-sub {
+    display: none;
   }
 }

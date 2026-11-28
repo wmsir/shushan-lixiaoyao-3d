@@ -59,6 +59,7 @@ import {
   type HeroLoadoutStats,
   type RolledGearItem,
   RARITY_LABELS,
+  SHOP_ITEM_MAP,
   getEquippedSkinVisual,
   getEquippedWeaponVisual,
   rollEquipmentDrop,
@@ -223,6 +224,16 @@ export class Game {
   private readonly worldGuideArrow = new THREE.Group();
   private worldGuideCategory: 'auto' | 'waypoint' | 'chest' | 'orb' | 'boss' = 'auto';
   private worldAutoNav = false;
+  private worldInCombat = false;
+  private worldCombatCooldown = 0;
+  private worldAutoNavPausedByCombat = false;
+  private worldLastCombatNotice = '';
+
+  private shopPreviewActive = false;
+  private shopPreviewSkinId: string | null = null;
+  private shopPreviewWeaponId: string | null = null;
+  private shopPreviewYaw = 0;
+  private shopPreviewAutoSpin = true;
 
   private activeTowerFloor: TowerFloorDef | null = null;
   private roguelikeState: {
@@ -705,6 +716,17 @@ export class Game {
         this.audio.playDialogueStep(false);
         this.hud.showStageDialogue(replayDef);
       },
+      onShopPreview: (active: boolean, skinId?: string | null, weaponId?: string | null) => {
+        this.setShopPreview(active, skinId ?? null, weaponId ?? null);
+      },
+      onShopPreviewRotate: (deltaYaw: number) => {
+        this.shopPreviewAutoSpin = false;
+        this.shopPreviewYaw += deltaYaw;
+      },
+      onShopPreviewToggleSpin: () => {
+        this.shopPreviewAutoSpin = !this.shopPreviewAutoSpin;
+        return this.shopPreviewAutoSpin;
+      },
     });
 
     this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
@@ -731,6 +753,8 @@ export class Game {
   private setupLighting(): void {
     this.scene.background = new THREE.Color('#0c1522');
     this.scene.fog = new THREE.FogExp2('#101d2c', 0.0138);
+    this.scene.environment = this.pipeline.buildMoonlitEnvironment();
+    this.scene.environmentIntensity = 0.72;
 
     const hemi = new THREE.HemisphereLight('#8fb4d8', '#232026', 1.15);
     this.scene.add(hemi);
@@ -739,6 +763,7 @@ export class Game {
     moonKey.position.set(-15, 24, -18);
     moonKey.castShadow = true;
     moonKey.shadow.mapSize.set(2048, 2048);
+    moonKey.shadow.radius = 2.6;
     moonKey.shadow.camera.near = 2;
     moonKey.shadow.camera.far = 68;
     const sc = 22;
@@ -883,6 +908,95 @@ export class Game {
     );
   }
 
+  private setShopPreview(active: boolean, skinId: string | null = null, weaponId: string | null = null): void {
+    if (!active) {
+      if (!this.shopPreviewActive) return;
+      this.shopPreviewActive = false;
+      this.shopPreviewSkinId = null;
+      this.shopPreviewWeaponId = null;
+      this.applyCurrentLoadoutVisuals();
+      this.hero.rig.setWeaponDrawn(
+        this.mode === 'playing' || this.mode === 'camp' || this.mode === 'showcase' || this.mountMode === 'horse',
+      );
+      if (this.mode === 'title') {
+        this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed);
+      } else {
+        this.cameraRig.snapTo(this.hero.pos);
+      }
+      return;
+    }
+
+    const equipped = this.saveStore.getEquipped();
+    if (!this.shopPreviewActive) {
+      this.shopPreviewActive = true;
+      this.shopPreviewYaw = 0;
+      this.shopPreviewAutoSpin = true;
+    }
+    this.shopPreviewSkinId = skinId ?? equipped.skin;
+    this.shopPreviewWeaponId = weaponId ?? equipped.weapon;
+    const skinVis = SHOP_ITEM_MAP[this.shopPreviewSkinId]?.skinVisual ?? getEquippedSkinVisual(equipped);
+    const wpnVis =
+      SHOP_ITEM_MAP[this.shopPreviewWeaponId]?.weaponVisual ??
+      getEquippedWeaponVisual({ ...equipped, weapon: this.shopPreviewWeaponId }, this.saveStore.getInventory());
+    this.hero.rig.applyHeroAppearance(skinVis, wpnVis);
+    this.hero.rig.setWeaponDrawn(true);
+  }
+
+  private hasNearbyWorldHostile(radius = 13.5): boolean {
+    const h = this.hero.pos;
+    return this.enemies.some(
+      (e) =>
+        e.aiState !== 'dead' &&
+        !e.isDummy &&
+        Math.hypot(e.pos.x - h.x, e.pos.z - h.z) <= radius &&
+        ((e.aggroHeroTimer ?? 0) > 0 ||
+          e.aiState === 'chase' ||
+          e.aiState === 'windup' ||
+          e.aiState === 'attack' ||
+          e.aiState === 'recover'),
+    );
+  }
+
+  private markWorldCombatEngage(): void {
+    if (this.mode !== 'world') return;
+    this.worldInCombat = true;
+    this.worldCombatCooldown = 3.2;
+    if (this.worldAutoNav) {
+      this.worldAutoNav = false;
+      this.worldAutoNavPausedByCombat = true;
+      this.rmbMoveTarget = null;
+      this.hud.showWorldToast('遭遇敌袭：自动寻路已暂停，破敌后将指引下一步！', true, 2600);
+    }
+  }
+
+  private announceWorldNextStep(reason: string): void {
+    if (this.mode !== 'world') return;
+    const dropCount = this.vfx.getPendingGearDropCount();
+    let nextMsg = '';
+    if (dropCount > 0) {
+      nextMsg = `${reason}！下一步：前方仍有 ${dropCount} 件战利品光柱，走近拾取神兵`;
+    } else if (this.activeWorldInteract) {
+      nextMsg = `${reason}！下一步：${this.activeWorldInteract.label}`;
+    } else {
+      const guide = this.resolveWorldGuideTarget();
+      if (guide) {
+        const dx = guide.x - this.hero.pos.x;
+        const dz = guide.z - this.hero.pos.z;
+        const dist = Math.round(Math.hypot(dx, dz));
+        const dir = this.formatWorldDirection(dx, dz);
+        nextMsg = this.worldAutoNavPausedByCombat
+          ? `${reason}！可点右下「继续寻路」→ ${dir} 约${dist}米【${guide.label}】(${guide.actionHint})`
+          : `${reason}！下一步：${dir} 约${dist}米前往【${guide.label}】(${guide.actionHint})`;
+      } else {
+        nextMsg = `${reason}！九州探索圆满，可点右上「重召首领」或回剑庐/闯关历练`;
+      }
+    }
+    this.worldLastCombatNotice = nextMsg;
+    this.hud.flashWorldGuideNextStep(nextMsg);
+    this.hud.showWorldToast(nextMsg, true, 4600);
+    this.showStorySubtitle(nextMsg, 4.2);
+  }
+
   private syncMoonKeyLightToHero(): void {
     if (!this.moonKeyLight) return;
     const texel = 44 / 2048;
@@ -955,9 +1069,14 @@ export class Game {
   }
 
   private enterTitleMode(): void {
+    this.input.resetState();
+    this.setShopPreview(false);
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.worldInCombat = false;
+    this.worldCombatCooldown = 0;
+    this.worldAutoNavPausedByCombat = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
     this.activeWorldInteract = null;
@@ -1024,9 +1143,14 @@ export class Game {
 
   enterCampMode(): void {
     this.audio.unlock();
+    this.input.resetState();
+    this.setShopPreview(false);
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.worldInCombat = false;
+    this.worldCombatCooldown = 0;
+    this.worldAutoNavPausedByCombat = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
     this.activeWorldInteract = null;
@@ -1130,7 +1254,14 @@ export class Game {
 
   enterOpenWorldMode(): void {
     this.audio.unlock();
+    this.input.resetState();
+    this.setShopPreview(false);
     this.setMountMode('none', true);
+    this.worldAutoNav = false;
+    this.worldInCombat = false;
+    this.worldCombatCooldown = 0;
+    this.worldAutoNavPausedByCombat = false;
+    this.worldLastCombatNotice = '';
     this.mp.leave();
     this.clearPeerHero();
     this.hud.setMpHudBadge('');
@@ -1357,10 +1488,23 @@ export class Game {
     this.activeWorldInteract = nextPrompt;
     this.hud.setWorldInteractPrompt(nextPrompt?.label ?? null);
 
+    if (this.worldCombatCooldown > 0) {
+      this.worldCombatCooldown -= dt;
+      if (this.worldCombatCooldown <= 0) {
+        if (this.hasNearbyWorldHostile(13.5)) {
+          this.worldCombatCooldown = 1.2;
+        } else if (this.worldInCombat) {
+          this.worldInCombat = false;
+          this.announceWorldNextStep('战斗结束');
+        }
+      }
+    }
+
     const prog = this.saveStore.getWorldProgress();
     this.hud.setWorldStatus(region.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
 
     const guide = this.resolveWorldGuideTarget();
+    const resumeLabel = !this.worldAutoNav && this.worldAutoNavPausedByCombat ? '继续寻路' : undefined;
     if (guide) {
       const dx = guide.x - h.pos.x;
       const dz = guide.z - h.pos.z;
@@ -1378,11 +1522,12 @@ export class Game {
       }
 
       if (this.worldAutoNav) {
+        this.worldAutoNavPausedByCombat = false;
         if (dist <= 2.6 || h.state === 'dead') {
           this.worldAutoNav = false;
           this.rmbMoveTarget = null;
           if (dist <= 2.6) {
-            this.hud.showWorldToast(`已抵达【${guide.label}】附近！`, true);
+            this.hud.showWorldToast(`已抵达【${guide.label}】附近！${guide.actionHint}`, true, 3600);
           }
         } else {
           if (guide.kind === 'orb' && dist <= 9.5 && this.mountMode !== 'sword' && (h.state === 'idle' || h.state === 'run')) {
@@ -1400,10 +1545,12 @@ export class Game {
         `${dirText} · 约 ${Math.round(dist)} 米 · ${guide.actionHint}`,
         '玩法：点亮4锚点开传送 · 开6宝箱/御剑采6灵瞳永久加血 · 斩4首领与宝妖爆神兵',
         this.worldAutoNav,
+        resumeLabel,
       );
     } else {
       this.worldGuideArrow.visible = false;
       this.worldAutoNav = false;
+      this.worldAutoNavPausedByCombat = false;
       this.hud.setWorldGuide(
         '九州探索圆满 · 挑战四方首领',
         '可点右上「重召首领」或进剑庐/闯关继续历练',
@@ -1521,6 +1668,7 @@ export class Game {
   private toggleWorldAutoNav(): void {
     if (this.mode !== 'world') return;
     this.worldAutoNav = !this.worldAutoNav;
+    this.worldAutoNavPausedByCombat = false;
     if (!this.worldAutoNav) {
       this.rmbMoveTarget = null;
       this.hud.showWorldToast('已停止自动寻路', true);
@@ -1548,8 +1696,8 @@ export class Game {
     this.audio.playDropChime('spirit');
     triggerHaptic('medium');
     this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
-    this.hud.showWorldToast(`吸收【${orb.name}】：永久气血 +10，+${orb.jade} 灵石！`, true);
     this.spawnWorldCallout('灵瞳 +10气血!', oPos, 'heal');
+    this.announceWorldNextStep(`吸收【${orb.name}】(气血+10 · +${orb.jade}灵石)`);
     return true;
   }
 
@@ -1619,12 +1767,9 @@ export class Game {
       triggerHaptic('medium');
       this.hud.renderWorldTeleportList();
       this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
-      this.hud.showWorldToast(
-        firstLit ? `已点亮传送锚点【${wp.name}】(+${wp.rewardJade}灵石)！可随时快速传送` : `【${wp.name}】灵脉充盈`,
-        true,
-      );
       this.activeWorldInteract = null;
       this.hud.setWorldInteractPrompt(null);
+      this.announceWorldNextStep(firstLit ? `点亮锚点【${wp.name}】(+${wp.rewardJade}灵石)` : `【${wp.name}】灵脉充盈`);
       return true;
     }
 
@@ -1647,10 +1792,10 @@ export class Game {
     triggerHaptic('heavy');
     this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
     const gearMsg = addedRes.added ? `神兵【${item.name}】` : `折算+${addedRes.overflowSalvagedJade ?? 0}灵石`;
-    this.hud.showWorldToast(`开启【${ch.name}】：+${ch.jade} 灵石 & ${gearMsg}！`, true);
     this.spawnWorldCallout(`+${ch.jade} 灵石!`, chPos, 'info');
     this.activeWorldInteract = null;
     this.hud.setWorldInteractPrompt(null);
+    this.announceWorldNextStep(`开启【${ch.name}】(+${ch.jade}灵石 · ${gearMsg})`);
     return true;
   }
 
@@ -1710,6 +1855,12 @@ export class Game {
 
   private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false, skipDialogue = false): void {
     this.audio.unlock();
+    this.input.resetState();
+    this.setShopPreview(false);
+    this.worldAutoNav = false;
+    this.worldInCombat = false;
+    this.worldCombatCooldown = 0;
+    this.worldAutoNavPausedByCombat = false;
     this.clearCombatEntities();
     this.activeDungeon = null;
     this.activeTowerFloor = null;
@@ -2506,6 +2657,28 @@ export class Game {
     const animDt = this.reducedMotion ? 0 : rawDt;
     this.elapsed += animDt;
 
+    if (this.shopPreviewActive) {
+      if (this.shopPreviewAutoSpin) {
+        this.shopPreviewYaw += animDt * 0.85;
+      }
+      const equippedWpn = this.saveStore.getEquipped().weapon;
+      this.hero.rig.applyPose(
+        this.shopPreviewWeaponId && this.shopPreviewWeaponId !== equippedWpn ? 'combatIdle' : 'idle',
+        0,
+        this.elapsed,
+        animDt,
+        0,
+      );
+      this.arena.update(animDt, this.elapsed, this.hero.pos);
+      const isPortrait = window.innerWidth <= 820 && window.innerHeight > window.innerWidth;
+      this.cameraRig.updateShopPreview(this.hero.pos, this.hero.yaw, this.shopPreviewYaw, isPortrait);
+      this.syncMoonKeyLightToHero();
+      if (doRender) this.pipeline.render();
+      this.input.endFrame();
+      this.publishDiagnostics();
+      return;
+    }
+
     if (this.mode === 'title') {
       this.hero.rig.applyPose('idle', 0, this.elapsed, animDt, 0);
       this.arena.update(animDt, this.elapsed, this.hero.pos);
@@ -3288,6 +3461,7 @@ export class Game {
   }
 
   private startHeroAttack(step: number): void {
+    this.markWorldCombatEngage();
     const h = this.hero;
     const prevMount = this.mountMode;
     if (prevMount !== 'none') {
@@ -3783,6 +3957,7 @@ export class Game {
   }
 
   private startSkillQ(): void {
+    this.markWorldCombatEngage();
     const h = this.hero;
     const cdMult = this.getCdMult();
     if (this.mountMode === 'sword') {
@@ -3907,6 +4082,7 @@ export class Game {
   }
 
   private startSkillE(): void {
+    this.markWorldCombatEngage();
     const h = this.hero;
     if (this.mountMode !== 'none') this.setMountMode('none', true);
     h.spirit -= 45;
@@ -3927,6 +4103,7 @@ export class Game {
   }
 
   private startSkillR(): void {
+    this.markWorldCombatEngage();
     const h = this.hero;
     if (this.mountMode !== 'none') this.setMountMode('none', true);
     h.ult = 0;
@@ -4318,6 +4495,7 @@ export class Game {
     isCrit: boolean,
     skill?: string,
   ): void {
+    this.markWorldCombatEngage();
     const h = this.hero;
     if (this.mp.mode === 'coop' && this.mp.role === 'guest') {
       h.spirit = Math.min(h.maxSpirit, h.spirit + (heavy ? 12 : 7));
@@ -4580,13 +4758,21 @@ export class Game {
     if (this.mp.mode === 'offline' || this.mp.role === 'host') {
       this.saveStore.incrementStat('totalKills', 1);
       if (this.mode === 'world') {
+        const hasOtherHostile = this.enemies.some(
+          (x) => x.id !== e.id && x.aiState !== 'dead' && !x.isDummy && Math.hypot(x.pos.x - this.hero.pos.x, x.pos.z - this.hero.pos.z) <= 13.5,
+        );
         if (e.worldCampId) {
           const camp = WORLD_MOB_CAMPS.find((c) => c.id === e.worldCampId);
           const campAlive = this.enemies.some((x) => x.id !== e.id && x.worldCampId === e.worldCampId && x.aiState !== 'dead');
           if (camp && !campAlive) {
             this.saveStore.addJade(camp.jadeReward);
             this.worldMobTimers.set(camp.id, camp.respawnSec);
-            this.hud.showWorldToast(`清剿据点【${camp.name}】：+${camp.jadeReward} 灵石！`, true);
+            if (!hasOtherHostile) {
+              this.worldInCombat = false;
+              this.worldCombatCooldown = 0;
+            }
+            this.announceWorldNextStep(`清剿据点【${camp.name}】(+${camp.jadeReward}灵石)`);
+            return;
           }
         }
         if (e.worldBossId === 'event_goblin') {
@@ -4602,7 +4788,12 @@ export class Game {
           });
           this.vfx.spawnGearDrop(e.pos, item, this.rng);
           this.audio.playGearDropChime(item.rarity);
-          this.hud.showWorldToast(`斩杀【${e.name}】！爆出 +180 灵石与极品神兵！`, true);
+          if (!hasOtherHostile) {
+            this.worldInCombat = false;
+            this.worldCombatCooldown = 0;
+          }
+          this.announceWorldNextStep(`斩杀【${e.name}】(+180灵石与极品神兵)`);
+          return;
         } else if (e.worldBossId) {
           const wb = WORLD_BOSS_SPAWNS.find((b) => b.id === e.worldBossId);
           if (wb) {
@@ -4621,11 +4812,21 @@ export class Game {
               this.vfx.spawnGearDrop(e.pos, item, this.rng);
               if (k === 0) this.audio.playGearDropChime(item.rarity);
             }
-            this.hud.showWorldToast(`斩杀野外首领【${wb.name}】！+${wb.jadeReward} 灵石与神兵掉落！`, true);
             const prog = this.saveStore.getWorldProgress();
             const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
             this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
+            if (!hasOtherHostile) {
+              this.worldInCombat = false;
+              this.worldCombatCooldown = 0;
+            }
+            this.announceWorldNextStep(`击破野外首领【${wb.name}】(+${wb.jadeReward}灵石)`);
+            return;
           }
+        }
+        if (this.worldInCombat && !hasOtherHostile) {
+          this.worldInCombat = false;
+          this.worldCombatCooldown = 0;
+          this.announceWorldNextStep('战斗结束');
         }
         return;
       }
@@ -6977,6 +7178,13 @@ export class Game {
           .filter((e) => e.kind === 'boss' && e.aiState !== 'dead')
           .map((b) => b.bossArchetype ?? 'default'),
         worldProgress: this.saveStore.getWorldProgress(),
+        shopPreviewActive: this.shopPreviewActive,
+        shopPreviewSkinId: this.shopPreviewSkinId,
+        shopPreviewWeaponId: this.shopPreviewWeaponId,
+        worldInCombat: this.worldInCombat,
+        worldAutoNav: this.worldAutoNav,
+        worldAutoNavPausedByCombat: this.worldAutoNavPausedByCombat,
+        worldLastCombatNotice: this.worldLastCombatNotice,
       }),
       getStats: () => {
         const stats = this.pipeline.getStats();
@@ -7072,6 +7280,17 @@ export class Game {
         }
         if (action === 'worldToggleAutoNav') {
           this.toggleWorldAutoNav();
+          this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action.startsWith('previewSkin:')) {
+          const skinId = action.slice('previewSkin:'.length);
+          this.setShopPreview(true, skinId, null);
+          this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action === 'closeShopPreview') {
+          this.setShopPreview(false);
           this.stepFrame(0.05, true);
           return true;
         }
