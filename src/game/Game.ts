@@ -35,6 +35,7 @@ import {
   CULTIVATION_STEPS,
   CampaignSaveStore,
   type ChapterDef,
+  type ChapterId,
   type DungeonDef,
   type StageDef,
   type StageDialogueDef,
@@ -49,6 +50,7 @@ import {
   getStageDef,
   getStageDialogue,
   getStageDialogueForStage,
+  getSwordHeartSummary,
   getSwordRealm,
   pickBlessingChoices,
 } from './CampaignData';
@@ -98,10 +100,13 @@ import {
 import {
   CAMP_MEDITATION_QUOTES,
   CAMP_TEA_QUOTES,
+  CHAPTER_EPILOGUES,
   EPISODE_STORY_SCRIPTS,
   STAGE_20_EPILOGUE,
+  STAGE_25_EPILOGUE,
   getBossCutsceneTaunt,
   getBossEnrageLine,
+  getChapterEpilogue,
   getWineMasterCampDialogue,
   getXuanyingCampDialogue,
 } from './StoryScripts';
@@ -185,7 +190,8 @@ export class Game {
   private corridorMode = false;
   private healingShrineCollected = false;
   private activeDialogueDef: StageDialogueDef | null = null;
-  private dialogueContext: 'preStage' | 'campNpc' | 'epilogue' = 'preStage';
+  private dialogueContext: 'preStage' | 'campNpc' | 'epilogue' | 'replay' = 'preStage';
+  private lastEpilogueStageId = 20;
   private pendingEpilogueResultOpts: ResultDisplayOptions | null = null;
   private lastEpilogueResultOpts: ResultDisplayOptions | null = null;
   private campNpcGroup: THREE.Group | null = null;
@@ -347,7 +353,7 @@ export class Game {
         const prefix = quickMatch ? '快速匹配已建房' : `${modeLabel}房间已创建`;
         this.hud.setMpLobbyStatus(`${prefix} · 房间码【${code}】等待同门加入...`, true, true);
         this.hud.setMpHudBadge(`${modeLabel} · ${code}`);
-        this.currentStageId = clamp(Math.floor(stageId), 1, 20);
+        this.currentStageId = clamp(Math.floor(stageId), 1, CAMPAIGN_STAGES.length);
       },
       onRoomReady: (info) => {
         this.localHeroName = info.role === 'host' ? info.hostName : info.guestName;
@@ -359,7 +365,7 @@ export class Game {
           true,
         );
         this.hud.setMpHudBadge(`${info.mode === 'solo' ? '1v1 Solo' : 'Co-op'} · ${info.code}`);
-        this.startMultiplayerMatch(info.mode, clamp(Math.floor(info.stage), 1, 20), peerName);
+        this.startMultiplayerMatch(info.mode, clamp(Math.floor(info.stage), 1, CAMPAIGN_STAGES.length), peerName);
       },
       onPeerState: (pkt) => this.handlePeerStatePacket(pkt),
       onPeerAction: (pkt) => this.handlePeerActionPacket(pkt),
@@ -368,7 +374,7 @@ export class Game {
       onPvpHit: (pkt) => this.handleIncomingPvpHit(pkt),
       onStageSync: (stageNum, bossIntro) => {
         if (this.mp.mode === 'coop' && this.mp.role === 'guest') {
-          this.enterStage(clamp(Math.floor(stageNum), 1, 20), bossIntro, false);
+          this.enterStage(clamp(Math.floor(stageNum), 1, CAMPAIGN_STAGES.length), bossIntro, false);
         }
       },
       onPeerRevive: () => {
@@ -493,12 +499,14 @@ export class Game {
       },
       onReplayEpilogue: () => {
         if (!this.lastEpilogueResultOpts) return;
+        const ep =
+          getChapterEpilogue(this.lastEpilogueStageId, this.saveStore.getSwordHeart()) ?? STAGE_25_EPILOGUE;
         this.pendingEpilogueResultOpts = this.lastEpilogueResultOpts;
         this.dialogueContext = 'epilogue';
-        this.activeDialogueDef = STAGE_20_EPILOGUE;
+        this.activeDialogueDef = ep;
         this.mode = 'dialogue';
         this.audio.playDialogueStep(false);
-        this.hud.showStageDialogue(STAGE_20_EPILOGUE);
+        this.hud.showStageDialogue(ep);
       },
       onRetry: () => {
         if (this.mp.mode !== 'offline' && this.mp.peerConnected && this.peer) {
@@ -678,6 +686,25 @@ export class Game {
         }
         return res;
       },
+      onReplayStory: (kind: 'episode' | 'epilogue', id: number) => {
+        const dlg =
+          kind === 'epilogue'
+            ? getChapterEpilogue(id, this.saveStore.getSwordHeart())
+            : getStageDialogueForStage(id > 100 ? getDungeonDef(id === 101 ? 'dg_guling' : id === 102 ? 'dg_jianku' : id === 103 ? 'dg_modian' : 'dg_taixu').stageDef : getStageDef(id), false);
+        if (!dlg) return;
+        const replayDef: StageDialogueDef = {
+          ...dlg,
+          mode: 'replay',
+          choices: [],
+          tipText: '剑录回廊 · 阅毕可返回蜀山剧情志',
+          confirmLabel: '收卷 · 返回剧情志',
+        };
+        this.dialogueContext = 'replay';
+        this.activeDialogueDef = replayDef;
+        this.mode = 'dialogue';
+        this.audio.playDialogueStep(false);
+        this.hud.showStageDialogue(replayDef);
+      },
     });
 
     this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
@@ -826,8 +853,13 @@ export class Game {
   private getEffectiveUltGainMult(): number {
     const loadout = this.getLoadoutStats();
     const rank = evaluateCombatRank(this.combatStyleScore);
+    const swordHeart = getSwordHeartSummary(this.saveStore.getSwordHeart());
     const affixBonus = this.getActiveLeylineAffix() === 'glass_cannon' ? 0.4 : 0;
-    return this.blessings.ultGainMult * loadout.ultGainMult * (1 + rank.ultGainBonusPct + affixBonus);
+    return (
+      this.blessings.ultGainMult *
+      loadout.ultGainMult *
+      (1 + rank.ultGainBonusPct + swordHeart.ultGainBonus + affixBonus)
+    );
   }
 
   private addCombatStyle(points: number, actionKey: string): void {
@@ -877,6 +909,9 @@ export class Game {
     } else if (biome === 'celestial_sanctum') {
       this.scene.background = new THREE.Color('#0a1224');
       this.scene.fog = new THREE.FogExp2('#101c36', 0.0124);
+    } else if (biome === 'astral_void') {
+      this.scene.background = new THREE.Color('#090d22');
+      this.scene.fog = new THREE.FogExp2('#101736', 0.0118);
     } else if (chDef) {
       this.scene.background = new THREE.Color(chDef.bgHex);
       this.scene.fog = new THREE.FogExp2(chDef.fogHex, 0.0138);
@@ -890,6 +925,7 @@ export class Game {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
     const cultivation = this.saveStore.getCultivationBonus();
+    const swordHeart = getSwordHeartSummary(this.saveStore.getSwordHeart());
     const h = this.hero;
     const prevMaxHp = h.maxHp;
     const nextMaxHp =
@@ -898,6 +934,7 @@ export class Game {
       loadout.maxHpBonus +
       this.blessings.maxHpBonus +
       cultivation.hpBonus +
+      swordHeart.hpBonus +
       this.saveStore.getWorldOrbHpBonus() +
       this.activeMealBuff.hpBonus +
       this.episodeChoiceBuff.hpBonus;
@@ -1692,7 +1729,7 @@ export class Game {
         ultBonus: meal.ultBonus,
       };
     }
-    const targetStage = jumpToBoss ? 20 : clamp(Math.floor(stageId), 1, 20);
+    const targetStage = jumpToBoss ? CAMPAIGN_STAGES.length : clamp(Math.floor(stageId), 1, CAMPAIGN_STAGES.length);
     this.saveStore.setLastPlayed(targetStage);
     this.episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
     this.resetHero(new THREE.Vector3(0, 0, jumpToBoss ? 7.2 : 8.8), Math.PI);
@@ -1874,6 +1911,12 @@ export class Game {
     this.dialogueContext = 'preStage';
     this.campDialogueFocusPos = null;
 
+    if (context === 'replay') {
+      this.enterTitleMode();
+      this.hud.openStoryCodex();
+      return true;
+    }
+
     if (context === 'epilogue') {
       const opts = this.pendingEpilogueResultOpts ?? this.lastEpilogueResultOpts;
       this.pendingEpilogueResultOpts = null;
@@ -1932,7 +1975,8 @@ export class Game {
 
     const stageDef = this.getActiveStageDef();
     const chDef = getChapterDef(stageDef.chapter);
-    const chosen = dlg ? (dlg.choices.find((c) => c.id === choiceId) ?? dlg.choices[0]) : undefined;
+    const chosenIdx = dlg ? dlg.choices.findIndex((c) => c.id === choiceId) : -1;
+    const chosen = dlg ? (chosenIdx >= 0 ? dlg.choices[chosenIdx] : dlg.choices[0]) : undefined;
     if (chosen) {
       this.episodeChoiceBuff = {
         dmgBonus: chosen.dmgBonus ?? 0,
@@ -1941,11 +1985,17 @@ export class Game {
         ultBonus: chosen.ultBonus ?? 0,
         extraGourd: chosen.extraGourd ?? 0,
       };
+      this.saveStore.recordStoryChoice(
+        stageDef.id,
+        chosen.id,
+        chosen.alignment ?? (chosenIdx === 1 ? 'heart' : 'sword'),
+      );
       this.syncLiveHeroCapsFromLoadout();
       if (this.episodeChoiceBuff.ultBonus > 0) {
         this.hero.ult = clamp(this.hero.ult + this.episodeChoiceBuff.ultBonus, 0, 100);
       }
       this.spawnWorldCallout(chosen.title, this.hero.pos, 'parry');
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
       this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
     }
 
@@ -2041,7 +2091,7 @@ export class Game {
         duration: 2.2,
       });
     } else {
-      this.enterStage(clamp(Math.floor(stageId), 1, 20), false, isHost);
+      this.enterStage(clamp(Math.floor(stageId), 1, CAMPAIGN_STAGES.length), false, isHost);
     }
     this.cameraRig.snapTo(this.hero.pos);
     this.hud.update(this.hero, this.getObjectiveLabel(), this.getActiveBoss(), this.peer, 'none', this.buildTacticalState());
@@ -2088,7 +2138,7 @@ export class Game {
         ? this.getActiveStageDef().id
         : this.activeDungeon
           ? this.activeDungeon.stageDef.id
-          : clamp(Math.floor(stageId), 1, 20);
+          : clamp(Math.floor(stageId), 1, CAMPAIGN_STAGES.length);
     const stageDef = this.getActiveStageDef();
     const chDef = getChapterDef(stageDef.chapter);
     this.currentWaveIdx = jumpLastWave ? stageDef.waves.length - 1 : 0;
@@ -2243,7 +2293,10 @@ export class Game {
       this.mode = 'playing';
       this.hud.setMode('playing');
       if (allowCutscene) {
-        if (wave.subtitle) {
+        const waveLine = EPISODE_STORY_SCRIPTS[stageDef.id]?.waveCallouts?.[waveIdx];
+        if (waveLine) {
+          this.showStorySubtitle(waveLine, 3.4);
+        } else if (wave.subtitle) {
           this.showStorySubtitle(wave.subtitle, 3.2);
         } else if (waveIdx > 0) {
           this.showStorySubtitle(`【${wave.label}】妖众增援杀至！`, 2.4);
@@ -3211,6 +3264,7 @@ export class Game {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
     const cultivation = this.saveStore.getCultivationBonus();
+    const swordHeart = getSwordHeartSummary(this.saveStore.getSwordHeart());
     const affix = this.getActiveLeylineAffix();
     const leylineZoneMult = this.heroInLeylineZone ? 1.3 : 1.0;
     const affixBonus = affix === 'blood_pact' ? 0.28 : affix === 'glass_cannon' ? 0.35 : 0;
@@ -3224,6 +3278,7 @@ export class Game {
       leylineZoneMult *
       (1 +
         cultivation.atkPct +
+        swordHeart.dmgBonus +
         this.activeMealBuff.dmgBonus +
         this.episodeChoiceBuff.dmgBonus +
         affixBonus +
@@ -5150,8 +5205,15 @@ export class Game {
                 const rLong = this.rng();
                 if (e.bossArchetype === 'phantom') {
                   longMove = rLong < 0.44 ? 'blinkStrike' : rLong < 0.76 ? 'swordStorm' : 'lunge';
-                } else if (e.bossArchetype === 'celestial') {
-                  longMove = rLong < 0.4 ? 'meteorRain' : rLong < 0.72 ? 'crossBeam' : 'swordStorm';
+                } else if (e.bossArchetype === 'celestial' || e.bossArchetype === 'astral') {
+                  longMove =
+                    e.bossArchetype === 'astral' && rLong < 0.34
+                      ? 'blinkStrike'
+                      : rLong < 0.4
+                        ? 'meteorRain'
+                        : rLong < 0.72
+                          ? 'crossBeam'
+                          : 'swordStorm';
                 } else if (e.bossArchetype === 'inferno') {
                   longMove = rLong < 0.5 ? 'lavaEruption' : 'barrage';
                 } else if (e.bossArchetype === 'titan' && dist < 8.5) {
@@ -5191,17 +5253,19 @@ export class Game {
                   mv = roll < 0.34 ? 'blinkStrike' : roll < 0.62 ? 'swordStorm' : roll < 0.84 ? 'lunge' : 'cleave';
                 } else if (e.bossArchetype === 'inferno') {
                   mv = roll < 0.4 ? 'lavaEruption' : roll < 0.66 ? 'slam' : roll < 0.85 ? 'barrage' : 'cleave';
-                } else if (e.bossArchetype === 'celestial') {
+                } else if (e.bossArchetype === 'celestial' || e.bossArchetype === 'astral') {
                   mv =
-                    roll < 0.32
-                      ? 'crossBeam'
-                      : roll < 0.62
-                        ? 'meteorRain'
-                        : roll < 0.82
-                          ? e.phase === 2
-                            ? 'quakeRing'
-                            : 'slam'
-                          : 'swordStorm';
+                    e.bossArchetype === 'astral' && roll < 0.28
+                      ? 'blinkStrike'
+                      : roll < 0.36
+                        ? 'crossBeam'
+                        : roll < 0.64
+                          ? 'meteorRain'
+                          : roll < 0.84
+                            ? e.phase === 2
+                              ? 'quakeRing'
+                              : 'slam'
+                            : 'swordStorm';
                 }
               }
               this.beginEnemyWindup(e, mv, undefined, targetPos);
@@ -6295,9 +6359,10 @@ export class Game {
       this.saveStore.addRolledItem(bonusGear);
       this.stageDroppedGear.push(bonusGear);
     }
-    this.hud.syncCampaignProgress(this.saveStore, stageDef.id < 20 ? stageDef.id + 1 : 20);
+    const maxStage = CAMPAIGN_STAGES.length;
+    this.hud.syncCampaignProgress(this.saveStore, stageDef.id < maxStage ? stageDef.id + 1 : maxStage);
 
-    const nextStageId = stageDef.id < 20 ? stageDef.id + 1 : null;
+    const nextStageId = stageDef.id < maxStage ? stageDef.id + 1 : null;
     const blessingChoices = nextStageId && this.mp.mode === 'offline' ? pickBlessingChoices(this.rng, 3) : undefined;
 
     const opts: ResultDisplayOptions = {
@@ -6310,16 +6375,19 @@ export class Game {
       jadeEarned: this.hero.stageJadeEarned,
     };
 
-    if (stageDef.id === 20 && this.mp.mode === 'offline') {
+    const epilogue = getChapterEpilogue(stageDef.id, this.saveStore.getSwordHeart());
+    if (epilogue && this.mp.mode === 'offline') {
+      this.saveStore.markEpilogueSeen(stageDef.id);
+      this.lastEpilogueStageId = stageDef.id;
       this.lastEpilogueResultOpts = opts;
       if (!skipEpilogue) {
         this.pendingEpilogueResultOpts = opts;
         this.dialogueContext = 'epilogue';
-        this.activeDialogueDef = STAGE_20_EPILOGUE;
+        this.activeDialogueDef = epilogue;
         this.mode = 'dialogue';
         this.hud.clearSubtitle();
         this.audio.playDialogueStep(false);
-        this.hud.showStageDialogue(STAGE_20_EPILOGUE);
+        this.hud.showStageDialogue(epilogue);
         return;
       }
     }
@@ -6483,7 +6551,7 @@ export class Game {
   private handleEnemySyncPacket(snaps: EnemyNetSnapshot[], stageNum: number): void {
     if (this.mp.mode !== 'coop' || this.mp.role !== 'guest') return;
     if (stageNum !== this.currentStageId) {
-      this.enterStage(clamp(Math.floor(stageNum), 1, 20), false, false);
+      this.enterStage(clamp(Math.floor(stageNum), 1, CAMPAIGN_STAGES.length), false, false);
     }
     const seen = new Set<number>();
     for (const s of snaps) {
@@ -6710,8 +6778,9 @@ export class Game {
       spawn: (kind: 'bladesman' | 'caster' | 'elite' | 'boss', x = 0, z = -3) => {
         this.spawnEnemy(kind, x, z);
       },
-      toBoss: () => this.startNewRun(true, 20, false, true),
-      toStage: (stage: number) => this.startNewRun(false, clamp(Math.floor(stage), 1, 20), false, true),
+      toBoss: () => this.startNewRun(true, CAMPAIGN_STAGES.length, false, true),
+      toStage: (stage: number, jumpBoss = false) =>
+        this.startNewRun(jumpBoss, clamp(Math.floor(stage), 1, CAMPAIGN_STAGES.length), false, true),
       stageNum: () => this.currentStageId,
       wave: () => this.currentWaveIdx + 1,
       totalStars: () => this.saveStore.getTotalStars(),
@@ -6737,7 +6806,7 @@ export class Game {
       confirmDialogue: () => this.confirmStageDialogue(),
       vfxGhostStats: () => this.vfx.getGhostStats(),
       version: APP_VERSION,
-      openMap: (chapterId?: 1 | 2 | 3 | 4) => this.hud.openCampaignMap(chapterId),
+      openMap: (chapterId?: ChapterId) => this.hud.openCampaignMap(chapterId),
       clearCurrentStage: () => {
         for (const e of this.enemies) {
           if (e.aiState !== 'dead') this.killEnemy(e);
@@ -6901,6 +6970,9 @@ export class Game {
         roguelikePaths: { ...this.blessings.pathCounts },
         combatRank: evaluateCombatRank(this.combatStylePeak).rank,
         towerStars: this.saveStore.getTotalTowerStars(),
+        stageCount: CAMPAIGN_STAGES.length,
+        swordHeart: this.saveStore.getSwordHeart(),
+        seenEpilogues: this.saveStore.getSeenEpilogues(),
         bossArchetypes: this.enemies
           .filter((e) => e.kind === 'boss' && e.aiState !== 'dead')
           .map((b) => b.bossArchetype ?? 'default'),
@@ -7013,7 +7085,7 @@ export class Game {
           return true;
         }
         if (action.startsWith('startEpisode:')) {
-          const ep = clamp(Math.round(Number(action.slice('startEpisode:'.length))), 1, 20);
+          const ep = clamp(Math.round(Number(action.slice('startEpisode:'.length))), 1, CAMPAIGN_STAGES.length);
           if (!Number.isFinite(ep)) return false;
           this.mp.leave();
           this.clearPeerHero();
@@ -7023,6 +7095,20 @@ export class Game {
           this.startNewRun(false, ep, false, false);
           this.pipeline.render();
           this.publishDiagnostics();
+          return true;
+        }
+        if (action === 'openCodex') {
+          this.hud.openStoryCodex();
+          return true;
+        }
+        if (action.startsWith('replayEpilogue:')) {
+          const epId = Math.round(Number(action.slice('replayEpilogue:'.length)));
+          const dlg = getChapterEpilogue(epId, this.saveStore.getSwordHeart());
+          if (!dlg) return false;
+          this.dialogueContext = 'replay';
+          this.activeDialogueDef = { ...dlg, mode: 'replay', confirmLabel: '收卷 · 返回剧情志' };
+          this.mode = 'dialogue';
+          this.hud.showStageDialogue(this.activeDialogueDef);
           return true;
         }
         if (action === 'confirmDialogue') {
@@ -7102,11 +7188,11 @@ export class Game {
           this.hud.openTrialsHub(tab === 'roguelike' || tab === 'dungeon' ? tab : 'tower');
           return true;
         }
-        if (action === 'forceWinStage') {
+        if (action === 'forceWinStage' || action === 'forceWinStage:epilogue') {
           for (const e of this.enemies) {
             if (e.aiState !== 'dead') e.aiState = 'dead';
           }
-          this.completeCurrentStage(true);
+          this.completeCurrentStage(action !== 'forceWinStage:epilogue');
           this.pipeline.render();
           this.publishDiagnostics();
           return true;
@@ -7150,10 +7236,11 @@ export class Game {
           'sword_graveyard',
           'lava_abyss',
           'celestial_sanctum',
+          'astral_void',
           'haven_camp',
         ];
         const stageBiomes = new Set(CAMPAIGN_STAGES.map((s) => s.biome));
-        let biomeSwitchOk = stageBiomes.size >= 5;
+        let biomeSwitchOk = stageBiomes.size >= 6;
         const propCounts: number[] = [];
         for (const b of allBiomes) {
           this.arena.setBiome(b);
@@ -7170,7 +7257,7 @@ export class Game {
 
         const lv = this.saveStore.getCultivationLevel();
         const stepsValid =
-          CULTIVATION_STEPS.length === 9 &&
+          CULTIVATION_STEPS.length === 10 &&
           CULTIVATION_STEPS.every(
             (st, idx) =>
               st.level === idx &&
@@ -7204,10 +7291,10 @@ export class Game {
         const stage1Hp = CAMPAIGN_STAGES[0].waves
           .flatMap((w) => w.enemies)
           .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
-        const stage20Hp = CAMPAIGN_STAGES[19].waves
+        const stageFinalHp = CAMPAIGN_STAGES[CAMPAIGN_STAGES.length - 1].waves
           .flatMap((w) => w.enemies)
           .reduce((s, e) => s + Math.round(ENEMY_BASE_STATS[e.kind].hp * (e.hpMult ?? 1)), 0);
-        const diffPass = stage1Hp >= 1200 && stage20Hp > stage1Hp;
+        const diffPass = stage1Hp >= 1200 && stageFinalHp > stage1Hp;
 
         const allStoryIds = [...CAMPAIGN_STAGES.map((s) => s.id), 101, 102, 103, 104];
         const scriptsPresent = allStoryIds.every((id) => {
@@ -7221,7 +7308,9 @@ export class Game {
             !sc.lines.some((l) => l.role === 'enemy' && l.text.startsWith(`${l.speaker.split('·')[0].trim()}`))
           );
         });
-        const epilogueOk = STAGE_20_EPILOGUE.lines.length >= 4 && STAGE_20_EPILOGUE.mode === 'epilogue';
+        const epilogueOk = [5, 10, 15, 20, 25].every(
+          (sid) => Boolean(CHAPTER_EPILOGUES[sid]) && CHAPTER_EPILOGUES[sid].lines.length >= 3,
+        );
         const campNpcOk = this.campNpcGroup !== null;
 
         const bossArchetypes = new Set(
@@ -7234,7 +7323,7 @@ export class Game {
           WORLD_SPIRIT_ORBS.length === 6 &&
           WORLD_BOSS_SPAWNS.length === 4 &&
           WORLD_MOB_CAMPS.length === 4 &&
-          bossArchetypes.size >= 4 &&
+          bossArchetypes.size >= 5 &&
           stageLayouts.has('pillars') &&
           stageLayouts.has('islands');
 
@@ -7269,11 +7358,11 @@ export class Game {
           },
           stageDifficultyBuffed: {
             pass: diffPass,
-            detail: `stage1Hp=${stage1Hp}, stage20Hp=${stage20Hp}`,
+            detail: `stage1Hp=${stage1Hp}, stage25Hp=${stageFinalHp}`,
           },
           storyScriptsValid: {
             pass: scriptsPresent && epilogueOk,
-            detail: `scripts=${allStoryIds.length}, epilogue=${STAGE_20_EPILOGUE.lines.length}, campNpcInit=${campNpcOk}`,
+            detail: `scripts=${allStoryIds.length}, epilogues=5, campNpcInit=${campNpcOk}`,
           },
           mountsAndOpenWorldValid: {
             pass: mountsAndOpenWorldOk,

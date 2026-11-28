@@ -383,7 +383,7 @@ body,
 
 .chapter-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -587,6 +587,12 @@ body,
   color: #bceeff;
   background: rgba(24, 84, 148, 0.38);
   border-color: rgba(118, 214, 255, 0.38);
+}
+
+.sc-biome.biome-astral_void {
+  color: #8cf2ff;
+  background: rgba(24, 58, 128, 0.44);
+  border-color: rgba(104, 232, 255, 0.42);
 }
 
 .sc-hazard {
@@ -3975,10 +3981,10 @@ body,
     font-size: 10px;
   }
   .stage-card-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .chapter-tabs {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .shop-tabs {
     grid-template-columns: repeat(5, 1fr);
@@ -4545,8 +4551,8 @@ body,
     gap: 6px;
   }
   .chapter-tabs {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 5px;
   }
   .chapter-tab {
     padding: 4px 6px;
@@ -5515,5 +5521,214 @@ body,
   .trials-tab {
     padding: 4px 9px;
     font-size: 11.5px;
+  }
+}
+
+/* ==================== Story Codex, Spirit Speaker & Campaign Head Actions ==================== */
+.campaign-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.codex-btn {
+  border-color: rgba(104, 232, 255, 0.45);
+  color: #9beeff;
+  background: rgba(16, 42, 68, 0.72);
+}
+
+.dlg-line.role-spirit .dlg-seal {
+  border-color: rgba(104, 232, 255, 0.65);
+  background: linear-gradient(180deg, rgba(22, 82, 118, 0.9), rgba(12, 42, 68, 0.96));
+  color: #baf6ff;
+}
+
+.dlg-line.role-spirit .dlg-speaker {
+  color: #88eeff;
+}
+
+.codex-modal {
+  width: min(940px, calc(100vw - 24px));
+  max-height: 92dvh;
+  overflow: hidden;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(11, 18, 34, 0.97) 0%, rgba(7, 11, 24, 0.98) 100%);
+  border: 1px solid rgba(104, 232, 255, 0.44);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.codex-karma-card {
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: rgba(16, 28, 48, 0.86);
+  border: 1px solid rgba(223, 192, 117, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.karma-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.karma-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #9ff4ff;
+  background: rgba(20, 74, 108, 0.65);
+  border: 1px solid rgba(104, 232, 255, 0.48);
+  margin-right: 8px;
+}
+
+.karma-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.karma-counts {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold-bright);
+}
+
+.karma-track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(94, 234, 212, 0.35);
+  overflow: hidden;
+}
+
+.karma-fill-sword {
+  height: 100%;
+  background: linear-gradient(90deg, #ff7b54, #ffd166);
+  transition: width 0.25s ease;
+}
+
+.codex-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.codex-tab {
+  padding: 5px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(14, 24, 42, 0.8);
+  color: #b4c8dc;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.codex-tab.active {
+  border-color: #68e8ff;
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(24, 78, 108, 0.9), rgba(14, 44, 68, 0.96));
+}
+
+.codex-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.codex-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(104, 232, 255, 0.28);
+  background: rgba(13, 24, 42, 0.86);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-card.locked {
+  opacity: 0.56;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.codex-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.codex-tag {
+  font-size: 11px;
+  color: #7ee8fa;
+  font-weight: 700;
+}
+
+.codex-choice-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(247, 212, 102, 0.18);
+  color: #ffe28a;
+  border: 1px solid rgba(247, 212, 102, 0.38);
+}
+
+.codex-title {
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  color: #f6efe0;
+}
+
+.codex-sub {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.codex-play-btn {
+  margin-top: auto;
+  align-self: flex-end;
+  padding: 4px 12px;
+  font-size: 11.5px;
+}
+
+@media (max-width: 820px) {
+  .codex-modal {
+    padding: 10px 12px;
+    max-height: 95dvh;
+  }
+  .codex-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .codex-tab {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+}
+
+@media (max-height: 460px) {
+  .codex-modal {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+  .codex-karma-card {
+    padding: 6px 10px;
   }
 }

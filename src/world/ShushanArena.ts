@@ -29,6 +29,7 @@ export type WorldBiome =
   | 'sword_graveyard'
   | 'lava_abyss'
   | 'celestial_sanctum'
+  | 'astral_void'
   | 'haven_camp';
 
 interface OccludableProp {
@@ -123,6 +124,8 @@ export class ShushanArena {
   private readonly lavaCorridorSubGroup = new THREE.Group();
   private readonly celestialSanctumGroup = new THREE.Group();
   private readonly celestialCorridorSubGroup = new THREE.Group();
+  private readonly astralVoidGroup = new THREE.Group();
+  private readonly astralCorridorSubGroup = new THREE.Group();
   private readonly campPropsGroup = new THREE.Group();
   private readonly bambooGrovesGroup = new THREE.Group();
   private readonly campObstacles: CircleObstacle[] = [];
@@ -183,6 +186,7 @@ export class ShushanArena {
   private campLanternLight?: THREE.PointLight;
   private readonly magmaVentPlumes: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }> = [];
   private readonly cloudPillars: Array<{ group: THREE.Group; baseY: number; phase: number; halo: THREE.Mesh }> = [];
+  private readonly astralObelisks: Array<{ group: THREE.Group; ring: THREE.Mesh; baseY: number; phase: number }> = [];
   private readonly graveyardCrystals: Array<{ mat: THREE.MeshStandardMaterial; phase: number }> = [];
 
   private layout: ArenaLayout = 'arena';
@@ -1432,25 +1436,27 @@ export class ShushanArena {
     skySwordRgb: [number, number, number];
   }): void {
     this.lastStageNum = stageNum;
-    const ch = stageNum <= 5 ? 1 : stageNum <= 10 ? 2 : stageNum <= 15 ? 3 : 4;
-    const isBoss = stageNum % 5 === 0 || stageNum === 19;
+    const ch = stageNum <= 5 ? 1 : stageNum <= 10 ? 2 : stageNum <= 15 ? 3 : stageNum <= 20 ? 4 : 5;
+    const isBoss = stageNum % 5 === 0 || stageNum === 19 || stageNum === 24;
     const bagua = overrideChapter
       ? Math.min(1.0, overrideChapter.baguaBase + (isBoss ? 0.14 : 0))
-      : ch === 4
+      : ch === 5
         ? 1.0
-        : ch === 3
-          ? 0.8
-          : ch === 2
-            ? 0.52
-            : isBoss
-              ? 0.42
-              : 0.08;
+        : ch === 4
+          ? 1.0
+          : ch === 3
+            ? 0.8
+            : ch === 2
+              ? 0.52
+              : isBoss
+                ? 0.42
+                : 0.08;
     const lightHex =
       overrideChapter?.lanternLightHex ??
-      (ch === 4 ? '#ff424c' : ch === 3 ? '#ff6e3a' : ch === 2 ? '#b96cff' : '#ff9c42');
+      (ch === 5 ? '#5ee8ff' : ch === 4 ? '#ff424c' : ch === 3 ? '#ff6e3a' : ch === 2 ? '#b96cff' : '#ff9c42');
     const flameHex =
       overrideChapter?.lanternFlameHex ??
-      (ch === 4 ? '#ff8278' : ch === 3 ? '#ffae70' : ch === 2 ? '#e1a8ff' : '#ffd28a');
+      (ch === 5 ? '#b8f8ff' : ch === 4 ? '#ff8278' : ch === 3 ? '#ffae70' : ch === 2 ? '#e1a8ff' : '#ffd28a');
     this.bossIntensity = bagua;
     for (const l of this.lanterns) {
       l.light.color.set(lightHex);
@@ -2761,12 +2767,14 @@ export class ShushanArena {
       this.swordGraveyardGroup,
       this.lavaAbyssGroup,
       this.celestialSanctumGroup,
+      this.astralVoidGroup,
       this.campPropsGroup,
     );
     this.peachShrineGroup.add(this.peachCorridorSubGroup);
     this.swordGraveyardGroup.add(this.swordCorridorSubGroup);
     this.lavaAbyssGroup.add(this.lavaCorridorSubGroup);
     this.celestialSanctumGroup.add(this.celestialCorridorSubGroup);
+    this.astralVoidGroup.add(this.astralCorridorSubGroup);
 
     // --- 1. Bamboo Canyon Arena Rim Clusters (8 outer clusters outside curb r >= 19.8m) ---
     const bStalkMat = new THREE.MeshStandardMaterial({ color: '#276846', roughness: 0.72 });
@@ -3158,6 +3166,79 @@ export class ShushanArena {
     ];
     celCorridorSpots.forEach(([cx, cy, cz, sc], idx) => {
       this.celestialCorridorSubGroup.add(buildCloudPillar(cx, cy, cz, sc, (idx + 6) * 1.05));
+    });
+
+    // --- 5b. Astral Void (太虚星海: 12 Obsidian-Cyan Star-Obelisks) ---
+    const astralStoneMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#253162',
+      emissive: new THREE.Color('#13224e'),
+      emissiveIntensity: 0.45,
+      roughness: 0.36,
+      metalness: 0.42,
+    });
+    const astralGoldRingMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.4, 1.85, 2.2),
+    });
+    const astralSpireGeo = new THREE.OctahedronGeometry(0.66, 0);
+    const astralShardGeo = new THREE.OctahedronGeometry(0.18, 0);
+    const astralHaloGeo = new THREE.TorusGeometry(0.95, 0.045, 8, 28);
+
+    const buildAstralObelisk = (x: number, y: number, z: number, sc: number, phase: number): THREE.Group => {
+      const grp = new THREE.Group();
+      grp.position.set(x, y, z);
+      grp.scale.setScalar(sc);
+
+      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.92, 0.85, 6), astralStoneMat);
+      pedestal.position.y = 0.42;
+      pedestal.castShadow = true;
+
+      const spire = new THREE.Mesh(astralSpireGeo, astralStoneMat);
+      spire.scale.set(0.85, 3.6, 0.85);
+      spire.position.y = 3.2;
+      spire.castShadow = true;
+
+      const core = new THREE.Mesh(astralShardGeo, astralCrystalMat);
+      core.scale.set(1.6, 2.4, 1.6);
+      core.position.y = 5.9;
+
+      const ring = new THREE.Mesh(astralHaloGeo, astralGoldRingMat);
+      ring.position.y = 3.65;
+      ring.rotation.x = 0.65;
+
+      for (let s = 0; s < 3; s++) {
+        const a = (s / 3) * Math.PI * 2 + phase;
+        const shard = new THREE.Mesh(astralShardGeo, sanctumGoldMat);
+        shard.position.set(Math.cos(a) * 1.05, 1.8 + s * 0.95, Math.sin(a) * 1.05);
+        grp.add(shard);
+      }
+
+      grp.add(pedestal, spire, core, ring);
+      this.astralObelisks.push({ group: grp, ring, baseY: y, phase });
+      return grp;
+    };
+
+    const astralZone0Spots: Array<[number, number, number]> = [
+      [-14.2, -13.6, 1.05],
+      [14.2, -13.6, 1.05],
+      [-18.2, -4.4, 1.0],
+      [18.2, -4.4, 1.0],
+      [-17.2, 6.2, 0.96],
+      [17.2, 6.2, 0.96],
+    ];
+    astralZone0Spots.forEach(([ax, az, sc], idx) => {
+      this.astralVoidGroup.add(buildAstralObelisk(ax, 0.35, az, sc, idx * 1.1));
+    });
+    const astralCorridorSpots: Array<[number, number, number, number]> = [
+      [-14.4, 0.5, -21.8, 1.12],
+      [14.4, 0.5, -23.8, 1.12],
+      [-17.8, 0.4, -44.0, 1.08],
+      [17.8, 0.4, -44.0, 1.08],
+      [-14.8, 0.5, -63.5, 1.18],
+      [14.8, 0.5, -63.5, 1.18],
+    ];
+    astralCorridorSpots.forEach(([ax, ay, az, sc], idx) => {
+      this.astralCorridorSubGroup.add(buildAstralObelisk(ax, ay, az, sc, (idx + 6) * 1.1));
     });
 
     // --- 6. Haven Camp (云来剑庐) Cozy Walkable Sanctuary in Zone 0 ---
@@ -4034,6 +4115,8 @@ export class ShushanArena {
     this.lavaCorridorSubGroup.visible = isCorridor;
     this.celestialSanctumGroup.visible = !isOpen && b === 'celestial_sanctum';
     this.celestialCorridorSubGroup.visible = isCorridor;
+    this.astralVoidGroup.visible = !isOpen && b === 'astral_void';
+    this.astralCorridorSubGroup.visible = isCorridor;
     this.campPropsGroup.visible = !isOpen && b === 'haven_camp';
 
     // Zone 1 Healing Spring Shrine visible only in corridor mode (maxZone >= 1) and NOT haven_camp
@@ -4047,7 +4130,7 @@ export class ShushanArena {
           ? 2.0
           : b === 'lava_abyss'
             ? 3.0
-            : b === 'celestial_sanctum'
+            : b === 'celestial_sanctum' || b === 'astral_void'
               ? 4.0
               : b === 'haven_camp'
                 ? 5.0
@@ -4058,9 +4141,10 @@ export class ShushanArena {
     if (this.plungeFoamMat) this.plungeFoamMat.uniforms.uWaterMode.value = waterMode;
 
     // 3. Biome-specific stone, cliff, sky, mist, and particle palettes
-    const ch = this.lastStageNum <= 5 ? 1 : this.lastStageNum <= 10 ? 2 : this.lastStageNum <= 15 ? 3 : 4;
-    const stageSkyTint = ch === 4 ? '#c46c86' : ch === 3 ? '#d88b68' : ch === 2 ? '#a88ce0' : '#ffffff';
-    const stageFloorHex = ch === 4 ? '#927488' : ch === 3 ? '#ab8879' : ch === 2 ? '#8e86b2' : '#9fb2c7';
+    const ch =
+      this.lastStageNum <= 5 ? 1 : this.lastStageNum <= 10 ? 2 : this.lastStageNum <= 15 ? 3 : this.lastStageNum <= 20 ? 4 : 5;
+    const stageSkyTint = ch === 5 ? '#9ac6ff' : ch === 4 ? '#c46c86' : ch === 3 ? '#d88b68' : ch === 2 ? '#a88ce0' : '#ffffff';
+    const stageFloorHex = ch === 5 ? '#6c7ba8' : ch === 4 ? '#927488' : ch === 3 ? '#ab8879' : ch === 2 ? '#8e86b2' : '#9fb2c7';
 
     const palette: Record<WorldBiome, {
       floor: string;
@@ -4157,6 +4241,22 @@ export class ShushanArena {
         fogMountain: '#16324a',
         petal: '#dff6ff',
         orb: '#ffe88a',
+      },
+      astral_void: {
+        floor: '#6c7ba8',
+        cliff: '#141936',
+        trim: '#7898c8',
+        canyonCliff: '#4d6090',
+        cliffCrest: '#2a3c68',
+        streamBed: '#384c7c',
+        slab: '#4a5f8e',
+        bridgeDeck: '#6e86b8',
+        skyTint: '#9ac6ff',
+        skyAdd: '#101438',
+        mist: '#7ad4ff',
+        fogMountain: '#111632',
+        petal: '#82f2ff',
+        orb: '#ffdf88',
       },
       haven_camp: {
         floor: '#a8b0bc',
@@ -4387,6 +4487,8 @@ export class ShushanArena {
         return (this.lavaAbyssGroup.children.length - 1) + (isCorridor ? this.lavaCorridorSubGroup.children.length : 0);
       case 'celestial_sanctum':
         return (this.celestialSanctumGroup.children.length - 1) + (isCorridor ? this.celestialCorridorSubGroup.children.length : 0);
+      case 'astral_void':
+        return (this.astralVoidGroup.children.length - 1) + (isCorridor ? this.astralCorridorSubGroup.children.length : 0);
       case 'haven_camp':
         return this.campPropsGroup.children.length;
     }
@@ -4728,6 +4830,12 @@ export class ShushanArena {
         cp.group.position.y = cp.baseY + Math.sin(elapsed * 0.95 + cp.phase) * 0.34;
         cp.halo.rotation.y = elapsed * 0.9 + cp.phase;
         cp.halo.rotation.x = Math.sin(elapsed * 0.7 + cp.phase) * 0.25;
+      }
+    } else if (this.currentBiome === 'astral_void') {
+      for (const ao of this.astralObelisks) {
+        ao.group.position.y = ao.baseY + Math.sin(elapsed * 1.15 + ao.phase) * 0.24;
+        ao.ring.rotation.z = elapsed * 1.1 + ao.phase;
+        ao.ring.rotation.y = Math.cos(elapsed * 0.65 + ao.phase) * 0.45;
       }
     } else if (this.currentBiome === 'sword_graveyard') {
       for (const gc of this.graveyardCrystals) {

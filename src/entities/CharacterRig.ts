@@ -57,7 +57,7 @@ import ironArmorUrl from '../assets/iron-armor.jpg';
 import ironArmorNrmUrl from '../assets/iron-armor-nrm.jpg';
 
 export type CharacterArchetype = 'xiaoyao' | 'ally' | 'bladesman' | 'caster' | 'elite' | 'boss';
-export type BossArchetype = 'titan' | 'phantom' | 'inferno' | 'celestial';
+export type BossArchetype = 'titan' | 'phantom' | 'inferno' | 'celestial' | 'astral';
 
 export type PoseName =
   | 'idle'
@@ -1914,6 +1914,39 @@ export class CharacterRig {
         horn.position.set(Math.cos(a) * 0.24, 0.78, -0.14 + Math.sin(a) * 0.12);
         grp.add(horn);
       }
+    } else if (variant === 'astral') {
+      this.bossArmorMat?.color.set('#b6d2f8');
+      this.bossTrimMat?.color.set('#26407a');
+      this.weaponGlowMat.emissive.set('#48f0ff');
+      for (const h of this.bossRimHandles) h.uRimColor.value.set('#58f4ff');
+      const wheel = new THREE.Group();
+      wheel.position.set(0, 0.44, -0.34);
+      const cyanRingMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(0.55, 1.95, 2.3),
+      });
+      const goldRingMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1.9, 1.45, 0.55),
+      });
+      const outer = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.028, 8, 28), cyanRingMat);
+      const inner = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.022, 6, 22), goldRingMat);
+      inner.rotation.y = 0.45;
+      wheel.add(outer, inner);
+      for (let i = 0; i < 4; i++) {
+        const side = i < 2 ? -1 : 1;
+        const idx = i % 2;
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.76 - idx * 0.12, 0.025), cyanRingMat);
+        const bx = side * (0.42 + idx * 0.2);
+        const by = 0.54 - idx * 0.18;
+        blade.position.set(bx, by, -0.26);
+        blade.rotation.z = side * (-0.34 - idx * 0.24);
+        blade.userData.baseX = bx;
+        blade.userData.baseY = by;
+        blade.userData.phase = i * 1.1;
+        grp.add(blade);
+        this.bossWingBlades.push(blade);
+      }
+      grp.add(wheel);
+      this.bossWheelMesh = wheel;
     } else {
       // celestial
       this.bossArmorMat?.color.set('#c4b4dc');

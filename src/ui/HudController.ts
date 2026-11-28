@@ -15,14 +15,17 @@ import {
   DUNGEON_LIST,
   type BlessingDef,
   type CampaignSaveStore,
+  type ChapterId,
   type DungeonDef,
   type EpisodeChoiceDef,
   type StageDef,
   type StageDialogueDef,
   getChapterDef,
   getStageDef,
+  getSwordHeartSummary,
   getSwordRealm,
 } from '../game/CampaignData';
+import { CHAPTER_EPILOGUES } from '../game/StoryScripts';
 import {
   CHAPTER_STAR_CHESTS,
   DIFFICULTY_TIERS,
@@ -160,6 +163,7 @@ export interface HudCallbacks {
   onSetDifficulty?: (diff: DifficultyTierId) => void;
   onClaimChapterChest?: (chestId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
   onClaimTowerChest?: (starsReq: number) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
+  onReplayStory?: (kind: 'episode' | 'epilogue', id: number) => void;
 }
 
 export interface ResultDisplayOptions {
@@ -232,6 +236,7 @@ export class HudController {
   private readonly appRoot = this.q('#app');
   private readonly titleOverlay = this.q('#title-overlay');
   private readonly campaignOverlay = this.q('#campaign-overlay');
+  private readonly codexOverlay = this.q('#codex-overlay');
   private readonly shopOverlay = this.q('#shop-overlay');
   private readonly dungeonOverlay = this.q('#dungeon-overlay');
   private readonly dialogueOverlay = this.q('#dialogue-overlay');
@@ -422,6 +427,10 @@ export class HudController {
   private readonly campaignDetailEl = this.q('#campaign-detail-box');
   private readonly mapLaunchBtn = this.q('#btn-map-launch');
   private readonly mapCoopBtn = this.q('#btn-map-coop');
+  private readonly codexKarmaBar = this.q('#codex-karma-bar');
+  private readonly codexTabsEl = this.q('#codex-tabs');
+  private readonly codexListEl = this.q('#codex-list');
+  private readonly codexCountPill = this.q('#codex-count-pill');
 
   // Result modal elements
   private readonly resultModalCard = this.q('#result-modal-card');
@@ -454,7 +463,8 @@ export class HudController {
   private readonly mpConnDot = this.q('#mp-conn-dot');
 
   private selectedStage = 1;
-  private activeChapter: 1 | 2 | 3 | 4 = 1;
+  private activeChapter: ChapterId = 1;
+  private activeCodexTab: ChapterId | 'dungeon' | 'epilogue' = 1;
   private activeShopCategory: EquipCategory | 'bag' = 'weapon';
   private activeTrialsTab: 'tower' | 'roguelike' | 'dungeon' = 'tower';
   private campPanelCollapsed = false;
@@ -524,6 +534,11 @@ export class HudController {
     this.worldAutoNavBtn.addEventListener('click', () => this.callbacks.onWorldToggleAutoNav?.());
     this.q('#btn-open-dungeon').addEventListener('click', () => this.openTrialsHub());
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
+    this.q('#btn-open-codex').addEventListener('click', () => {
+      this.closeCampaignMap();
+      this.openStoryCodex();
+    });
+    this.q('#btn-close-codex').addEventListener('click', () => this.closeStoryCodex());
     this.q('#btn-open-shop').addEventListener('click', () => this.openShop());
     this.q('#btn-close-dungeon').addEventListener('click', () => this.closeDungeon());
     for (const tabBtn of this.trialsTabBtns) {
@@ -706,14 +721,15 @@ export class HudController {
     this.activeChapter = stDef.chapter;
 
     this.titleRealmBadge.textContent = realm.title;
-    this.titleStarsText.textContent = `★ ${totalStars} / 60`;
+    const maxTotalStars = CAMPAIGN_STAGES.length * 3;
+    this.titleStarsText.textContent = `★ ${totalStars} / ${maxTotalStars}`;
     this.titleJadePill.textContent = `◆ ${jade} 灵石`;
-    this.titleClearText.textContent = `已破 ${clearedCount} / 20 关`;
+    this.titleClearText.textContent = `已破 ${clearedCount} / ${CAMPAIGN_STAGES.length} 关`;
     this.hudRealmName.textContent = realm.title;
 
     this.mapRealmPill.textContent = realm.title;
     this.mapRealmBuff.textContent = `气血+${realm.hpBonus} · 剑伤+${Math.round((realm.dmgMult - 1) * 100)}%`;
-    this.mapStarsPill.textContent = `★ ${totalStars} / 60`;
+    this.mapStarsPill.textContent = `★ ${totalStars} / ${maxTotalStars}`;
 
     this.updateSelectedStageLabels();
     this.renderCampaignModal();
@@ -924,7 +940,7 @@ export class HudController {
     }
   }
 
-  openCampaignMap(chapterId?: 1 | 2 | 3 | 4): void {
+  openCampaignMap(chapterId?: ChapterId): void {
     if (chapterId) this.activeChapter = chapterId;
     else this.activeChapter = getStageDef(this.selectedStage).chapter;
     this.renderCampaignModal();
@@ -933,6 +949,148 @@ export class HudController {
 
   closeCampaignMap(): void {
     this.campaignOverlay.classList.remove('visible');
+  }
+
+  openStoryCodex(): void {
+    this.renderCodexModal();
+    this.codexOverlay.classList.add('visible');
+  }
+
+  closeStoryCodex(): void {
+    this.codexOverlay.classList.remove('visible');
+  }
+
+  private renderCodexModal(): void {
+    const store = this.saveStore;
+    if (!store) return;
+
+    const sh = getSwordHeartSummary(store.getSwordHeart());
+    const totalChoices = sh.sword + sh.heart;
+    const swordPct = totalChoices > 0 ? Math.round((sh.sword / totalChoices) * 100) : 50;
+    this.codexKarmaBar.innerHTML = `
+      <div class="karma-head">
+        <div>
+          <span class="karma-badge">${sh.title}</span>
+          <span class="karma-desc">${sh.desc}</span>
+        </div>
+        <span class="karma-counts">剑道 ${sh.sword} · 侠心 ${sh.heart}</span>
+      </div>
+      <div class="karma-track">
+        <div class="karma-fill-sword" style="width:${swordPct}%"></div>
+      </div>
+    `;
+
+    const choicesMap = store.getStoryChoices();
+    const seenEpilogues = new Set(store.getSeenEpilogues());
+    const maxStageReached = Math.max(1, store.getMaxClearedStage(), store.getRecommendedStage());
+    const unlockedEpisodes = CAMPAIGN_STAGES.filter((s) => s.id <= maxStageReached).length;
+    const unlockedCount = unlockedEpisodes + DUNGEON_LIST.length + seenEpilogues.size;
+    const totalEntries = CAMPAIGN_STAGES.length + DUNGEON_LIST.length + Object.keys(CHAPTER_EPILOGUES).length;
+    this.codexCountPill.textContent = `已解锁 ${unlockedCount} / ${totalEntries}`;
+
+    const tabDefs: Array<{ key: ChapterId | 'dungeon' | 'epilogue'; label: string }> = [
+      ...CHAPTERS.map((ch) => ({ key: ch.id as ChapterId, label: `${ch.roman} · ${ch.name}` })),
+      { key: 'dungeon', label: '秘境外传' },
+      { key: 'epilogue', label: '五章终幕' },
+    ];
+    this.codexTabsEl.innerHTML = '';
+    for (const t of tabDefs) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `codex-tab${this.activeCodexTab === t.key ? ' active' : ''}`;
+      btn.textContent = t.label;
+      btn.addEventListener('click', () => {
+        this.activeCodexTab = t.key;
+        this.renderCodexModal();
+      });
+      this.codexTabsEl.appendChild(btn);
+    }
+
+    this.codexListEl.innerHTML = '';
+    const appendCodexCard = (opts: {
+      tag: string;
+      title: string;
+      sub: string;
+      unlocked: boolean;
+      choiceLabel?: string;
+      kind: 'episode' | 'epilogue';
+      id: number;
+    }) => {
+      const card = document.createElement('div');
+      card.className = `codex-card${opts.unlocked ? '' : ' locked'}`;
+      const choiceChip = opts.choiceLabel ? `<span class="codex-choice-tag">${opts.choiceLabel}</span>` : '';
+      card.innerHTML = `
+        <div class="codex-card-top">
+          <span class="codex-tag">${opts.tag}</span>
+          ${choiceChip}
+        </div>
+        <strong class="codex-title">${opts.title}</strong>
+        <span class="codex-sub">${opts.sub}</span>
+      `;
+      const actBtn = document.createElement('button');
+      actBtn.type = 'button';
+      actBtn.className = 'util-btn codex-play-btn';
+      actBtn.disabled = !opts.unlocked;
+      actBtn.textContent = opts.unlocked ? '重温剧情' : '尚未解锁';
+      if (opts.unlocked) {
+        actBtn.addEventListener('click', () => {
+          this.closeStoryCodex();
+          this.callbacks.onReplayStory?.(opts.kind, opts.id);
+        });
+      }
+      card.appendChild(actBtn);
+      this.codexListEl.appendChild(card);
+    };
+
+    if (this.activeCodexTab === 'epilogue') {
+      for (const ch of CHAPTERS) {
+        const bossId = ch.stageRange[1];
+        const ep = CHAPTER_EPILOGUES[bossId];
+        if (!ep) continue;
+        const unlocked = Boolean(store.getStageRecord(bossId)) || seenEpilogues.has(bossId);
+        appendCodexCard({
+          tag: ep.episodeTag,
+          title: ep.title,
+          sub: `${ep.chapterName} · ${ep.lines[0]?.text.slice(0, 32) ?? ''}…`,
+          unlocked,
+          kind: 'epilogue',
+          id: bossId,
+        });
+      }
+    } else if (this.activeCodexTab === 'dungeon') {
+      for (const dg of DUNGEON_LIST) {
+        appendCodexCard({
+          tag: `外传 · T${dg.tier}`,
+          title: dg.name,
+          sub: dg.subtitle,
+          unlocked: true,
+          choiceLabel: choicesMap[dg.stageDef.id] ? '已抉择' : undefined,
+          kind: 'episode',
+          id: dg.stageDef.id,
+        });
+      }
+    } else {
+      const stages = CAMPAIGN_STAGES.filter((s) => s.chapter === this.activeCodexTab);
+      for (const st of stages) {
+        const cleared = Boolean(store.getStageRecord(st.id));
+        const unlocked = st.id <= maxStageReached;
+        const picked = choicesMap[st.id];
+        const choiceLabel = picked
+          ? picked.includes('heart') || picked.includes('guard') || picked.includes('breeze') || picked.includes('ward') || picked.includes('ice') || picked.includes('taiji')
+            ? '侠骨仁心'
+            : '凌霄剑道'
+          : undefined;
+        appendCodexCard({
+          tag: `第 ${st.episodeNum} 集 · ${BIOME_LABELS[st.biome]}`,
+          title: st.name,
+          sub: cleared ? `已破关 · ${st.victoryLine}` : st.subtitle,
+          unlocked,
+          choiceLabel,
+          kind: 'episode',
+          id: st.id,
+        });
+      }
+    }
   }
 
   openShop(cat?: EquipCategory | 'bag'): void {
@@ -1096,9 +1254,17 @@ export class HudController {
       btn.className = `dlg-choice-card${idx === 0 ? ' active' : ''}`;
       btn.dataset.choiceId = choice.id;
       const hintHtml = choice.storyHint ? `<div class="dlg-choice-hint">${choice.storyHint}</div>` : '';
+      const alignTag =
+        dlg.mode === 'preStage'
+          ? choice.alignment === 'heart' || idx === 1
+            ? '抉择 · 乙 · 仁心'
+            : '抉择 · 甲 · 剑道'
+          : idx === 0
+            ? '抉择 · 甲'
+            : '抉择 · 乙';
       btn.innerHTML = `
         <div class="dlg-choice-top">
-          <span class="dlg-choice-tag">${idx === 0 ? '抉择 · 甲' : '抉择 · 乙'}</span>
+          <span class="dlg-choice-tag">${alignTag}</span>
           <strong class="dlg-choice-title">${choice.title}</strong>
         </div>
         ${hintHtml}
@@ -1542,9 +1708,9 @@ export class HudController {
     this.pauseDesc.textContent = '暂歇剑势，随时继续试剑。';
     if (enabled) {
       this.setWheelForced(true);
-      this.titleTagline.textContent = '写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 手机双摇杆王者轮盘 · 跨端双人联机。';
+      this.titleTagline.textContent = '写实 3D 仙侠五章二十五关闯关 · 三星评星与剑道境界养成 · 手机双摇杆王者轮盘 · 跨端双人联机。';
     } else {
-      this.titleTagline.textContent = '写实 3D 仙侠四章二十关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。';
+      this.titleTagline.textContent = '写实 3D 仙侠五章二十五关闯关 · 三星评星与剑道境界养成 · 电脑联盟鼠标 / 手机王者轮盘 · 跨端双人联机。';
     }
   }
 
@@ -1605,7 +1771,10 @@ export class HudController {
     this.campHud.classList.toggle('visible', mode === 'camp');
     this.worldHud.classList.toggle('visible', mode === 'world');
     this.dialogueOverlay.classList.toggle('visible', mode === 'dialogue');
-    if (mode !== 'title') this.campaignOverlay.classList.remove('visible');
+    if (mode !== 'title') {
+      this.campaignOverlay.classList.remove('visible');
+      this.codexOverlay.classList.remove('visible');
+    }
     if (mode === 'playing' || mode === 'cutscene' || mode === 'dialogue') {
       this.shopOverlay.classList.remove('visible');
       this.dungeonOverlay.classList.remove('visible');
@@ -1705,7 +1874,10 @@ export class HudController {
     const towerFloor = opts?.towerFloor;
     const rlChamber = opts?.roguelikeChamber;
     const rlTotal = opts?.roguelikeTotalChambers ?? 6;
-    const isFinalWin = victory && !dungeonDef && !towerFloor && !rlChamber && stageDef?.id === 20;
+    const hasEpilogue = Boolean(
+      victory && !dungeonDef && !towerFloor && !rlChamber && stageDef && CHAPTER_EPILOGUES[stageDef.id],
+    );
+    const isGrandFinalWin = victory && !dungeonDef && !towerFloor && !rlChamber && stageDef?.id === CAMPAIGN_STAGES.length;
     this.resultModalCard.classList.toggle('win', victory);
     this.resultModalCard.classList.toggle('lose', !victory);
     this.resultStageTag.textContent = towerFloor
@@ -1735,18 +1907,20 @@ export class HudController {
             ? victory
               ? `${dungeonDef.name} · 破阵凯旋`
               : '秘 境 折 戟'
-            : isFinalWin
-              ? '二 十 劫 破 · 剑 圣 加 冕'
-              : victory
-                ? `第 ${stageDef?.id ?? ''} 关 凯 旋`
-                : '身 陨 剑 台');
+            : isGrandFinalWin
+              ? '二 十 五 劫 破 · 太 虚 剑 祖'
+              : stageDef?.id === 20 && victory
+                ? '二 十 劫 破 · 剑 圣 加 冕'
+                : victory
+                  ? `第 ${stageDef?.id ?? ''} 关 凯 旋`
+                  : '身 陨 剑 台');
     this.resultTitle.className = victory ? 'result-title win' : 'result-title lose';
     this.resultStoryLine.textContent =
       opts?.customSub ??
       (victory
         ? stageDef?.victoryLine ?? ''
         : '剑心未泯，暂返云来剑庐吐纳温酒，重整旗鼓再破妖阵。');
-    this.resultEpilogueBtn.style.display = isFinalWin ? 'inline-flex' : 'none';
+    this.resultEpilogueBtn.style.display = hasEpilogue ? 'inline-flex' : 'none';
 
     if (opts?.combatRank) {
       this.resultRankBadge.style.display = 'inline-flex';
@@ -2433,6 +2607,18 @@ export class HudController {
         shimmer: 'rgba(255, 236, 148, 0.56)',
         cliff: 'rgba(20, 9, 10, 0.92)',
         rim: 'rgba(242, 118, 68, 0.34)',
+      },
+      astral_void: {
+        bg0: '#080c20',
+        bg1: '#101836',
+        bg2: '#18244e',
+        bank: 'rgba(42, 76, 148, 0.44)',
+        river0: 'rgba(56, 118, 204, 0.78)',
+        river1: 'rgba(104, 212, 255, 0.84)',
+        vein: 'rgba(142, 240, 255, 0.42)',
+        shimmer: 'rgba(255, 224, 140, 0.52)',
+        cliff: 'rgba(9, 13, 32, 0.92)',
+        rim: 'rgba(104, 232, 255, 0.36)',
       },
       celestial_sanctum: {
         bg0: '#081326',

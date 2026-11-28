@@ -1158,7 +1158,7 @@ export const ROGUELIKE_CHAMBERS: RoguelikeChamberDef[] = [
 
 export interface ChapterStarChestDef {
   id: string;
-  chapter: 1 | 2 | 3 | 4;
+  chapter: 1 | 2 | 3 | 4 | 5;
   starsReq: 5 | 10 | 15;
   jade: number;
   rarity?: EquipRarity;
@@ -1181,6 +1181,10 @@ export const CHAPTER_STAR_CHESTS: ChapterStarChestDef[] = [
   { id: 'ch4_5', chapter: 4, starsReq: 5, jade: 280, label: '5★ 剑匣' },
   { id: 'ch4_10', chapter: 4, starsReq: 10, jade: 420, rarity: 'epic', label: '10★ 玄匣' },
   { id: 'ch4_15', chapter: 4, starsReq: 15, jade: 600, rarity: 'legendary', label: '15★ 剑圣仙匣' },
+
+  { id: 'ch5_5', chapter: 5, starsReq: 5, jade: 340, label: '5★ 星匣' },
+  { id: 'ch5_10', chapter: 5, starsReq: 10, jade: 500, rarity: 'epic', label: '10★ 太虚匣' },
+  { id: 'ch5_15', chapter: 5, starsReq: 15, jade: 800, rarity: 'legendary', label: '15★ 剑祖仙匣' },
 ];
 
 // ==================== DMC / Honkai Combat Style Rating (D -> SSS) ====================

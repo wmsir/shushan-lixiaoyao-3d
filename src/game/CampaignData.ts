@@ -37,15 +37,17 @@ export const BIOME_LABELS: Record<WorldBiome, string> = {
   sword_graveyard: '古剑荒冢',
   lava_abyss: '赤焰火狱',
   celestial_sanctum: '星穹天坛',
+  astral_void: '太虚星海',
   haven_camp: '云来剑庐',
 };
 
+export type ChapterId = 1 | 2 | 3 | 4 | 5;
 export type EnemyKind = 'bladesman' | 'caster' | 'elite' | 'boss';
 export type EnemyAffix = 'swift' | 'vampiric' | 'ironclad' | 'storm';
 export type StageHazardType = 'none' | 'lightning' | 'ember' | 'abyss';
 
 export interface ChapterDef {
-  id: 1 | 2 | 3 | 4;
+  id: ChapterId;
   roman: string;
   name: string;
   subtitle: string;
@@ -82,10 +84,10 @@ export interface StageWaveDef {
 
 export interface StageDef {
   id: number;
-  chapter: 1 | 2 | 3 | 4;
+  chapter: ChapterId;
   episodeNum: number;
   biome: WorldBiome;
-  stageLayout?: 'corridor' | 'pillars' | 'islands';
+  stageLayout?: 'corridor' | 'arena' | 'pillars' | 'islands';
   stageMode?: StageMode;
   leylineAffix?: LeylineAffixId;
   surviveSec?: number;
@@ -148,6 +150,7 @@ export interface CampaignSaveStats {
   totalRoguelikeClears: number;
   totalWorldBosses: number;
   totalDefendWins: number;
+  totalStoryChoices: number;
 }
 
 export interface CampaignSaveData {
@@ -175,6 +178,9 @@ export interface CampaignSaveData {
   roguelikeBestFloor?: number;
   roguelikeClears?: number;
   selectedDifficulty?: DifficultyTierId;
+  storyChoices?: Record<number, string>;
+  swordHeart?: { sword: number; heart: number };
+  seenEpilogues?: number[];
 }
 
 export interface CultivationRealmStep {
@@ -232,7 +238,7 @@ export interface BountyState {
 
 export interface StageDialogueLine {
   speaker: string;
-  role: 'elder' | 'ally' | 'enemy' | 'hero';
+  role: 'elder' | 'ally' | 'enemy' | 'hero' | 'spirit';
   seal: string;
   text: string;
 }
@@ -241,6 +247,7 @@ export interface EpisodeChoiceDef {
   id: string;
   title: string;
   subtitle: string;
+  alignment?: 'sword' | 'heart';
   storyHint?: string;
   heroReply?: string;
   battleCallout?: string;
@@ -253,7 +260,7 @@ export interface EpisodeChoiceDef {
 
 export interface StageDialogueDef {
   stageId: number;
-  mode?: 'preStage' | 'epilogue' | 'campNpc';
+  mode?: 'preStage' | 'epilogue' | 'campNpc' | 'replay';
   episodeTag: string;
   biomeLabel: string;
   kicker: string;
@@ -342,6 +349,21 @@ export const CHAPTERS: ChapterDef[] = [
     skySwordRgb: [1.95, 0.42, 0.52],
     baguaBase: 0.96,
     lore: '登顶九幽锁妖剑台绝巅，历代魔剑煞灵合流，直面九幽剑煞·镇狱天尊！',
+  },
+  {
+    id: 5,
+    roman: '第五章',
+    name: '太虚仙域',
+    subtitle: '星海裂隙 · 剑心问道',
+    stageRange: [21, 25],
+    accentHex: '#68e8ff',
+    fogHex: '#111632',
+    bgHex: '#0b0f26',
+    lanternLightHex: '#5ee8ff',
+    lanternFlameHex: '#b8f8ff',
+    skySwordRgb: [0.65, 1.85, 2.2],
+    baguaBase: 1.0,
+    lore: '锁妖终劫虽平，天穹却裂开上古太虚星海。太虚剑灵·云裳苏醒传音，邀李逍遥踏星阶、破心魔，直面太虚剑祖！',
   },
 ];
 
@@ -1180,6 +1202,248 @@ export const CAMPAIGN_STAGES: StageDef[] = [
       },
     ],
   },
+
+  // ===================== CHAPTER 5: 太虚仙域 (21–25) =====================
+  {
+    id: 21,
+    chapter: 5,
+    episodeNum: 21,
+    biome: 'astral_void',
+    stageLayout: 'corridor',
+    stageMode: 'exterminate',
+    leylineAffix: 'flying_surge',
+    name: '云海仙阶',
+    subtitle: '星海裂隙 · 太虚巡使',
+    badge: '星海前哨',
+    isBossStage: false,
+    parTimeSec: 155,
+    recommendedRealm: '蜀山剑圣',
+    hazard: 'lightning',
+    hazardLabel: '星穹落雷',
+    hazardIntervalSec: 4.5,
+    hazardDamage: 32,
+    introLine: '凡尘剑圣也敢踏足太虚星海？先过我星门巡使三关！',
+    victoryLine: '太虚星门已开，云裳剑灵的星光指引就在前方！',
+    waves: [
+      {
+        label: '星门游骑',
+        enemies: [
+          { kind: 'bladesman', x: -4.2, z: -2.8, name: '太虚星卒', hpMult: 2.2, dmgMult: 1.56, affix: 'swift' },
+          { kind: 'bladesman', x: 4.2, z: -2.8, name: '太虚星卒', hpMult: 2.2, dmgMult: 1.56 },
+          { kind: 'caster', x: 0.0, z: -6.2, name: '司星符官', hpMult: 2.05, dmgMult: 1.54, affix: 'storm' },
+        ],
+      },
+      {
+        label: '太虚符阵',
+        enemies: [
+          { kind: 'elite', x: -3.6, z: -3.6, name: '星甲破阵卫', hpMult: 1.85, poiseMult: 1.28, dmgMult: 1.58, affix: 'ironclad' },
+          { kind: 'caster', x: 4.4, z: -5.4, name: '星穹幻法师', hpMult: 2.1, dmgMult: 1.58, affix: 'swift' },
+        ],
+      },
+      {
+        label: '苍冥巡使 · 星痕',
+        subtitle: '太虚星阶守将「苍冥巡使 · 星痕」踏星而来！',
+        enemies: [
+          { kind: 'elite', x: 0.0, z: -4.8, name: '苍冥巡使 · 星痕', hpMult: 2.05, poiseMult: 1.38, dmgMult: 1.65, affix: 'storm', scaleMult: 1.06 },
+          { kind: 'caster', x: -4.6, z: -6.2, name: '星轨秘巫', hpMult: 1.95, dmgMult: 1.55 },
+        ],
+      },
+    ],
+  },
+  {
+    id: 22,
+    chapter: 5,
+    episodeNum: 22,
+    biome: 'astral_void',
+    stageLayout: 'pillars',
+    stageMode: 'defend',
+    monolithHp: 760,
+    leylineAffix: 'parry_nova',
+    name: '玉衡灵枢',
+    subtitle: '守护星枢 · 惊雷破招',
+    badge: '守护灵枢',
+    isBossStage: false,
+    parTimeSec: 150,
+    recommendedRealm: '蜀山剑圣',
+    hazard: 'lightning',
+    hazardLabel: '灵枢震雷',
+    hazardIntervalSec: 4.6,
+    hazardDamage: 30,
+    introLine: '绝不能让虚空魔兵毁掉玉衡星枢，守住太虚地脉最后一线生机！',
+    victoryLine: '玉衡星枢重新亮起！太虚诸星的剑道记忆正在回响。',
+    waves: [
+      {
+        label: '星海猎刃',
+        enemies: [
+          { kind: 'bladesman', x: -5.6, z: -4.2, name: '蚀星刺客', hpMult: 2.25, dmgMult: 1.58, affix: 'swift' },
+          { kind: 'bladesman', x: 5.6, z: -4.2, name: '蚀星刺客', hpMult: 2.25, dmgMult: 1.58, affix: 'swift' },
+          { kind: 'caster', x: 0.0, z: -6.6, name: '虚空咒印师', hpMult: 2.1, dmgMult: 1.56 },
+        ],
+      },
+      {
+        label: '破枢重卫',
+        enemies: [
+          { kind: 'elite', x: -4.2, z: -5.0, name: '玄星重锤使', hpMult: 1.92, poiseMult: 1.34, dmgMult: 1.62, affix: 'ironclad' },
+          { kind: 'bladesman', x: 4.4, z: -3.2, name: '嗜血星刃', hpMult: 2.28, dmgMult: 1.6, affix: 'vampiric' },
+        ],
+      },
+      {
+        label: '玉衡镇使 · 璇玑',
+        subtitle: '镇守玉衡灵枢的堕落星将「璇玑」拔剑现身！',
+        enemies: [
+          { kind: 'elite', x: 0.0, z: -5.2, name: '玉衡镇使 · 璇玑', hpMult: 2.14, poiseMult: 1.42, dmgMult: 1.68, affix: 'storm', scaleMult: 1.08 },
+          { kind: 'caster', x: 4.6, z: -6.4, name: '星陨祭司', hpMult: 2.05, dmgMult: 1.6, affix: 'swift' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 23,
+    chapter: 5,
+    episodeNum: 23,
+    biome: 'astral_void',
+    stageLayout: 'islands',
+    stageMode: 'survive',
+    surviveSec: 55,
+    leylineAffix: 'rapid_cooldown',
+    name: '镜花幻劫',
+    subtitle: '心魔试炼 · 五十五秒死守',
+    badge: '心魔血战',
+    isBossStage: false,
+    parTimeSec: 120,
+    recommendedRealm: '太虚剑祖',
+    hazard: 'abyss',
+    hazardLabel: '心魔蚀渊',
+    hazardIntervalSec: 4.0,
+    hazardDamage: 34,
+    introLine: '太虚幻境映照你内心的执念与剑影——撑过五十五秒幻潮，方能破镜见本心！',
+    victoryLine: '心魔尽碎，你的剑影与太虚星海合而为一！',
+    waves: [
+      {
+        label: '心魔初现',
+        enemies: [
+          { kind: 'bladesman', x: -4.6, z: -3.4, name: '妄念剑影', hpMult: 2.32, dmgMult: 1.62, affix: 'swift' },
+          { kind: 'bladesman', x: 4.6, z: -3.4, name: '妄念剑影', hpMult: 2.32, dmgMult: 1.62, affix: 'vampiric' },
+          { kind: 'caster', x: 0.0, z: -6.0, name: '镜花幻师', hpMult: 2.18, dmgMult: 1.62 },
+        ],
+      },
+      {
+        label: '玄影幻身',
+        enemies: [
+          { kind: 'elite', x: -3.8, z: -4.6, name: '李逍遥·心魔幻身', hpMult: 2.08, poiseMult: 1.38, dmgMult: 1.68, affix: 'storm' },
+          { kind: 'caster', x: 4.2, z: -5.8, name: '幻劫咒尊', hpMult: 2.2, dmgMult: 1.64, affix: 'swift' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 24,
+    chapter: 5,
+    episodeNum: 24,
+    biome: 'astral_void',
+    stageLayout: 'pillars',
+    stageMode: 'bossRush',
+    leylineAffix: 'titan_armor',
+    name: '四象剑尊',
+    subtitle: '星宫双尊 · 破军与焚星',
+    badge: '双尊连战',
+    isBossStage: true,
+    bossCutscene: true,
+    parTimeSec: 175,
+    recommendedRealm: '太虚剑祖',
+    hazard: 'ember',
+    hazardLabel: '星炎焚阵',
+    hazardIntervalSec: 3.6,
+    hazardDamage: 35,
+    introLine: '欲见太虚剑祖，先问过我星宫苍龙、朱雀二位护法剑尊！',
+    victoryLine: '连斩星宫双尊！前方只剩太虚剑海深处的终极问心台。',
+    waves: [
+      {
+        label: '第一尊 · 苍龙破军',
+        enemies: [
+          {
+            kind: 'boss',
+            x: 0.0,
+            z: -4.8,
+            name: '苍龙星君 · 破军',
+            bossArchetype: 'titan',
+            hpMult: 1.72,
+            poiseMult: 1.48,
+            dmgMult: 1.6,
+            affix: 'ironclad',
+            scaleMult: 1.04,
+          },
+        ],
+      },
+      {
+        label: '第二尊 · 朱雀焚星',
+        subtitle: '火德星宫之主「朱雀炎尊 · 焚星」踏焰降临！',
+        enemies: [
+          {
+            kind: 'boss',
+            x: 0.0,
+            z: -5.2,
+            name: '朱雀炎尊 · 焚星',
+            bossArchetype: 'inferno',
+            hpMult: 1.98,
+            poiseMult: 1.58,
+            dmgMult: 1.68,
+            affix: 'storm',
+            scaleMult: 1.06,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 25,
+    chapter: 5,
+    episodeNum: 25,
+    biome: 'astral_void',
+    stageLayout: 'arena',
+    stageMode: 'bossRush',
+    leylineAffix: 'glass_cannon',
+    name: '太虚问心',
+    subtitle: '终章大捷 · 太虚剑祖',
+    badge: '太虚剑祖',
+    isBossStage: true,
+    bossCutscene: true,
+    parTimeSec: 195,
+    recommendedRealm: '太虚剑祖',
+    hazard: 'abyss',
+    hazardLabel: '太虚天劫',
+    hazardIntervalSec: 3.0,
+    hazardDamage: 40,
+    introLine: '蜀山小辈，你一路所择之剑道与仁心，今日便由本祖一剑称量！',
+    victoryLine: '一剑开太虚！李逍遥超越先贤剑祖，成为三界共仰的无双剑仙！',
+    waves: [
+      {
+        label: '问道试心 · 护法剑影',
+        enemies: [
+          { kind: 'elite', x: -4.8, z: -4.6, name: '太虚左使 · 星渊', hpMult: 1.96, poiseMult: 1.32, dmgMult: 1.66, affix: 'swift' },
+          { kind: 'elite', x: 4.8, z: -4.6, name: '太虚右使 · 瑶光', hpMult: 1.96, poiseMult: 1.32, dmgMult: 1.66, affix: 'vampiric' },
+        ],
+      },
+      {
+        label: '绝巅问心 · 太虚剑祖',
+        subtitle: '太虚星海之主「太虚剑祖 · 苍穹剑尊」显化真身！',
+        enemies: [
+          {
+            kind: 'boss',
+            x: 0.0,
+            z: -5.4,
+            name: '太虚剑祖 · 苍穹剑尊',
+            bossArchetype: 'astral',
+            hpMult: 2.55,
+            poiseMult: 1.88,
+            dmgMult: 1.78,
+            affix: 'storm',
+            scaleMult: 1.12,
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 export function getStageDef(stageId: number): StageDef {
@@ -1464,6 +1728,15 @@ export const BOUNTY_LIST: BountyDef[] = [
     rewardJade: 220,
     rewardRarity: 'rare',
   },
+  {
+    id: 'b_story_heart',
+    title: '剑心抉择',
+    desc: '在剧情对话中完成 5 次道心抉择',
+    statKey: 'totalStoryChoices',
+    target: 5,
+    rewardJade: 240,
+    rewardRarity: 'epic',
+  },
 ];
 
 export function getChapterDef(chapterId: number): ChapterDef {
@@ -1527,8 +1800,66 @@ export const SWORD_REALMS: SwordRealmInfo[] = [
   { title: '金丹剑客', minStars: 15, nextStars: 27, hpBonus: 62, dmgMult: 1.30, spiritRegenMult: 1.24 },
   { title: '元婴剑尊', minStars: 27, nextStars: 39, hpBonus: 102, dmgMult: 1.48, spiritRegenMult: 1.38 },
   { title: '化神剑仙', minStars: 39, nextStars: 51, hpBonus: 145, dmgMult: 1.68, spiritRegenMult: 1.54 },
-  { title: '蜀山剑圣', minStars: 51, nextStars: null, hpBonus: 195, dmgMult: 1.90, spiritRegenMult: 1.72 },
+  { title: '蜀山剑圣', minStars: 51, nextStars: 66, hpBonus: 195, dmgMult: 1.90, spiritRegenMult: 1.72 },
+  { title: '太虚剑祖', minStars: 66, nextStars: null, hpBonus: 250, dmgMult: 2.15, spiritRegenMult: 1.90 },
 ];
+
+export interface SwordHeartSummary {
+  title: string;
+  desc: string;
+  sword: number;
+  heart: number;
+  dmgBonus: number;
+  hpBonus: number;
+  ultGainBonus: number;
+}
+
+export function getSwordHeartSummary(sh: { sword: number; heart: number }): SwordHeartSummary {
+  const sword = Math.max(0, Math.floor(sh.sword || 0));
+  const heart = Math.max(0, Math.floor(sh.heart || 0));
+  if (sword >= 3 && sword > heart + 1) {
+    return {
+      title: '凌霄剑道',
+      desc: '锋芒毕露 · 全剑伤 +5% · 开局剑意充盈',
+      sword,
+      heart,
+      dmgBonus: 0.05,
+      hpBonus: 0,
+      ultGainBonus: 0.06,
+    };
+  }
+  if (heart >= 3 && heart > sword + 1) {
+    return {
+      title: '侠骨仁心',
+      desc: '护佑苍生 · 气血上限 +32 · 稳守破招',
+      sword,
+      heart,
+      dmgBonus: 0.02,
+      hpBonus: 32,
+      ultGainBonus: 0,
+    };
+  }
+  if (sword >= 2 && heart >= 2) {
+    return {
+      title: '剑心通明',
+      desc: '刚柔并济 · 全剑伤 +4% · 气血 +20 · 剑意获取 +10%',
+      sword,
+      heart,
+      dmgBonus: 0.04,
+      hpBonus: 20,
+      ultGainBonus: 0.1,
+    };
+  }
+  return {
+    title: '初入剑途',
+    desc: '剑道仁心未分高下，于剧情中抉择可凝聚道心加护',
+    sword,
+    heart,
+    dmgBonus: 0,
+    hpBonus: 0,
+    ultGainBonus: 0,
+  };
+}
 
 export function getSwordRealm(totalStars: number): SwordRealmInfo {
   let cur = SWORD_REALMS[0];
@@ -1629,6 +1960,16 @@ export const CULTIVATION_STEPS: CultivationRealmStep[] = [
     startUltBonus: 55,
     desc: '气血 +300 · 剑伤 +55% · 回气 +55% · 开局剑意 +55',
   },
+  {
+    level: 9,
+    name: '太虚剑祖 · 破界',
+    costJade: 920,
+    hpBonus: 365,
+    atkPct: 0.66,
+    spiritRegenPct: 0.66,
+    startUltBonus: 68,
+    desc: '气血 +365 · 剑伤 +66% · 回气 +66% · 开局剑意 +68',
+  },
 ];
 
 export const CAMP_MEALS: CampMealDef[] = [
@@ -1700,7 +2041,7 @@ export function evaluateStageStars(
   };
 }
 
-const CHAPTER_ELDER_BRIEF: Record<1 | 2 | 3 | 4, { elder: string; seal: string; advice: string }> = {
+const CHAPTER_ELDER_BRIEF: Record<ChapterId, { elder: string; seal: string; advice: string }> = {
   1: {
     elder: '蜀山接引长老',
     seal: '剑',
@@ -1721,13 +2062,19 @@ const CHAPTER_ELDER_BRIEF: Record<1 | 2 | 3 | 4, { elder: string; seal: string; 
     seal: '酒',
     advice: '徒儿，锁妖绝巅已无退路！弹反攒满剑意降「天剑」破其金身，此战之后三界皆传你李逍遥之名！',
   },
+  5: {
+    elder: '云裳 · 太虚剑灵',
+    seal: '裳',
+    advice: '欢迎踏入太虚星海。此处汇集上古剑道星宫试炼，守好玉衡灵枢与本心，唯有历劫问心者方能直面太虚剑祖！',
+  },
 };
 
-const VOLUME_LABELS: Record<1 | 2 | 3 | 4, string> = {
+const VOLUME_LABELS: Record<ChapterId, string> = {
   1: '第一卷',
   2: '第二卷',
   3: '第三卷',
   4: '第四卷',
+  5: '第五卷',
 };
 
 const EPISODE_DRAMA_TITLES: Record<number, string> = {
@@ -1751,9 +2098,15 @@ const EPISODE_DRAMA_TITLES: Record<number, string> = {
   18: '第十八集 · 魔将车轮',
   19: '第十九集 · 绝巅双魔',
   20: '第二十集 · 镇狱终劫',
+  21: '第二十一集 · 星海仙阶',
+  22: '第二十二集 · 玉衡灵枢',
+  23: '第二十三集 · 镜花幻劫',
+  24: '第二十四集 · 四象剑尊',
+  25: '第二十五集 · 太虚问心',
   101: '外传秘境 · 古陵探宝',
   102: '外传秘境 · 剑窟问锋',
   103: '外传秘境 · 魔殿争仙',
+  104: '外传秘境 · 太虚剑墟',
 };
 
 function buildEpisodeChoices(stage: StageDef): [EpisodeChoiceDef, EpisodeChoiceDef] {
@@ -2023,6 +2376,7 @@ export class CampaignSaveStore {
             totalRoguelikeClears: Math.max(0, Math.floor(Number(rawStats?.totalRoguelikeClears) || 0)),
             totalWorldBosses: Math.max(0, Math.floor(Number(rawStats?.totalWorldBosses) || 0)),
             totalDefendWins: Math.max(0, Math.floor(Number(rawStats?.totalDefendWins) || 0)),
+            totalStoryChoices: Math.max(0, Math.floor(Number(rawStats?.totalStoryChoices) || 0)),
           };
           const dungeonClears: Record<string, number> = {};
           if (parsed.dungeonClears && typeof parsed.dungeonClears === 'object') {
@@ -2050,10 +2404,25 @@ export class CampaignSaveStore {
           const rawMealId = typeof parsed.activeMealId === 'string' ? parsed.activeMealId : null;
           const activeMealId =
             rawMealId && CAMP_MEALS.some((m) => m.id === rawMealId) ? rawMealId : null;
+          const rawSwordHeart = parsed.swordHeart as Partial<{ sword: number; heart: number }> | undefined;
+          const swordHeart = {
+            sword: Math.max(0, Math.floor(Number(rawSwordHeart?.sword) || 0)),
+            heart: Math.max(0, Math.floor(Number(rawSwordHeart?.heart) || 0)),
+          };
+          const storyChoices: Record<number, string> = {};
+          if (parsed.storyChoices && typeof parsed.storyChoices === 'object') {
+            for (const [k, v] of Object.entries(parsed.storyChoices)) {
+              const sid = Math.floor(Number(k));
+              if (sid > 0 && typeof v === 'string') storyChoices[sid] = v;
+            }
+          }
+          const seenEpilogues = Array.isArray(parsed.seenEpilogues)
+            ? parsed.seenEpilogues.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+            : [];
           return {
-            version: 6,
+            version: 7,
             cleared: parsed.cleared,
-            lastPlayedStage: Math.max(1, Math.min(20, Number(parsed.lastPlayedStage || 1))),
+            lastPlayedStage: Math.max(1, Math.min(CAMPAIGN_STAGES.length, Number(parsed.lastPlayedStage || 1))),
             jade,
             ownedItems: Array.from(ownedSet),
             equipped,
@@ -2090,6 +2459,9 @@ export class CampaignSaveStore {
             roguelikeBestFloor: Math.max(0, Math.min(6, Math.floor(Number(parsed.roguelikeBestFloor) || 0))),
             roguelikeClears: Math.max(0, Math.floor(Number(parsed.roguelikeClears) || 0)),
             selectedDifficulty,
+            storyChoices,
+            swordHeart,
+            seenEpilogues,
           };
         }
       }
@@ -2097,7 +2469,7 @@ export class CampaignSaveStore {
       // ignore storage failure in private mode
     }
     return {
-      version: 6,
+      version: 7,
       cleared: {},
       lastPlayedStage: 1,
       jade: DEFAULT_STARTER_JADE,
@@ -2116,6 +2488,7 @@ export class CampaignSaveStore {
         totalRoguelikeClears: 0,
         totalWorldBosses: 0,
         totalDefendWins: 0,
+        totalStoryChoices: 0,
       },
       claimedBounties: [],
       cultivationLevel: 0,
@@ -2130,6 +2503,9 @@ export class CampaignSaveStore {
       roguelikeBestFloor: 0,
       roguelikeClears: 0,
       selectedDifficulty: 'normal',
+      storyChoices: {},
+      swordHeart: { sword: 0, heart: 0 },
+      seenEpilogues: [],
     };
   }
 
@@ -2148,13 +2524,13 @@ export class CampaignSaveStore {
       bestTime: prev ? Math.min(prev.bestTime, elapsedSec) : elapsedSec,
       maxCombo: prev ? Math.max(prev.maxCombo, maxCombo) : maxCombo,
     };
-    this.data.lastPlayedStage = Math.min(20, stageId + 1);
+    this.data.lastPlayedStage = Math.min(CAMPAIGN_STAGES.length, stageId + 1);
     this.persist();
     return { firstClear: !prev };
   }
 
   setLastPlayed(stageId: number): void {
-    this.data.lastPlayedStage = Math.max(1, Math.min(20, stageId));
+    this.data.lastPlayedStage = Math.max(1, Math.min(CAMPAIGN_STAGES.length, stageId));
     this.persist();
   }
 
@@ -2171,10 +2547,10 @@ export class CampaignSaveStore {
   }
 
   getRecommendedStage(): number {
-    for (let s = 1; s <= 20; s++) {
+    for (let s = 1; s <= CAMPAIGN_STAGES.length; s++) {
       if (!this.data.cleared[s]) return s;
     }
-    return 20;
+    return CAMPAIGN_STAGES.length;
   }
 
   getStageRecord(stageId: number): StageClearRecord | null {
@@ -2564,7 +2940,7 @@ export class CampaignSaveStore {
     this.persist();
   }
 
-  getChapterStars(chapterId: 1 | 2 | 3 | 4): number {
+  getChapterStars(chapterId: ChapterId): number {
     const ch = getChapterDef(chapterId);
     let sum = 0;
     for (let s = ch.stageRange[0]; s <= ch.stageRange[1]; s++) {
@@ -2671,6 +3047,48 @@ export class CampaignSaveStore {
       this.data.stats.totalRoguelikeClears = (this.data.stats.totalRoguelikeClears ?? 0) + 1;
     }
     this.persist();
+  }
+
+  recordStoryChoice(stageId: number, choiceId: string, alignment: 'sword' | 'heart'): void {
+    if (!this.data.storyChoices) this.data.storyChoices = {};
+    if (!this.data.swordHeart) this.data.swordHeart = { sword: 0, heart: 0 };
+    this.data.storyChoices[stageId] = choiceId;
+    if (alignment === 'sword') this.data.swordHeart.sword += 1;
+    else this.data.swordHeart.heart += 1;
+    this.data.stats.totalStoryChoices = (this.data.stats.totalStoryChoices ?? 0) + 1;
+    this.persist();
+  }
+
+  getSwordHeart(): { sword: number; heart: number } {
+    return {
+      sword: this.data.swordHeart?.sword ?? 0,
+      heart: this.data.swordHeart?.heart ?? 0,
+    };
+  }
+
+  getStoryChoices(): Record<number, string> {
+    return { ...(this.data.storyChoices ?? {}) };
+  }
+
+  markEpilogueSeen(stageId: number): void {
+    if (!this.data.seenEpilogues) this.data.seenEpilogues = [];
+    if (!this.data.seenEpilogues.includes(stageId)) {
+      this.data.seenEpilogues.push(stageId);
+      this.persist();
+    }
+  }
+
+  getSeenEpilogues(): number[] {
+    return [...(this.data.seenEpilogues ?? [])];
+  }
+
+  getMaxClearedStage(): number {
+    let maxS = 0;
+    for (const k of Object.keys(this.data.cleared)) {
+      const n = Number(k);
+      if (Number.isFinite(n) && n > maxS) maxS = n;
+    }
+    return maxS;
   }
 
   hasAnyClaimableReward(): boolean {

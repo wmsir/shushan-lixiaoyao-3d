@@ -5,6 +5,7 @@ export interface EpisodeStoryScript {
   choices: [EpisodeChoiceDef, EpisodeChoiceDef];
   bossCutsceneTaunt?: string;
   bossEnrageLine?: string;
+  waveCallouts?: Record<number, string>;
 }
 
 const SCRIPT_BIOME_LABELS: Record<string, string> = {
@@ -13,6 +14,7 @@ const SCRIPT_BIOME_LABELS: Record<string, string> = {
   sword_graveyard: '古剑荒冢',
   lava_abyss: '赤焰火狱',
   celestial_sanctum: '星穹天坛',
+  astral_void: '太虚星海',
   haven_camp: '云来剑庐',
 };
 
@@ -61,6 +63,9 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
         extraGourd: 1,
       },
     ],
+    waveCallouts: {
+      1: '同门 · 玄影：「山门中阶仍有妖兵伏哨，踩过灵泉即可调息续战！」',
+    },
   },
   2: {
     lines: [
@@ -243,6 +248,9 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
     ],
     bossCutsceneTaunt: '玄甲镇门将 · 破岳：「千斤玄甲在此，蜀山小儿谁敢上前受死！」',
     bossEnrageLine: '玄甲镇门将 · 破岳：「竟能伤我金身？吃我破岳魔剑震天！」',
+    waveCallouts: {
+      1: '同门 · 玄影：「师弟，桃源深处有妖兵合围！重击破势后可乘胜追击！」',
+    },
   },
 
   // ===================== 第二章：剑冢幽冥 (6–10) =====================
@@ -472,6 +480,9 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
     ],
     bossCutsceneTaunt: '剑冢血尊 · 赤霄魔君：「剑冢万魂哀鸣——蜀山小儿，且看本尊断岳血雷！」',
     bossEnrageLine: '剑冢血尊 · 赤霄魔君：「好锋利的剑！既如此，本尊便燃尽残魂劈碎你！」',
+    waveCallouts: {
+      1: '剑冢守碑灵：「古剑阵眼已震，赤霄魔君正亲自提剑步出残碑！」',
+    },
   },
 
   // ===================== 第三章：锁妖深渊 (11–15) =====================
@@ -701,6 +712,9 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
     ],
     bossCutsceneTaunt: '焚天剑圣 · 炎狱妖王：「三百年焚天之怒——今日谁敢接我一记地火剑煞！」',
     bossEnrageLine: '焚天剑圣 · 炎狱妖王：「地火沸腾！本尊要将整座剑台化作熔炉！」',
+    waveCallouts: {
+      1: '锁妖塔镇守灵官：「小心！火狱地脉喷涌加剧，炎狱妖王快要现身了！」',
+    },
   },
 
   // ===================== 第四章：九幽绝巅 (16–20) =====================
@@ -932,6 +946,273 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
     ],
     bossCutsceneTaunt: '九幽剑煞 · 镇狱天尊：「千年魔煞合流！蜀山少年，接得住本尊这一剑再谈苍生！」',
     bossEnrageLine: '九幽剑煞 · 镇狱天尊：「不可思议……竟能逼出本尊灭世真身！随我一同坠入九幽吧！」',
+    waveCallouts: {
+      1: '师尊 · 酒剑仙：「护台双卫已倒，镇狱天尊要出真身了——凝神接招！」',
+    },
+  },
+
+  // ===================== 第五章：太虚仙域 (21–25) =====================
+  21: {
+    lines: [
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「蜀山的新任剑圣……锁妖天穹破裂后，上古太虚星海已与人间相连。唯重历太虚五劫、证道剑心，方能彻底弥合天裂！」',
+      },
+      {
+        speaker: '苍冥巡使 · 星痕',
+        role: 'enemy',
+        seal: '星',
+        text: '「太虚星海封存万载，岂容区区凡间剑修随意踏入？先尝尝星穹落雷与飞剑阵威！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「只要天裂未愈，人间便无一日安宁！云裳姑娘前路引路，这第一道星门便由我一剑劈开！」',
+      },
+    ],
+    choices: [
+      {
+        id: 'ep21_astral_sword',
+        alignment: 'sword',
+        title: '星海试锋 · 凌霄开路',
+        subtitle: '剑伤 +22% · 开局剑意 +48',
+        storyHint: '【剑道】以凌厉剑势强破星门守卫，不退半步',
+        heroReply: '「凡人又如何？我这一剑曾斩九幽天尊，今日同样可破太虚星门！」',
+        battleCallout: '凌霄破星 · 剑开云海！',
+        dmgBonus: 0.22,
+        ultBonus: 48,
+      },
+      {
+        id: 'ep21_astral_heart',
+        alignment: 'heart',
+        title: '护佑九州 · 御风济世',
+        subtitle: '气血 +82 · 移速 +14% · 灵葫 +1',
+        storyHint: '【仁心】为平三界天裂步步为营，稳守仙阶',
+        heroReply: '「天裂一天未补，百姓便多一分惊忧。我不求速胜，只求每一剑稳扎稳打！」',
+        battleCallout: '侠心护世 · 踏星登阶！',
+        hpBonus: 82,
+        speedBonus: 0.14,
+        extraGourd: 1,
+      },
+    ],
+    waveCallouts: {
+      1: '云裳 · 太虚剑灵：「星海风雷渐急，前方符阵善借地形迂回，莫被落雷所困！」',
+      2: '云裳 · 太虚剑灵：「苍冥巡使·星痕现身了！其周身缠绕狂雷星轨，待红圈起手再弹反破之！」',
+    },
+  },
+  22: {
+    lines: [
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「玉衡灵枢乃稳住星海不坠的核心！虚空魔兵正从四面合围灵枢，若灵枢崩毁，整片太虚仙域都将沉沦！」',
+      },
+      {
+        speaker: '玉衡镇使 · 璇玑',
+        role: 'enemy',
+        seal: '枢',
+        text: '「既然天下终将倾覆，何不令玉衡随我一同归于寂灭？来，看看你护得住多少人！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「有我一息尚存，谁也别想碰这灵枢半毫！尽管冲着我来吧！」',
+      },
+    ],
+    choices: [
+      {
+        id: 'ep22_astral_sword',
+        alignment: 'sword',
+        title: '惊雷夺势 · 断敌来路',
+        subtitle: '剑伤 +22% · 开局剑意 +48',
+        storyHint: '【剑道】以绝强攻势在星柱外围截杀魔兵',
+        heroReply: '「最好的防守便是斩尽来敌！靠近玉衡灵枢者，格杀勿论！」',
+        battleCallout: '惊雷破招 · 断敌来路！',
+        dmgBonus: 0.22,
+        ultBonus: 48,
+      },
+      {
+        id: 'ep22_astral_heart',
+        alignment: 'heart',
+        title: '守望灵枢 · 以身作盾',
+        subtitle: '气血 +86 · 移速 +14% · 灵葫 +1',
+        storyHint: '【仁心】贴近灵枢吸引敌方仇恨，护阵周全',
+        heroReply: '「灵枢背后便是九州万民！纵使受创千次，我亦寸步不退！」',
+        battleCallout: '以身作盾 · 死守玉衡！',
+        hpBonus: 86,
+        speedBonus: 0.14,
+        extraGourd: 1,
+      },
+    ],
+    waveCallouts: {
+      1: '云裳 · 太虚剑灵：「第二波破枢重卫携霸体杀至，切记优先拉住其仇恨！」',
+      2: '云裳 · 太虚剑灵：「镇使璇玑已亲临灵枢外环，弹反其招式可引动惊雷清场！」',
+    },
+  },
+  23: {
+    lines: [
+      {
+        speaker: '李逍遥·心魔幻身',
+        role: 'enemy',
+        seal: '魔',
+        text: '「逍遥，你一路斩魔无数，可曾听见自己心底的杀念？留在这镜花幻海，我便让你永享无敌虚名！」',
+      },
+      {
+        speaker: '同门 · 玄影',
+        role: 'ally',
+        seal: '影',
+        text: '「师弟守住本心！这幻海能借「瞬息剑域」疾速回转招式，切莫被心魔幻象迷了眼，撑过五十五秒幻潮即破！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「虚名不过镜中花，心中所念唯故人山河！区区心魔也想动摇我的剑？」',
+      },
+    ],
+    choices: [
+      {
+        id: 'ep23_astral_sword',
+        alignment: 'sword',
+        title: '剑破虚妄 · 越战越强',
+        subtitle: '剑伤 +24% · 开局剑意 +50',
+        storyHint: '【剑道】以绝对剑意击碎幻身，越战越锋利',
+        heroReply: '「真剑与幻影只在一瞬之间！来多少个心魔，我便一剑斩破多少个！」',
+        battleCallout: '剑破虚妄 · 本心如铁！',
+        dmgBonus: 0.24,
+        ultBonus: 50,
+      },
+      {
+        id: 'ep23_astral_heart',
+        alignment: 'heart',
+        title: '怀念故人 · 不忘初心',
+        subtitle: '气血 +90 · 移速 +15% · 灵葫 +1',
+        storyHint: '【仁心】忆起云来剑庐篝火与同门情谊抵御蚀渊',
+        heroReply: '「山风竹影、篝火清茶——心中牵挂之人都在等我归去，幻劫休想困我！」',
+        battleCallout: '不忘初心 · 破镜归来！',
+        hpBonus: 90,
+        speedBonus: 0.15,
+        extraGourd: 1,
+      },
+    ],
+    waveCallouts: {
+      1: '同门 · 玄影：「幻潮过半了师弟！你的剑影已经压过心魔，稳住呼吸！」',
+    },
+  },
+  24: {
+    lines: [
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「太虚星宫深处，苍龙破军与朱雀焚星两位古尊奉剑祖法旨连番试炼。二尊护甲奇厚，唯有「破势处决」方能造成重创！」',
+      },
+      {
+        speaker: '苍龙星君 · 破军',
+        role: 'enemy',
+        seal: '龙',
+        text: '「吾与朱雀炎尊镇守星宫九千年，能连挑我二人者，方有资格叩拜太虚剑祖！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「前辈剑威虽盛，晚辈却也不惧车轮之战！请苍龙、朱雀二位星君同时赐招！」',
+      },
+    ],
+    choices: [
+      {
+        id: 'ep24_astral_sword',
+        alignment: 'sword',
+        title: '以一敌二 · 剑破双尊',
+        subtitle: '剑伤 +24% · 开局剑意 +52',
+        storyHint: '【剑道】重击破势接天剑处决，快意连斩双尊',
+        heroReply: '「古尊金身再厚，也挡不住我御剑连破！先斩苍龙，再灭火凤！」',
+        battleCallout: '连斩双尊 · 叩问剑祖！',
+        dmgBonus: 0.24,
+        ultBonus: 52,
+      },
+      {
+        id: 'ep24_astral_heart',
+        alignment: 'heart',
+        title: '敬奉先贤 · 稳渡星火',
+        subtitle: '气血 +95 · 移速 +15% · 灵葫 +1',
+        storyHint: '【仁心】保存体力接下星炎与苍龙重击',
+        heroReply: '「前辈守星九千年令人敬重，晚辈自当竭尽全力护全彼此体面，堂堂一战！」',
+        battleCallout: '承先启后 · 稳破星宫！',
+        hpBonus: 95,
+        speedBonus: 0.15,
+        extraGourd: 1,
+      },
+    ],
+    bossCutsceneTaunt: '苍龙星君 · 破军：「且看你能否接住太虚星宫千年传承的一战！」',
+    bossEnrageLine: '朱雀炎尊 · 焚星：「星火燎原！让太虚记住你今日这口剑！」',
+    waveCallouts: {
+      1: '朱雀炎尊 · 焚星：「苍龙已退……下一关，便轮到我这朱雀焚星之焰试试你斤两！」',
+    },
+  },
+  25: {
+    lines: [
+      {
+        speaker: '师尊 · 酒剑仙',
+        role: 'elder',
+        seal: '酒',
+        text: '「好小子，竟然真让你走到太虚剑海之巅！前面那位便是一千年前开创蜀山与太虚剑脉的剑祖神念——别丢了为师的脸！」',
+      },
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「剑祖唯待一位兼具锋芒与苍生心的传人。若胜此一战，天裂自合，太虚万剑皆尊你为主！」',
+      },
+      {
+        speaker: '太虚剑祖 · 苍穹剑尊',
+        role: 'enemy',
+        seal: '祖',
+        text: '「李逍遥，你一路走来每一念抉择，皆映于太虚星海之中。拔剑吧——让我看看后世剑道，能否青出于蓝！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「弟子李逍遥，背负蜀山同门与人间烟火而来！请剑祖赐教这一剑——一剑开太虚！」',
+      },
+    ],
+    choices: [
+      {
+        id: 'ep25_astral_sword',
+        alignment: 'sword',
+        title: '一剑开天 · 独断万古',
+        subtitle: '剑伤 +26% · 开局剑意 +56',
+        storyHint: '【剑道】誓以手中三尺剑超迈古今，决死问心',
+        heroReply: '「古来剑修千万，今夜唯看我一剑开太虚！剑祖前辈，接招！」',
+        battleCallout: '一剑开天 · 超越剑祖！',
+        dmgBonus: 0.26,
+        ultBonus: 56,
+      },
+      {
+        id: 'ep25_astral_heart',
+        alignment: 'heart',
+        title: '剑为苍生 · 山海同安',
+        subtitle: '气血 +100 · 移速 +16% · 灵葫 +1',
+        storyHint: '【仁心】不为争胜而挥剑，只求天地从此再无天裂劫火',
+        heroReply: '「纵然成圣成祖，若护不住山河万家灯火亦属徒然！今日之剑，为苍生而挥！」',
+        battleCallout: '剑济苍生 · 万海归宁！',
+        hpBonus: 100,
+        speedBonus: 0.16,
+        extraGourd: 1,
+      },
+    ],
+    bossCutsceneTaunt: '太虚剑祖 · 苍穹剑尊：「千年星海共鸣——后世剑圣，接下这太虚第一剑！」',
+    bossEnrageLine: '太虚剑祖 · 苍穹剑尊：「痛快！蜀山后人竟真能逼出本祖全力——再来最后一击！」',
+    waveCallouts: {
+      1: '太虚剑祖 · 苍穹剑尊：「护法星影已破，不错！现在，由本祖亲自掂量你这一生剑心！」',
+    },
   },
 
   // ===================== 外传秘境打宝 (101–103) =====================
@@ -1125,45 +1406,229 @@ export const EPISODE_STORY_SCRIPTS: Record<number, EpisodeStoryScript> = {
   },
 };
 
-export const STAGE_20_EPILOGUE: StageDialogueDef = {
-  stageId: 20,
-  mode: 'epilogue',
-  episodeTag: '终章尾声 · 二十劫破',
-  biomeLabel: '蜀山重明',
-  kicker: '终章尾声 · 万里山河清朗',
-  title: '第二十集终幕 — 剑圣加冕 · 山河重明',
-  chapterName: '第四章 九幽绝巅',
-  intel: ['二十重剑劫全破', '锁妖大阵重固', '三界共传剑圣名'],
-  lines: [
-    {
-      speaker: '九幽剑煞 · 镇狱天尊',
-      role: 'enemy',
-      seal: '尊',
-      text: '「竟被一名蜀山少年……一剑破尽千年煞气……这便是正道剑心么……」',
-    },
-    {
-      speaker: '同门 · 玄影',
-      role: 'ally',
-      seal: '影',
-      text: '「师弟你看！锁妖台上的九幽黑云散开了，蜀山群峰千道剑气都在为你共鸣长啸！」',
-    },
-    {
-      speaker: '师尊 · 酒剑仙',
-      role: 'elder',
-      seal: '酒',
-      text: '「哈哈哈哈，痛快！御剑乘风来，除魔天地间——臭小子，从今日起，蜀山新任剑圣之名当归于你！」',
-    },
-    {
-      speaker: '李逍遥',
-      role: 'hero',
-      seal: '李',
-      text: '「剑道无止境，此战不过是江湖新始。待回云来剑庐再饮一壶好酒，三界若有妖邪，我剑随召而至！」',
-    },
-  ],
-  choices: [],
-  tipText: '二十重剑劫圆满落幕，点击开启剑圣加冕战绩与赐福总览',
-  confirmLabel: '剑圣加冕 · 查看战绩',
+export const CHAPTER_EPILOGUES: Record<number, StageDialogueDef> = {
+  5: {
+    stageId: 5,
+    mode: 'epilogue',
+    episodeTag: '第一章尾声 · 剑出山门',
+    biomeLabel: '十里桃源',
+    kicker: '第一章终幕 · 风起剑冢',
+    title: '第五集终幕 — 玄甲伏诛 · 古印指路',
+    chapterName: '第一章 蜀山山门',
+    intel: ['第一章山门五劫全破', '玄甲镇门将伏诛', '开启古剑冢深处调查'],
+    lines: [
+      {
+        speaker: '同门 · 玄影',
+        role: 'ally',
+        seal: '影',
+        text: '「师弟好剑法！我在破岳残甲里搜出半枚刻着紫雷符文的古剑印——源头似乎直指禁地「古剑荒冢」！」',
+      },
+      {
+        speaker: '师尊 · 酒剑仙',
+        role: 'elder',
+        seal: '酒',
+        text: '「山门不过开胃小菜。前方古剑冢里葬着前代堕落剑修，越往深处煞气越重——回云来剑庐温杯茶，准备下一卷吧！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「既已出剑，便无半途而废之理！玄影师兄且守山门，我去剑冢走一遭！」',
+      },
+    ],
+    choices: [],
+    tipText: '第一章剧情圆满落幕，可点击继续下一章或回看战绩',
+    confirmLabel: '收剑入鞘 · 查看战绩',
+  },
+  10: {
+    stageId: 10,
+    mode: 'epilogue',
+    episodeTag: '第二章尾声 · 残碑解印',
+    biomeLabel: '古剑荒冢',
+    kicker: '第二章终幕 · 赤霄散魂',
+    title: '第十集终幕 — 剑冢重明 · 地火微澜',
+    chapterName: '第二章 剑冢幽冥',
+    intel: ['第二章剑冢五劫全破', '赤霄魔君重归安息', '第三章锁妖深渊开启'],
+    lines: [
+      {
+        speaker: '剑冢守碑灵',
+        role: 'elder',
+        seal: '碑',
+        text: '「赤霄残剑已碎，千年怨魂随紫雷散尽。但剑冢底部的锁妖地脉突然滚烫……深渊地火被某种巨力唤醒了！」',
+      },
+      {
+        speaker: '师尊 · 酒剑仙',
+        role: 'elder',
+        seal: '酒',
+        text: '「连剑冢都镇不住那股火气，看来锁妖塔第三层已彻底松动。记住：在深渊里莫忘用弹反破重甲魔将的霸体！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「前辈英魂好生安息。锁妖深渊的地火之劫，由我替各位平息！」',
+      },
+    ],
+    choices: [],
+    tipText: '第二章剧情圆满落幕，下一卷将深入锁妖深渊火狱',
+    confirmLabel: '整装赴渊 · 查看战绩',
+  },
+  15: {
+    stageId: 15,
+    mode: 'epilogue',
+    episodeTag: '第三章尾声 · 剑灵初音',
+    biomeLabel: '赤焰火狱',
+    kicker: '第三章终幕 · 火狱平息',
+    title: '第十五集终幕 — 炎狱归寂 · 远音传讯',
+    chapterName: '第三章 锁妖深渊',
+    intel: ['第三章深渊五劫全破', '炎狱妖王伏诛', '第四章九幽绝巅开启'],
+    lines: [
+      {
+        speaker: '锁妖塔镇守灵官',
+        role: 'elder',
+        seal: '镇',
+        text: '「三百年火狱终于平息！不过九幽绝巅上的黑云却更浓了——连传说中的上古剑灵虚影都自天外投来一丝微光。」',
+      },
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「（遥远传音）年轻的蜀山剑修……莫要停步。先斩断绝巅的九幽镇狱天尊，星穹彼端……我会在太虚星海等你。」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「方才那道如琴似剑的声音……莫非真有上古仙域在九幽之上？无论如何，先拿下锁妖终战再说！」',
+      },
+    ],
+    choices: [],
+    tipText: '第三章深渊落幕，九幽绝巅已近在咫尺',
+    confirmLabel: '直指绝巅 · 查看战绩',
+  },
+  20: {
+    stageId: 20,
+    mode: 'epilogue',
+    episodeTag: '第四章尾声 · 二十劫破',
+    biomeLabel: '蜀山重明',
+    kicker: '第四章终幕 · 剑圣加冕 · 天穹初裂',
+    title: '第二十集终幕 — 剑圣加冕 · 太虚启门',
+    chapterName: '第四章 九幽绝巅',
+    intel: ['二十重剑劫全破', '获封蜀山少剑圣', '解锁第五章·太虚仙域'],
+    lines: [
+      {
+        speaker: '师尊 · 酒剑仙',
+        role: 'elder',
+        seal: '酒',
+        text: '「哈哈哈哈，痛快！御剑乘风来，除魔天地间——臭小子，从今日起，蜀山新任剑圣之名当归于你！」',
+      },
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「且慢收剑……天尊崩解的余威冲破了九天之外的古老星幕！太虚星海已显现人间，唯新晋剑圣能随我登阶问心！」',
+      },
+      {
+        speaker: '同门 · 玄影',
+        role: 'ally',
+        seal: '影',
+        text: '「师弟抬头看天！云海之外浮现出整片璀璨星海与仙阶——这便是传说中的第五卷「太虚仙域」！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「山河虽安，天裂犹存！师尊且先温酒，待弟子再闯一趟太虚星海，问心归来再痛饮三百杯！」',
+      },
+    ],
+    choices: [],
+    tipText: '第四章圆满收官，第五章「太虚仙域（21–25关）」正式开启',
+    confirmLabel: '仰望星海 · 查看战绩',
+  },
+  25: {
+    stageId: 25,
+    mode: 'epilogue',
+    episodeTag: '全剧终幕 · 二十五劫破',
+    biomeLabel: '太虚重明',
+    kicker: '第五章大结局 · 天裂愈合 · 万剑朝宗',
+    title: '第二十五集大结局 — 一剑开太虚 · 山海同春',
+    chapterName: '第五章 太虚仙域',
+    intel: ['五章二十五关全破', '天穹星裂彻底愈合', '三界共尊无双剑仙'],
+    lines: [
+      {
+        speaker: '太虚剑祖 · 苍穹剑尊',
+        role: 'enemy',
+        seal: '祖',
+        text: '「好一记清澄天地的一剑……老夫等了一千年的答案，今日终于在你手中见到了。这太虚万剑印记，便交付与你！」',
+      },
+      {
+        speaker: '云裳 · 太虚剑灵',
+        role: 'spirit',
+        seal: '裳',
+        text: '「天裂已合，星枢复明！从此太虚星海重归宁静，无论你在江湖何处，只要拔剑长啸，万里星光皆与你同在。」',
+      },
+      {
+        speaker: '师尊 · 酒剑仙',
+        role: 'elder',
+        seal: '酒',
+        text: '「连太虚老祖都点头服气了！臭小子，别站在星海里发愣了——同门与篝火桃花酿可还在云来剑庐等着你呢！」',
+      },
+      {
+        speaker: '李逍遥',
+        role: 'hero',
+        seal: '李',
+        text: '「御剑乘风来，除魔天地间，有酒乐逍遥，无酒我亦颠！天下既安，我自归剑庐共醉山河，若世有不平，剑起三界外！」',
+      },
+    ],
+    choices: [],
+    tipText: '二十五重剑劫全数圆满，点击开启剑祖加冕战绩总览',
+    confirmLabel: '万剑归宗 · 查看终局战绩',
+  },
 };
+
+export const STAGE_20_EPILOGUE: StageDialogueDef = CHAPTER_EPILOGUES[20];
+export const STAGE_25_EPILOGUE: StageDialogueDef = CHAPTER_EPILOGUES[25];
+
+export function getChapterEpilogue(
+  stageId: number,
+  swordHeart?: { sword: number; heart: number },
+): StageDialogueDef | null {
+  const base = CHAPTER_EPILOGUES[stageId];
+  if (!base) return null;
+  if (stageId !== 25 || !swordHeart) {
+    return {
+      ...base,
+      intel: [...base.intel],
+      lines: base.lines.map((l) => ({ ...l })),
+      choices: [],
+    };
+  }
+  const sword = swordHeart.sword ?? 0;
+  const heart = swordHeart.heart ?? 0;
+  const pathTitle =
+    sword >= 3 && sword > heart + 1
+      ? '证道结局 · 凌霄剑道'
+      : heart >= 3 && heart > sword + 1
+        ? '证道结局 · 侠骨仁心'
+        : sword >= 2 && heart >= 2
+          ? '证道结局 · 剑心通明'
+          : '证道结局 · 逍遥自在';
+  const heroClosing =
+    sword >= 3 && sword > heart + 1
+      ? '「剑锋所指，无坚不摧！天裂既合，我自以无敌剑道护蜀山千秋长青！」'
+      : heart >= 3 && heart > sword + 1
+        ? '「剑祖明鉴——此剑不为独尊天地，只愿护尽凡间灯火与同门无恙！」'
+        : '「剑道凌霄，仁心守世，二者缺一不可！天裂既愈，且回云来剑庐再饮一壶桃花酿！」';
+  const lines = base.lines.map((l, idx) =>
+    idx === base.lines.length - 1 ? { ...l, text: heroClosing } : { ...l },
+  );
+  return {
+    ...base,
+    intel: [pathTitle, ...base.intel],
+    lines,
+    choices: [],
+  };
+}
 
 export const CAMP_MEDITATION_QUOTES: string[] = [
   '蒲团吐纳间，丹田真气与蜀山灵脉悄然共鸣，剑心愈发澄明。',
@@ -1192,9 +1657,12 @@ export function getBossEnrageLine(stageId: number, bossName: string): string {
 export function getWineMasterCampDialogue(clearedCount: number, realmName: string): StageDialogueDef {
   let elderText: string;
   let stageLabel: string;
-  if (clearedCount >= 20) {
-    stageLabel = '剑圣归庐 · 把酒言欢';
-    elderText = `「二十重剑劫都被你挑落马下了，如今整个蜀山谁不叫你一声少剑圣？别绷着了，过来陪师尊喝两口，秘境里还有太初仙兵等你去淘！」`;
+  if (clearedCount >= 25) {
+    stageLabel = '剑祖归庐 · 万剑同贺';
+    elderText = `「连太虚剑祖都被你一剑折服，天穹星裂彻底愈合——如今三界谁不知我蜀山出了位无双剑圣？少废话，过来陪为师满饮这坛百花仙酿！」`;
+  } else if (clearedCount >= 20) {
+    stageLabel = '剑圣登星 · 太虚问道';
+    elderText = `「镇狱天尊既平，天穹却裂开了太虚星海。云裳那道古剑灵在等你登阶问道——去吧，先补满真气与剑意再进第五卷！」`;
   } else if (clearedCount >= 15) {
     stageLabel = '决战九幽前夕 · 师徒论道';
     elderText = `「深渊火狱已平，前面九幽绝巅的天劫可不是闹着玩的。你如今已有「${realmName}」修为，临战前再吐纳稳固根基、温壶好酒壮胆！」`;
@@ -1217,7 +1685,7 @@ export function getWineMasterCampDialogue(clearedCount: number, realmName: strin
     kicker: `云来剑庐 · ${stageLabel}`,
     title: '师尊 · 酒剑仙 — 篝火温酒论剑',
     chapterName: '云来剑庐',
-    intel: [`当前剑道境界：${realmName}`, `已破剑劫：${clearedCount} / 20`, '篝火温养 · 下战生效'],
+    intel: [`当前剑道境界：${realmName}`, `已破剑劫：${clearedCount} / 25`, '篝火温养 · 下战生效'],
     lines: [
       {
         speaker: '师尊 · 酒剑仙',
@@ -1259,8 +1727,8 @@ export function getXuanyingCampDialogue(nextStage: StageDef, clearedCount: numbe
     ? `且此地伴随「${nextStage.hazardLabel}」，走位时千万留意脚下预警红阵。`
     : '此地灵脉尚算稳定，正适合演练四连破势与万剑归宗。';
   const allyText =
-    clearedCount >= 20
-      ? `「逍遥剑圣，如今各处残魔已平，但古陵与魔殿秘境仍余波未息。你随时可用木人桩试剑，或再去重温第 ${nextStage.id} 关「${nextStage.name}」！」`
+    clearedCount >= 25
+      ? `「逍遥剑祖，二十五重剑劫全数破尽，星海与山河均已平安！你随时可用木人桩演武，或打开「剧情志」重温一路剑途！」`
       : `「师弟，下一战便是第 ${nextStage.episodeNum} 集「${nextStage.name}」（地界：${biomeLabel}）。推荐境界「${nextStage.recommendedRealm}」，${hazardTip}」`;
 
   return {

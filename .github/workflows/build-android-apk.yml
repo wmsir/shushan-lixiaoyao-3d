@@ -60,11 +60,16 @@ jobs:
           KS_FILE="$RUNNER_TEMP/lixiaoyao-release.jks"
           if [ -n "$KEYSTORE_B64" ]; then
             printf '%s' "$KEYSTORE_B64" | tr -d '\r\n\t ' | base64 --decode > "$KS_FILE"
-            echo "ANDROID_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
-            echo "ANDROID_KEYSTORE_PASSWORD=${KEYSTORE_PASS}" >> "$GITHUB_ENV"
-            echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
-            echo "ANDROID_KEY_PASSWORD=${KEY_PASS}" >> "$GITHUB_ENV"
-            keytool -list -keystore "$KS_FILE" -storepass "$KEYSTORE_PASS" | grep -i -E "Alias|SHA256" || true
+            CLEAN_STORE_PASS=$(printf '%s' "$KEYSTORE_PASS" | tr -d '\r\n')
+            CLEAN_KEY_ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+            CLEAN_KEY_PASS=$(printf '%s' "$KEY_PASS" | tr -d '\r\n')
+            {
+              echo "ANDROID_KEYSTORE_PATH=$KS_FILE"
+              echo "ANDROID_KEYSTORE_PASSWORD=${CLEAN_STORE_PASS}"
+              echo "ANDROID_KEY_ALIAS=${CLEAN_KEY_ALIAS}"
+              echo "ANDROID_KEY_PASSWORD=${CLEAN_KEY_PASS}"
+            } >> "$GITHUB_ENV"
+            keytool -list -keystore "$KS_FILE" -storepass "$CLEAN_STORE_PASS" -alias "$CLEAN_KEY_ALIAS" | grep -i -E "Alias|SHA256"
           else
             echo "::error::Missing ANDROID_KEYSTORE_BASE64 secret! Refusing to generate ephemeral keystore that breaks overwrite installs."
             exit 1

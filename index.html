@@ -27,22 +27,22 @@
       <section id="title-overlay" class="overlay visible">
         <div class="title-card">
           <div class="title-kicker">
-            <span>SHUSHAN DEMON-LOCK COURT · 20 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.62</span>
+            <span>SHUSHAN DEMON-LOCK COURT · 25 STAGES</span>
+            <span id="app-version-badge" class="version-pill">v1.63</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
             <span class="chop-seal" aria-hidden="true">逍遥</span>
           </div>
-          <p id="title-tagline" class="title-tagline">写实 3D 仙侠四章二十关闯关 · 装备神兵与侠客皮肤养成 · 战前剧情对白与高燃对打 · 跨端双人联机。</p>
+          <p id="title-tagline" class="title-tagline">写实 3D 仙侠五章二十五关闯关 · 装备神兵与侠客皮肤养成 · 道心抉择与剧情回廊 · 跨端双人联机。</p>
 
           <!-- Campaign Progress & Selected Stage Strip -->
           <div class="campaign-strip">
             <div class="campaign-strip-row">
               <span id="title-realm-badge" class="realm-badge">炼气初境</span>
-              <span id="title-stars-text" class="stars-badge">★ 0 / 60</span>
+              <span id="title-stars-text" class="stars-badge">★ 0 / 75</span>
               <span id="title-jade-pill" class="jade-badge">◆ 280 灵石</span>
-              <span id="title-clear-text" class="clear-badge">已破 0 / 20 关</span>
+              <span id="title-clear-text" class="clear-badge">已破 0 / 25 关</span>
             </div>
             <div class="campaign-selected-row">
               <span id="title-selected-stage" class="selected-stage-label">当前目标：第 1 关 · 剑启山门</span>
@@ -59,14 +59,14 @@
               试炼 · 塔/肉鸽
               <span id="dungeon-bounty-dot" class="bounty-dot" aria-hidden="true"></span>
             </button>
-            <button id="btn-open-campaign" class="xianxia-btn map-btn" type="button">二十关 · 剑录</button>
+            <button id="btn-open-campaign" class="xianxia-btn map-btn" type="button">二十五关 · 剑录</button>
             <button id="btn-open-shop" class="xianxia-btn shop-btn" type="button">藏宝阁 · 装备皮肤</button>
           </div>
 
           <!-- 2-Player Online Multiplayer Lobby -->
           <div class="mp-lobby">
             <div class="mp-lobby-head">
-              <span class="mp-badge">联机阁 · 20 关跨端互通</span>
+              <span class="mp-badge">联机阁 · 25 关跨端互通</span>
               <span class="mp-dot-wrap"><span id="mp-conn-dot" class="mp-dot"></span><span class="mp-dot-lbl">联机就绪</span></span>
             </div>
             <div class="mp-btn-row">
@@ -103,22 +103,25 @@
         </div>
       </section>
 
-      <!-- Commercial 20-Stage 4-Chapter Campaign Map Overlay -->
+      <!-- Commercial 25-Stage 5-Chapter Campaign Map Overlay -->
       <section id="campaign-overlay" class="overlay">
         <div class="campaign-modal">
           <div class="campaign-head">
             <div class="campaign-head-left">
-              <h2 class="campaign-title">二十重剑劫 · 蜀山剑录</h2>
+              <h2 class="campaign-title">二十五重剑劫 · 蜀山剑录</h2>
               <div class="campaign-meta-pills">
                 <span id="map-realm-pill" class="realm-badge">炼气初境</span>
                 <span id="map-realm-buff" class="realm-buff-txt">气血+0 · 剑伤+0%</span>
-                <span id="map-stars-pill" class="stars-badge">★ 0 / 60</span>
+                <span id="map-stars-pill" class="stars-badge">★ 0 / 75</span>
               </div>
             </div>
-            <button id="btn-close-campaign" class="util-btn" type="button">返回</button>
+            <div class="campaign-head-actions">
+              <button id="btn-open-codex" class="util-btn codex-btn" type="button">剧情志</button>
+              <button id="btn-close-campaign" class="util-btn" type="button">返回</button>
+            </div>
           </div>
 
-          <!-- 4 Chapter Tabs -->
+          <!-- 5 Chapter Tabs -->
           <div id="chapter-tabs" class="chapter-tabs" role="tablist" aria-label="战役章节"></div>
 
           <!-- Active Chapter Lore Banner & Star Milestone Chests -->
@@ -139,6 +142,22 @@
               <button id="btn-map-launch" class="xianxia-btn primary" type="button">单人挑战第 1 关</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Story Codex & Sword-Heart Alignment Replay Gallery (蜀山剧情志) -->
+      <section id="codex-overlay" class="overlay">
+        <div class="codex-modal">
+          <div class="campaign-head">
+            <div class="campaign-head-left">
+              <h2 class="campaign-title">蜀山剑录 · 剧情志</h2>
+              <span id="codex-count-pill" class="stars-badge">已阅 0 / 34</span>
+            </div>
+            <button id="btn-close-codex" class="util-btn" type="button">返回</button>
+          </div>
+          <div id="codex-karma-bar" class="codex-karma-card"></div>
+          <div id="codex-tabs" class="codex-tabs" role="tablist" aria-label="剧情卷章"></div>
+          <div id="codex-list" class="codex-grid"></div>
         </div>
       </section>
 
@@ -523,7 +542,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.62</span>
+            <span id="pause-version-badge" class="version-pill">v1.63</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
