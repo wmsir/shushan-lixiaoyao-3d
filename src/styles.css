@@ -219,7 +219,7 @@ body,
 
 .title-cta-row {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -230,9 +230,20 @@ body,
   letter-spacing: 0.12em;
 }
 
-#btn-start,
+#btn-start {
+  grid-column: 1 / -1;
+  padding: 10px 14px;
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+}
+
 #btn-open-world,
-#btn-open-camp {
+#btn-open-camp,
+#btn-open-dungeon,
+#btn-open-campaign,
+#btn-open-shop,
+#btn-open-roster {
   grid-column: span 2;
   padding: 9px 6px;
   font-size: 13.5px;
@@ -240,14 +251,16 @@ body,
   white-space: nowrap;
 }
 
-#btn-open-dungeon,
-#btn-open-campaign,
-#btn-open-shop {
-  grid-column: span 2;
-  padding: 9px 6px;
-  font-size: 13.5px;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
+.xianxia-btn.roster-btn {
+  border-color: rgba(164, 148, 255, 0.66);
+  color: #f0eaff;
+  background: linear-gradient(180deg, rgba(64, 44, 122, 0.8), rgba(26, 18, 56, 0.94));
+  box-shadow: 0 4px 16px rgba(132, 108, 240, 0.24), inset 0 1px 0 rgba(226, 214, 255, 0.28);
+}
+
+.xianxia-btn.roster-btn:hover {
+  border-color: #c9bcff;
+  color: #ffffff;
 }
 
 .xianxia-btn.world-btn {
@@ -1103,17 +1116,48 @@ body,
   align-items: stretch;
   gap: 4px;
   width: 124px;
-  padding: 5px 6px 6px;
-  border-radius: 8px;
-  background: linear-gradient(160deg, rgba(7, 13, 22, 0.84) 0%, rgba(8, 16, 28, 0.72) 100%);
-  border: 1px solid rgba(223, 192, 117, 0.34);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(247, 225, 162, 0.14);
-  backdrop-filter: blur(4px);
+  padding: 5px 6px 5px;
+  border-radius: 10px;
+  background: linear-gradient(160deg, rgba(7, 13, 22, 0.86) 0%, rgba(8, 16, 28, 0.76) 100%);
+  border: 1px solid rgba(223, 192, 117, 0.42);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(247, 225, 162, 0.16);
+  backdrop-filter: blur(5px);
   pointer-events: none;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
 }
 
 .minimap-box.visible {
   display: flex;
+}
+
+#game-hud.visible .minimap-box.visible {
+  pointer-events: auto;
+}
+
+.minimap-box:hover {
+  border-color: rgba(247, 225, 162, 0.85);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.65), 0 0 14px rgba(223, 192, 117, 0.28);
+}
+
+.minimap-box:active {
+  transform: scale(0.97);
+}
+
+.minimap-expand-hint {
+  display: block;
+  text-align: center;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(84, 58, 22, 0.52), rgba(26, 62, 72, 0.58));
+  border: 1px solid rgba(223, 192, 117, 0.34);
+  font-family: var(--font-serif);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: #f8e4ab;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .minimap-head {
@@ -1310,14 +1354,55 @@ body,
   transform: translateY(0);
 }
 
+.boss-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  min-width: 0;
+}
+
 .boss-name {
   text-align: center;
   font-family: var(--font-serif);
   font-size: 17px;
   letter-spacing: 0.2em;
   color: #ffdce3;
-  margin-bottom: 5px;
+  margin-bottom: 0;
+  min-width: 0;
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
+}
+
+.boss-inspect-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(247, 225, 162, 0.58);
+  background: linear-gradient(180deg, rgba(102, 34, 48, 0.88), rgba(46, 14, 24, 0.96));
+  color: #ffeab8;
+  font-family: var(--font-serif);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.15s ease, transform 0.12s ease;
+}
+
+#game-hud.visible .boss-bar.visible .boss-inspect-btn {
+  pointer-events: auto;
+}
+
+.boss-inspect-btn:hover {
+  border-color: #fff0be;
+  color: #ffffff;
+}
+
+.boss-inspect-btn:active {
+  transform: scale(0.95);
 }
 
 .boss-hp-track {
@@ -1396,6 +1481,10 @@ body,
   opacity: 0;
   transform: scale(0.9);
   transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.combo-box:not(.visible) {
+  display: none;
 }
 
 .combo-box.visible {
@@ -5758,7 +5847,8 @@ body,
 .shop-preview-stage {
   display: none;
   position: relative;
-  flex: 1 1 46%;
+  flex: 0 0 47%;
+  width: 47%;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -5772,48 +5862,194 @@ body,
 }
 
 #shop-overlay.preview-active {
-  background: linear-gradient(90deg, rgba(4, 9, 16, 0.08) 0%, rgba(4, 9, 16, 0.24) 44%, rgba(4, 9, 16, 0.88) 64%);
+  background: linear-gradient(90deg, rgba(4, 9, 16, 0.04) 0%, rgba(4, 9, 16, 0.16) 42%, rgba(4, 9, 16, 0.86) 54%, rgba(4, 9, 16, 0.94) 100%);
   backdrop-filter: none;
-  justify-content: flex-end;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: space-between;
   gap: 12px;
+}
+
+/* Hide underlying Title, HUD, World/Camp bars, Touch controls & banners when Shop 3D preview is open */
+#app.shop-preview-open #title-overlay,
+#app.shop-preview-open #game-hud,
+#app.shop-preview-open #world-hud,
+#app.shop-preview-open #camp-hud,
+#app.shop-preview-open #touch-controls,
+#app.shop-preview-open #pause-overlay,
+#app.shop-preview-open #result-overlay,
+#app.shop-preview-open #mobile-notify-pill,
+#app.shop-preview-open #stage-banner,
+#app.shop-preview-open #subtitle-banner,
+#app:has(#shop-overlay.visible.preview-active) #title-overlay,
+#app:has(#shop-overlay.visible.preview-active) #game-hud,
+#app:has(#shop-overlay.visible.preview-active) #world-hud,
+#app:has(#shop-overlay.visible.preview-active) #camp-hud,
+#app:has(#shop-overlay.visible.preview-active) #touch-controls,
+#app:has(#shop-overlay.visible.preview-active) #pause-overlay,
+#app:has(#shop-overlay.visible.preview-active) #result-overlay,
+#app:has(#shop-overlay.visible.preview-active) #mobile-notify-pill,
+#app:has(#shop-overlay.visible.preview-active) #stage-banner,
+#app:has(#shop-overlay.visible.preview-active) #subtitle-banner {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 #shop-overlay.preview-active .shop-preview-stage {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  padding-bottom: 8px;
+  padding: 4px 0;
+  gap: 6px;
 }
 
 #shop-overlay.preview-active .shop-modal {
-  width: min(520px, 52%);
+  flex: 1 1 53%;
+  width: min(560px, 53%);
+  min-width: 0;
   flex-shrink: 0;
 }
 
+/* Left-Side Top Equipped Gear Overview Slots (#shop-equipped-slots) */
+.shop-equipped-slots {
+  width: min(396px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.eq-slot-badge {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 9px;
+  border: 1px solid rgba(223, 192, 117, 0.32);
+  background: linear-gradient(180deg, rgba(11, 20, 34, 0.86), rgba(7, 13, 24, 0.92));
+  color: #eaf2fa;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  text-align: left;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.48);
+  transition: border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+.eq-slot-badge:hover,
+.eq-slot-badge.active {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 14px rgba(223, 192, 117, 0.28), 0 4px 14px rgba(0, 0, 0, 0.55);
+}
+
+.eq-slot-badge:active {
+  transform: scale(0.97);
+}
+
+.eq-slot-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #94a3b8;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.eq-slot-badge.rarity-common { border-color: rgba(148, 163, 184, 0.38); }
+.eq-slot-badge.rarity-common .eq-slot-dot { background: #cbd5e1; color: #cbd5e1; }
+.eq-slot-badge.rarity-rare { border-color: rgba(56, 189, 248, 0.54); }
+.eq-slot-badge.rarity-rare .eq-slot-dot { background: #38bdf8; color: #38bdf8; }
+.eq-slot-badge.rarity-epic { border-color: rgba(192, 125, 255, 0.62); }
+.eq-slot-badge.rarity-epic .eq-slot-dot { background: #c084fc; color: #c084fc; }
+.eq-slot-badge.rarity-legendary {
+  border-color: rgba(248, 198, 72, 0.72);
+  background: linear-gradient(180deg, rgba(44, 30, 14, 0.88), rgba(14, 18, 28, 0.94));
+}
+.eq-slot-badge.rarity-legendary .eq-slot-dot { background: #fbbf24; color: #fbbf24; }
+
+.eq-slot-cat {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--jade);
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(76, 217, 208, 0.14);
+}
+
+.eq-slot-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 700;
+  color: #f8efd8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shop-preview-viewport {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  pointer-events: none;
+}
+
+.preview-drag-hint {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(226, 240, 250, 0.76);
+  background: rgba(7, 13, 24, 0.58);
+  border: 1px solid rgba(223, 192, 117, 0.24);
+  padding: 2px 8px;
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
+}
+
 .shop-preview-hud {
-  width: min(390px, 96%);
+  width: min(396px, 100%);
   padding: 9px 12px;
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(10, 18, 32, 0.88), rgba(7, 13, 24, 0.94));
-  border: 1px solid rgba(104, 232, 255, 0.45);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(10, 18, 32, 0.9), rgba(7, 13, 24, 0.96));
+  border: 1px solid rgba(223, 192, 117, 0.44);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.68), inset 0 1px 0 rgba(255, 242, 204, 0.14);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   text-align: center;
+  pointer-events: auto;
+  z-index: 2;
 }
 
 .preview-name {
   font-family: var(--font-serif);
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 700;
   color: #ffe8a6;
+  line-height: 1.25;
 }
 
 .preview-sub {
   font-size: 11px;
-  color: #8ee8df;
+  color: #9bb8cc;
+  line-height: 1.3;
+}
+
+.preview-stats {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8bf5ea;
+  line-height: 1.3;
 }
 
 .preview-actions {
@@ -5826,13 +6062,23 @@ body,
 }
 
 .preview-actions .util-btn {
-  padding: 4px 9px;
+  padding: 5px 9px;
   font-size: 11.5px;
+  min-height: 30px;
 }
 
 .preview-actions .preview-buy-btn {
-  padding: 5px 12px;
-  font-size: 12px;
+  min-width: 0;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  min-height: 32px;
+}
+
+.preview-actions .preview-buy-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .shop-card.previewing {
@@ -5846,45 +6092,1405 @@ body,
   background: rgba(16, 54, 78, 0.72);
 }
 
-@media (max-width: 820px) {
-  #shop-overlay.preview-active {
-    flex-direction: column;
-    justify-content: flex-end;
-    background: linear-gradient(180deg, rgba(4, 9, 16, 0.06) 0%, rgba(4, 9, 16, 0.25) 36%, rgba(4, 9, 16, 0.92) 54%);
-    gap: 6px;
+/* ==================== Unified Mobile Notification Pill & HUD Action Accents ==================== */
+.hud-map-btn,
+.world-map-btn {
+  border-color: rgba(235, 196, 112, 0.62);
+  color: #fff0c2;
+  background: linear-gradient(180deg, rgba(88, 60, 22, 0.86), rgba(40, 26, 10, 0.94));
+}
+
+.hud-roster-btn,
+.world-roster-btn {
+  border-color: rgba(154, 178, 255, 0.58);
+  color: #e4ecff;
+  background: linear-gradient(180deg, rgba(34, 52, 98, 0.86), rgba(16, 24, 52, 0.94));
+}
+
+#app.world-mode #btn-hud-map,
+#app.world-mode #btn-hud-roster,
+#app.camp-mode #btn-hud-map,
+#app.camp-mode #btn-hud-roster {
+  display: none !important;
+}
+
+.mobile-notify-pill {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translate(-50%, -10px);
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 6px 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(180deg, rgba(12, 24, 38, 0.94), rgba(7, 14, 24, 0.96));
+  border: 1px solid rgba(223, 192, 117, 0.58);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.68), inset 0 1px 0 rgba(255, 244, 206, 0.2);
+  backdrop-filter: blur(8px);
+  color: #f6ecd2;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s ease;
+  z-index: 48;
+}
+
+.mobile-notify-pill.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+.mobile-notify-pill.tone-warn,
+.mobile-notify-pill.tone-gold {
+  border-color: rgba(248, 206, 92, 0.78);
+  color: #fff2c4;
+}
+
+.mobile-notify-pill.tone-err {
+  border-color: rgba(238, 96, 108, 0.78);
+  background: linear-gradient(180deg, rgba(56, 16, 24, 0.95), rgba(28, 10, 16, 0.97));
+  color: #ffd6da;
+}
+
+.mobile-notify-icon {
+  flex-shrink: 0;
+  color: var(--gold-bright);
+  font-size: 12px;
+}
+
+.mobile-notify-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==================== Mobile-First Overhaul (Portrait 390x844 & Landscape 844x390) ==================== */
+/* Hide desktop-only keycaps & keyboard hints on mobile/touch viewports */
+#app.mobile-mode .desktop-only,
+#app.mobile-mode .mount-key,
+#app.mobile-mode .camp-interact-key,
+#app.mobile-mode .skill-key {
+  display: none !important;
+}
+
+@media (hover: none), (max-width: 960px), (max-height: 520px) {
+  .desktop-only,
+  .mount-key,
+  .camp-interact-key,
+  .skill-key {
+    display: none !important;
   }
-  #shop-overlay.preview-active .shop-preview-stage {
-    flex: 0 0 38dvh;
-    width: 100%;
-    height: 38dvh;
-    padding-bottom: 2px;
+
+  /* Prevent inline toasts from stretching top bars into colliding 3rd rows on mobile */
+  .world-toast,
+  .camp-toast {
+    display: none !important;
   }
-  #shop-overlay.preview-active .shop-modal {
-    width: 100%;
-    max-height: calc(58dvh - 14px);
-    flex: 1 1 auto;
+
+  /* Unified Rounded Obsidian-Gold Glass Modals with Touch-Friendly Sticky Headers & Smooth Scroll */
+  .title-card,
+  .campaign-modal,
+  .codex-modal,
+  .dungeon-modal,
+  .shop-modal,
+  .pause-modal-card,
+  .result-modal-wide {
+    border-radius: 16px;
+    border-color: rgba(223, 192, 117, 0.5);
+    background: linear-gradient(180deg, rgba(11, 20, 34, 0.94) 0%, rgba(6, 12, 22, 0.97) 100%);
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.82), inset 0 1px 0 rgba(255, 242, 204, 0.18);
+    backdrop-filter: blur(12px);
   }
-  .shop-preview-hud {
-    width: 100%;
-    padding: 6px 10px;
-    gap: 3px;
+
+  .dialogue-card {
+    border-radius: 18px 18px 14px 14px;
+    border-color: rgba(223, 192, 117, 0.56);
+    background: linear-gradient(180deg, rgba(11, 20, 34, 0.95) 0%, rgba(6, 12, 22, 0.98) 100%);
+    backdrop-filter: blur(12px);
   }
-  .preview-name {
+
+  .title-card,
+  .stage-card-grid,
+  .codex-grid,
+  .shop-grid,
+  .dungeon-scroll,
+  .dlg-lines,
+  .result-body {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .campaign-head,
+  .shop-head,
+  .dungeon-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: transparent;
+  }
+
+  /* Accessible >= 40px touch close buttons across all modals */
+  #btn-close-campaign,
+  #btn-close-codex,
+  #btn-close-shop,
+  #btn-close-dungeon {
+    min-width: 44px;
+    min-height: 40px;
+    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
     font-size: 13px;
+    flex-shrink: 0;
   }
-  .preview-sub {
-    display: none;
+
+  .result-modal-wide {
+    overflow: hidden;
+  }
+
+  .result-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 }
 
-@media (max-height: 460px) {
-  #shop-overlay.preview-active .shop-modal {
-    width: min(460px, 56%);
+/* ===== Mobile Portrait (390x844 and narrow vertical screens) ===== */
+@media (max-width: 820px) and (orientation: portrait), (max-width: 560px) {
+  #title-overlay {
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    justify-content: center;
   }
-  .shop-preview-hud {
-    padding: 6px 8px;
+
+  .title-card {
+    width: 100%;
+    max-width: 100%;
+    padding: 16px 14px 14px;
   }
-  .preview-sub {
+
+  .title-cta-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #btn-start {
+    grid-column: 1 / -1;
+    min-height: 42px;
+    padding: 9px 10px;
+    font-size: 15px;
+    letter-spacing: 0.12em;
+  }
+
+  #btn-open-world,
+  #btn-open-camp,
+  #btn-open-dungeon,
+  #btn-open-campaign,
+  #btn-open-shop,
+  #btn-open-roster {
+    grid-column: span 1;
+    min-height: 38px;
+    padding: 7px 6px;
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ALWAYS LEFT-RIGHT Split Shop on Portrait: Left 44% Live 3D Hero + Equipped Slots, Right 56% Shop Cards */
+  #shop-overlay {
+    padding: max(8px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+  }
+
+  #shop-overlay.preview-active {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 6px;
+    background: linear-gradient(90deg, rgba(4, 9, 16, 0.03) 0%, rgba(4, 9, 16, 0.12) 41%, rgba(4, 9, 16, 0.88) 46%, rgba(4, 9, 16, 0.96) 100%);
+  }
+
+  #shop-overlay.preview-active .shop-preview-stage {
+    flex: 0 0 calc(44% - 3px);
+    width: calc(44% - 3px);
+    height: 100%;
+    padding: 0;
+    gap: 4px;
+    align-items: stretch;
+  }
+
+  #shop-overlay.preview-active .shop-equipped-slots {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .eq-slot-badge {
+    padding: 4px 6px;
+    min-height: 27px;
+    border-radius: 7px;
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .eq-slot-cat {
+    font-size: 9px;
+    padding: 1px 3px;
+  }
+
+  #shop-overlay.preview-active .eq-slot-name {
+    font-size: 10.5px;
+  }
+
+  #shop-overlay.preview-active .preview-drag-hint {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+
+  #shop-overlay.preview-active .shop-preview-hud {
+    width: 100%;
+    padding: 7px 6px;
+    border-radius: 12px;
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .preview-name {
+    font-size: 11.5px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  #shop-overlay.preview-active .preview-sub {
     display: none;
+  }
+
+  #shop-overlay.preview-active .preview-stats {
+    font-size: 9.5px;
+    line-height: 1.28;
+    overflow-wrap: anywhere;
+  }
+
+  #shop-overlay.preview-active .preview-actions {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr) 26px minmax(0, 1fr);
+    gap: 3px;
+    width: 100%;
+  }
+
+  #shop-overlay.preview-active .preview-actions .util-btn {
+    min-width: 0;
+    min-height: 30px;
+    padding: 3px 2px;
+    font-size: 9.5px;
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active .preview-actions .preview-buy-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    min-height: 34px;
+    padding: 5px 6px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active .shop-modal {
+    flex: 1 1 calc(56% - 3px);
+    width: calc(56% - 3px);
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    padding: 8px 7px;
+    gap: 6px;
+    border-radius: 14px;
+  }
+
+  #shop-overlay.preview-active .shop-head {
+    gap: 4px;
+    align-items: flex-start;
+  }
+
+  #shop-overlay.preview-active .shop-head-left {
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  #shop-overlay.preview-active .campaign-title {
+    font-size: 13px;
+    letter-spacing: 0.03em;
+    line-height: 1.2;
+  }
+
+  #shop-overlay.preview-active .jade-badge,
+  #shop-overlay.preview-active .realm-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  #shop-overlay.preview-active #btn-close-shop {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 4px 7px;
+    font-size: 11.5px;
+  }
+
+  /* 5-tab compact 2-row grid with ZERO horizontal overflow inside 56% (~196px) */
+  #shop-overlay.preview-active .shop-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .shop-tab {
+    padding: 5px 2px;
+    min-height: 32px;
+    border-radius: 7px;
+    gap: 1px;
+  }
+
+  #shop-overlay.preview-active .shop-tab strong {
+    font-size: 10.5px;
+    letter-spacing: 0;
+  }
+
+  #shop-overlay.preview-active .shop-tab span {
+    display: none;
+  }
+
+  #shop-overlay.preview-active .shop-tab.bag-tab span {
+    display: inline;
+    font-size: 9px;
+  }
+
+  #shop-overlay.preview-active .shop-bag-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 5px 6px;
+  }
+
+  #shop-overlay.preview-active .bag-cap-txt {
+    font-size: 10px;
+  }
+
+  #shop-overlay.preview-active .shop-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  #shop-overlay.preview-active .shop-card {
+    padding: 8px 8px;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  #shop-overlay.preview-active .shop-card-name {
+    font-size: 13.5px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  #shop-overlay.preview-active .shop-card-desc {
+    font-size: 10.5px;
+    line-height: 1.35;
+  }
+
+  #shop-overlay.preview-active .shop-card-actions {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .shop-act-btn {
+    min-height: 30px;
+    padding: 4px 5px;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  #shop-overlay.preview-active .shop-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+    padding-top: 6px;
+  }
+
+  #shop-overlay.preview-active .shop-power-summary {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  #shop-overlay.preview-active #btn-shop-battle {
+    min-width: 0;
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+  }
+
+  /* Pause Modal 7-Button Clean Symmetrical Mobile Portrait Grid */
+  .pause-modal-card .modal-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .pause-modal-card #btn-resume {
+    grid-column: 1 / -1;
+    min-height: 42px;
+  }
+
+  .pause-modal-card .modal-actions .xianxia-btn {
+    min-width: 0;
+    width: 100%;
+    min-height: 38px;
+    padding: 7px 6px;
+    font-size: 12.5px;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+
+  /* Zero-Collision Portrait In-Game & Open-World HUD (390x844) */
+  .top-left-stack,
+  #app.mobile-mode .top-left-stack {
+    left: 8px;
+    top: max(8px, env(safe-area-inset-top));
+    gap: 4px;
+  }
+
+  .hero-cluster,
+  #app.mobile-mode .hero-cluster {
+    width: 158px;
+    padding: 4px 7px;
+    gap: 2px;
+  }
+
+  .hero-nameplate {
+    gap: 6px;
+    margin-bottom: 1px;
+  }
+
+  .hero-seal,
+  #app.mobile-mode .hero-seal {
+    width: 22px;
+    height: 22px;
+    font-size: 12px;
+  }
+
+  .hero-name-col strong,
+  #app.mobile-mode .hero-name-col strong {
+    font-size: 13px;
+    letter-spacing: 0.06em;
+  }
+
+  .hero-sub {
+    font-size: 9.5px;
+  }
+
+  .bar-row {
+    gap: 5px;
+  }
+
+  .bar-label {
+    width: 22px;
+    font-size: 10px;
+  }
+
+  .bar-track {
+    height: 13px;
+  }
+
+  .bar-row.compact .bar-track {
+    height: 7px;
+  }
+
+  .bar-value {
+    font-size: 9.5px;
+  }
+
+  .minimap-box,
+  #app.mobile-mode .minimap-box {
+    width: 86px;
+    padding: 4px 5px;
+    gap: 2px;
+  }
+
+  .minimap-head {
+    font-size: 9.5px;
+  }
+
+  #minimap-pct {
+    font-size: 9px;
+  }
+
+  #minimap-canvas,
+  #app.mobile-mode #minimap-canvas {
+    width: 74px;
+    height: 82px;
+  }
+
+  .minimap-expand-hint {
+    font-size: 8.5px;
+    padding: 1px 2px;
+  }
+
+  .top-right-stack,
+  #app.mobile-mode .top-right-stack {
+    top: max(8px, env(safe-area-inset-top));
+    right: 8px;
+    gap: 78px;
+  }
+
+  .util-row {
+    gap: 4px;
+  }
+
+  .util-row .util-btn {
+    padding: 4px 7px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    min-height: 28px;
+  }
+
+  .top-center-stack,
+  #app.mobile-mode .top-center-stack {
+    top: calc(max(8px, env(safe-area-inset-top)) + 34px);
+    right: 8px;
+    left: auto;
+    transform: none;
+    width: calc(100% - 178px);
+    min-width: 0;
+    align-items: flex-end;
+    gap: 4px;
+  }
+
+  .objective-pill {
+    font-size: 11.5px;
+    padding: 3px 10px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .boss-bar,
+  #app.mobile-mode .boss-bar {
+    padding: 4px 8px 5px;
+  }
+
+  .boss-bar-head {
+    gap: 4px;
+    margin-bottom: 3px;
+  }
+
+  .boss-name,
+  #app.mobile-mode .boss-name {
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+  }
+
+  .boss-inspect-btn {
+    padding: 1px 6px;
+    font-size: 9.5px;
+  }
+
+  /* Open-World Top Bar on 390px Portrait: Ultra-Clean <=2 Rows */
+  .world-top-bar {
+    top: max(6px, env(safe-area-inset-top));
+    left: 6px;
+    right: 6px;
+    padding: 5px 7px;
+    gap: 4px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .world-top-info {
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+
+  .world-region-badge {
+    font-size: 11.5px;
+    letter-spacing: 0.03em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .world-progress-pill {
+    font-size: 9.5px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+  }
+
+  .world-top-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 3px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .world-top-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .world-top-actions .util-btn {
+    padding: 4px 5px;
+    font-size: 10px;
+    letter-spacing: 0.01em;
+    min-height: 26px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  #app.world-mode .top-left-stack,
+  #app.world-mode .top-right-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 68px);
+  }
+
+  #app.world-mode .top-right-stack {
+    gap: 4px;
+  }
+
+  #app.world-mode .combo-box.visible {
+    position: fixed;
+    right: 8px;
+    top: calc(max(6px, env(safe-area-inset-top)) + 238px);
+    z-index: 25;
+  }
+
+  .world-tp-drawer {
+    top: calc(max(6px, env(safe-area-inset-top)) + 70px);
+    right: 6px;
+    width: min(240px, calc(100vw - 12px));
+  }
+
+  .world-guide-card {
+    top: calc(max(6px, env(safe-area-inset-top)) + 102px);
+    right: 8px;
+    width: 184px;
+    padding: 6px 8px;
+    border-radius: 10px;
+  }
+
+  .world-guide-card.collapsed {
+    width: auto;
+    padding: 5px 8px;
+  }
+
+  .world-guide-badge {
+    font-size: 11.5px;
+  }
+
+  .world-guide-goal {
+    font-size: 11px;
+  }
+
+  .world-guide-dir {
+    font-size: 10px;
+  }
+
+  .world-guide-howto {
+    display: none;
+  }
+
+  .world-guide-actions .util-btn {
+    padding: 4px 5px;
+    font-size: 10.5px;
+    min-height: 26px;
+  }
+
+  /* Camp Top Bar Portrait */
+  .camp-top-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .camp-top-actions .util-btn {
+    padding: 4px 6px;
+    font-size: 10.5px;
+  }
+
+  /* Non-Overlapping Portrait Touch Controls (390px wide: stick 8..144, actions 156..382 -> 12px clear gap!) */
+  #touch-stick-zone {
+    left: max(8px, env(safe-area-inset-left));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: 136px;
+    height: 144px;
+  }
+
+  #touch-stick {
+    width: 106px;
+    height: 106px;
+  }
+
+  #touch-knob {
+    width: 44px;
+    height: 44px;
+  }
+
+  .touch-actions {
+    right: max(8px, env(safe-area-inset-right));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: 226px;
+    height: 220px;
+  }
+
+  .t-atk {
+    width: 76px;
+    height: 76px;
+    right: 6px;
+    bottom: 12px;
+  }
+
+  .t-skill {
+    width: 52px;
+    height: 52px;
+  }
+
+  .t-ult {
+    width: 56px;
+    height: 56px;
+  }
+
+  .t-mid {
+    width: 46px;
+    height: 46px;
+  }
+
+  .t-util {
+    width: 44px;
+    height: 44px;
+  }
+
+  #btn-skill-q {
+    right: 94px;
+    bottom: 14px;
+  }
+
+  #btn-dodge {
+    right: 162px;
+    bottom: 20px;
+  }
+
+  #btn-skill-e {
+    right: 88px;
+    bottom: 84px;
+  }
+
+  #btn-block {
+    right: 154px;
+    bottom: 88px;
+  }
+
+  #btn-skill-r {
+    right: 16px;
+    bottom: 108px;
+  }
+
+  #btn-heal {
+    right: 92px;
+    bottom: 156px;
+  }
+
+  .t-lbl {
+    font-size: 10px;
+    bottom: -10px;
+  }
+
+  /* Mount Bar strictly above joystick with 16px clearance */
+  .mount-bar,
+  #app.mobile-mode .mount-bar,
+  #app.force-wheel .mount-bar,
+  #app.world-mode .mount-bar {
+    left: max(8px, env(safe-area-inset-left));
+    right: auto;
+    top: auto;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 162px);
+    transform: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+  }
+
+  /* Combo Sigil Bar strictly above touch-actions with 16px clearance */
+  .combo-sigil-bar,
+  #app.mobile-mode .combo-sigil-bar,
+  #app.force-wheel .combo-sigil-bar {
+    left: auto;
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 236px);
+    transform: none;
+    padding: 3px 6px;
+    gap: 5px;
+  }
+
+  /* Guaranteed Collision-Free Notification Positions on MobilePortrait (390x844) */
+  #mobile-notify-pill {
+    top: calc(max(8px, env(safe-area-inset-top)) + 216px);
+    max-width: calc(100vw - 20px);
+    font-size: 11.5px;
+    padding: 5px 12px;
+  }
+
+  #app.world-mode #mobile-notify-pill {
+    top: calc(max(6px, env(safe-area-inset-top)) + 294px);
+  }
+
+  #stage-banner {
+    top: calc(max(8px, env(safe-area-inset-top)) + 260px);
+    padding: 6px 18px;
+  }
+
+  #subtitle-banner,
+  #app.mobile-mode #subtitle-banner {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 292px);
+    font-size: 12px;
+    padding: 5px 12px;
+    max-width: calc(100vw - 20px);
+  }
+
+  #app.mobile-mode .camp-interact-btn,
+  .world-interact-btn {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 280px);
+    padding: 6px 14px;
+    font-size: 12.5px;
+  }
+}
+
+/* ===== Mobile Landscape (844x390 and short horizontal phone screens) ===== */
+@media (max-height: 520px) and (orientation: landscape) {
+  .title-cta-row {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  #btn-start {
+    grid-column: 1 / -1;
+    padding: 7px 10px;
+    font-size: 13.5px;
+    min-height: 34px;
+  }
+
+  #btn-open-world,
+  #btn-open-camp,
+  #btn-open-dungeon,
+  #btn-open-campaign,
+  #btn-open-shop,
+  #btn-open-roster {
+    grid-column: span 2;
+    padding: 6px 4px;
+    font-size: 11.5px;
+    letter-spacing: 0.03em;
+  }
+
+  /* ALWAYS LEFT-RIGHT Split Shop on Landscape: Left 44% Live 3D Hero + Top Strip, Right 56% 2-Col Shop */
+  #shop-overlay {
+    padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  #shop-overlay.preview-active {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 8px;
+    background: linear-gradient(90deg, rgba(4, 9, 16, 0.03) 0%, rgba(4, 9, 16, 0.14) 41%, rgba(4, 9, 16, 0.86) 48%, rgba(4, 9, 16, 0.95) 100%);
+  }
+
+  #shop-overlay.preview-active .shop-preview-stage {
+    flex: 0 0 calc(44% - 4px);
+    width: calc(44% - 4px);
+    height: 100%;
+    padding: 0;
+    gap: 3px;
+    align-items: stretch;
+  }
+
+  #shop-overlay.preview-active .shop-equipped-slots {
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .eq-slot-badge {
+    padding: 3px 5px;
+    min-height: 28px;
+    border-radius: 7px;
+    gap: 3px;
+  }
+
+  #shop-overlay.preview-active .eq-slot-cat {
+    display: none;
+  }
+
+  #shop-overlay.preview-active .eq-slot-name {
+    font-size: 10px;
+  }
+
+  #shop-overlay.preview-active .preview-drag-hint {
+    display: none;
+  }
+
+  #shop-overlay.preview-active .shop-preview-hud {
+    width: 100%;
+    padding: 5px 8px;
+    border-radius: 10px;
+    gap: 3px;
+  }
+
+  #shop-overlay.preview-active .preview-name {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active .preview-sub {
+    display: none;
+  }
+
+  #shop-overlay.preview-active .preview-stats {
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active .preview-actions {
+    flex-wrap: nowrap;
+    gap: 4px;
+    margin-top: 1px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #shop-overlay.preview-active .preview-actions .util-btn {
+    padding: 3px 5px;
+    font-size: 10px;
+    min-height: 28px;
+    min-width: 0;
+    flex: 0 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active .preview-actions .preview-buy-btn {
+    padding: 3px 8px;
+    font-size: 10.5px;
+    min-height: 28px;
+    min-width: 0;
+    flex: 1 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active .shop-modal {
+    flex: 1 1 calc(56% - 4px);
+    width: calc(56% - 4px);
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    padding: 7px 10px;
+    gap: 5px;
+    border-radius: 14px;
+  }
+
+  #shop-overlay.preview-active .shop-head-left {
+    min-width: 0;
+    flex: 1;
+    gap: 5px;
+  }
+
+  #shop-overlay.preview-active .shop-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #shop-overlay.preview-active .shop-card {
+    min-width: 0;
+  }
+
+  #shop-overlay.preview-active .shop-card-actions {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .shop-act-btn {
+    padding: 4px 5px;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  #shop-overlay.preview-active .shop-tabs {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active .shop-tab {
+    padding: 4px 3px;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  #shop-overlay.preview-active .shop-tab strong {
+    font-size: 11px;
+  }
+
+  #shop-overlay.preview-active .shop-tab span {
+    display: none;
+  }
+
+  #shop-overlay.preview-active .shop-tab.bag-tab span {
+    display: inline;
+    font-size: 9px;
+  }
+
+  #shop-overlay.preview-active .shop-footer {
+    flex-wrap: nowrap;
+    padding-top: 5px;
+    gap: 6px;
+  }
+
+  #shop-overlay.preview-active .shop-power-summary {
+    font-size: 10.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #shop-overlay.preview-active #btn-shop-battle {
+    min-width: 0;
+    padding: 5px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* Pause Modal 7-Button Symmetrical 4-Col Grid on Landscape */
+  .pause-modal-card {
+    padding: 7px 12px 8px;
+  }
+
+  .pause-modal-card .modal-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .pause-modal-card #btn-resume {
+    grid-column: span 2;
+    min-height: 40px;
+  }
+
+  .pause-modal-card .modal-actions .xianxia-btn {
+    min-width: 0;
+    padding: 6px 6px;
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    min-height: 38px;
+  }
+
+  /* Zero-Collision MobileLandscape HUD (844x390) */
+  .top-left-stack,
+  #app.mobile-mode .top-left-stack {
+    left: max(8px, env(safe-area-inset-left));
+    top: max(6px, env(safe-area-inset-top));
+    gap: 2px;
+  }
+
+  .hero-cluster,
+  #app.mobile-mode .hero-cluster {
+    width: 158px;
+    padding: 3px 6px;
+    gap: 1.5px;
+  }
+
+  .hero-cluster .hero-nameplate {
+    gap: 5px;
+    margin-bottom: 0;
+  }
+
+  .hero-cluster .hero-seal,
+  #app.mobile-mode .hero-cluster .hero-seal {
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+  }
+
+  .hero-cluster .bar-track {
+    height: 11px;
+  }
+
+  .hero-cluster .bar-row.compact .bar-track {
+    height: 6px;
+  }
+
+  .minimap-box,
+  #app.mobile-mode .minimap-box {
+    width: 82px;
+    padding: 2px 5px 3px;
+    gap: 2px;
+  }
+
+  #minimap-canvas,
+  #app.mobile-mode #minimap-canvas {
+    width: 68px;
+    height: 44px;
+  }
+
+  .minimap-expand-hint {
+    font-size: 8.5px;
+    padding: 1px 2px;
+  }
+
+  .top-center-stack,
+  #app.mobile-mode .top-center-stack {
+    top: max(6px, env(safe-area-inset-top));
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(296px, 36vw);
+    align-items: center;
+    gap: 3px;
+  }
+
+  .boss-bar-head {
+    gap: 5px;
+    margin-bottom: 2px;
+  }
+
+  .boss-name,
+  #app.mobile-mode .boss-name {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+
+  .boss-inspect-btn {
+    padding: 1px 6px;
+    font-size: 9.5px;
+  }
+
+  .top-right-stack,
+  #app.mobile-mode .top-right-stack {
+    top: max(6px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    gap: 6px;
+  }
+
+  .util-row {
+    gap: 4px;
+  }
+
+  .util-row .util-btn {
+    padding: 3px 8px;
+    font-size: 11px;
+    min-height: 26px;
+  }
+
+  /* Compact Landscape Touch Controls (Zero Collision with Minimap & Combo Sigil Bar!) */
+  #touch-stick-zone {
+    left: max(10px, env(safe-area-inset-left));
+    bottom: max(6px, env(safe-area-inset-bottom));
+    width: 146px;
+    height: 136px;
+  }
+
+  #touch-stick {
+    width: 106px;
+    height: 106px;
+  }
+
+  #touch-knob {
+    width: 44px;
+    height: 44px;
+  }
+
+  .touch-actions {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: 244px;
+    height: 204px;
+  }
+
+  .t-atk {
+    width: 76px;
+    height: 76px;
+    right: 8px;
+    bottom: 10px;
+  }
+
+  .t-skill {
+    width: 50px;
+    height: 50px;
+  }
+
+  .t-ult {
+    width: 56px;
+    height: 56px;
+  }
+
+  .t-mid {
+    width: 44px;
+    height: 44px;
+  }
+
+  .t-util {
+    width: 42px;
+    height: 42px;
+  }
+
+  #btn-skill-q {
+    right: 98px;
+    bottom: 12px;
+  }
+
+  #btn-dodge {
+    right: 164px;
+    bottom: 16px;
+  }
+
+  #btn-skill-e {
+    right: 92px;
+    bottom: 78px;
+  }
+
+  #btn-block {
+    right: 158px;
+    bottom: 80px;
+  }
+
+  #btn-skill-r {
+    right: 18px;
+    bottom: 100px;
+  }
+
+  #btn-heal {
+    right: 96px;
+    bottom: 146px;
+  }
+
+  .t-lbl {
+    font-size: 10px;
+    bottom: -10px;
+  }
+
+  /* Combo Sigil Bar cleanly above Landscape touch-actions (204 + 12 = 216px -> 12px gap!) */
+  .combo-sigil-bar,
+  #app.mobile-mode .combo-sigil-bar,
+  #app.force-wheel .combo-sigil-bar {
+    left: auto;
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 216px);
+    transform: none;
+    padding: 3px 6px;
+    gap: 5px;
+  }
+
+  /* Open-World Top Bar Landscape: Crisp Single Row */
+  .world-top-bar {
+    top: max(6px, env(safe-area-inset-top));
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    padding: 4px 8px;
+    gap: 6px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+
+  .world-top-actions {
+    width: auto;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .world-top-actions .util-btn {
+    padding: 3px 7px;
+    font-size: 10.5px;
+    min-height: 26px;
+    white-space: nowrap;
+  }
+
+  #app.world-mode .top-left-stack,
+  #app.world-mode .top-right-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 42px);
+  }
+
+  /* Landscape World Guide Card placed next to Hero Cluster so it NEVER collides with top-right or combo-sigil-bar! */
+  .world-guide-card {
+    top: calc(max(6px, env(safe-area-inset-top)) + 42px);
+    left: calc(max(8px, env(safe-area-inset-left)) + 174px);
+    right: auto;
+    width: 196px;
+    padding: 5px 8px;
+  }
+
+  .world-guide-card.collapsed {
+    width: auto;
+  }
+
+  .world-tp-drawer {
+    top: calc(max(6px, env(safe-area-inset-top)) + 44px);
+    right: max(8px, env(safe-area-inset-right));
+    width: 224px;
+  }
+
+  /* Guaranteed Collision-Free Notification Pill on MobileLandscape (844x390) */
+  #mobile-notify-pill {
+    top: calc(max(6px, env(safe-area-inset-top)) + 68px);
+    left: 50%;
+    transform: translate(-50%, -10px);
+    max-width: min(320px, 38vw);
+    padding: 4px 12px;
+    font-size: 11px;
+  }
+
+  #mobile-notify-pill.visible {
+    transform: translate(-50%, 0);
+  }
+
+  #app.world-mode #mobile-notify-pill {
+    top: calc(max(6px, env(safe-area-inset-top)) + 42px);
+    left: 63%;
+    max-width: min(244px, 30vw);
+  }
+
+  #stage-banner {
+    top: calc(max(6px, env(safe-area-inset-top)) + 106px);
+    max-width: min(300px, 36vw);
+    padding: 5px 16px;
+  }
+
+  #subtitle-banner,
+  #app.mobile-mode #subtitle-banner {
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 44px);
+    max-width: min(300px, 35vw);
+    font-size: 11.5px;
+    padding: 4px 10px;
+  }
+
+  .camp-top-actions .util-btn {
+    padding: 3px 7px;
+    font-size: 10.5px;
   }
 }

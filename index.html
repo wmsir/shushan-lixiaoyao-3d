@@ -23,12 +23,18 @@
       <!-- Literary Dialogue / Event Subtitle Banner -->
       <div id="subtitle-banner" role="status" aria-live="polite"></div>
 
+      <!-- Unified Mobile Top Safe-Area Notification Pill -->
+      <div id="mobile-notify-pill" class="mobile-notify-pill" role="status" aria-live="polite">
+        <span id="mobile-notify-icon" class="mobile-notify-icon" aria-hidden="true">✦</span>
+        <span id="mobile-notify-text" class="mobile-notify-text"></span>
+      </div>
+
       <!-- Title Overlay over Live 3D Moonlit Shushan Courtyard -->
       <section id="title-overlay" class="overlay visible">
         <div class="title-card">
           <div class="title-kicker">
             <span>SHUSHAN DEMON-LOCK COURT · 25 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.64</span>
+            <span id="app-version-badge" class="version-pill">v1.65</span>
           </div>
           <div class="title-heading-wrap">
             <h1 class="game-title">仙剑 · 锁妖剑台</h1>
@@ -61,6 +67,7 @@
             </button>
             <button id="btn-open-campaign" class="xianxia-btn map-btn" type="button">二十五关 · 剑录</button>
             <button id="btn-open-shop" class="xianxia-btn shop-btn" type="button">藏宝阁 · 装备皮肤</button>
+            <button id="btn-open-roster" class="xianxia-btn roster-btn" type="button">群英人物志</button>
           </div>
 
           <!-- 2-Player Online Multiplayer Lobby -->
@@ -164,13 +171,42 @@
       <!-- Xianxia Equipment & 3D Skin Shop Overlay (蜀山藏宝阁) -->
       <section id="shop-overlay" class="overlay">
         <div id="shop-preview-stage" class="shop-preview-stage" aria-label="人物 3D 试穿预览区（拖动旋转）">
+          <!-- Top-Left Equipped Gear Overview Slots -->
+          <div id="shop-equipped-slots" class="shop-equipped-slots" aria-label="已穿戴装备总览">
+            <button id="eq-slot-weapon" class="eq-slot-badge rarity-common" type="button" data-slot-cat="weapon">
+              <span class="eq-slot-dot" aria-hidden="true"></span>
+              <span class="eq-slot-cat">仙剑</span>
+              <span class="eq-slot-name">青霜木剑</span>
+            </button>
+            <button id="eq-slot-armor" class="eq-slot-badge rarity-common" type="button" data-slot-cat="armor">
+              <span class="eq-slot-dot" aria-hidden="true"></span>
+              <span class="eq-slot-cat">玄甲</span>
+              <span class="eq-slot-name">青布侠衫</span>
+            </button>
+            <button id="eq-slot-relic" class="eq-slot-badge rarity-common" type="button" data-slot-cat="relic">
+              <span class="eq-slot-dot" aria-hidden="true"></span>
+              <span class="eq-slot-cat">灵宝</span>
+              <span class="eq-slot-name">凡玉平安扣</span>
+            </button>
+            <button id="eq-slot-skin" class="eq-slot-badge rarity-common" type="button" data-slot-cat="skin">
+              <span class="eq-slot-dot" aria-hidden="true"></span>
+              <span class="eq-slot-cat">外观</span>
+              <span class="eq-slot-name">青衫游侠</span>
+            </button>
+          </div>
+          <!-- Transparent Center 3D Live Character Window -->
+          <div class="shop-preview-viewport" aria-hidden="true">
+            <span class="preview-drag-hint">⟲ 拖动 360° 观赏</span>
+          </div>
+          <!-- Compact Bottom Preview Controls & Stat Diff HUD -->
           <div id="shop-preview-hud" class="shop-preview-hud">
             <div id="shop-preview-name" class="preview-name">3D 实时试穿 · 青衫游侠</div>
-            <div id="shop-preview-sub" class="preview-sub">左键或触屏左右拖动人物，可 360° 观赏外观与神兵光效</div>
+            <div id="shop-preview-sub" class="preview-sub">拖动人物可 360° 观赏外观、神兵与玄甲灵宝光效</div>
+            <div id="shop-preview-stats" class="preview-stats">气血+0 · 剑伤+0% · 暴击8%</div>
             <div class="preview-actions">
-              <button id="btn-preview-rot-l" class="util-btn" type="button" title="向左旋转">⟲</button>
+              <button id="btn-preview-rot-l" class="util-btn" type="button" title="向左旋转" aria-label="向左旋转">⟲</button>
               <button id="btn-preview-spin" class="util-btn" type="button">自动旋转: 开</button>
-              <button id="btn-preview-rot-r" class="util-btn" type="button" title="向右旋转">↻</button>
+              <button id="btn-preview-rot-r" class="util-btn" type="button" title="向右旋转" aria-label="向右旋转">↻</button>
               <button id="btn-preview-reset" class="util-btn" type="button">恢复已穿</button>
               <button id="btn-preview-action" class="xianxia-btn primary preview-buy-btn" type="button">已穿戴</button>
             </div>
@@ -306,13 +342,14 @@
             </div>
           </div>
 
-          <!-- Top-Left Below Hero Cluster: Live Corridor Minimap -->
-          <div id="minimap-box" class="minimap-box" aria-hidden="true">
+          <!-- Top-Left Below Hero Cluster: Live Interactive Minimap (Tap to Open Ancient Scroll Map) -->
+          <div id="minimap-box" class="minimap-box" role="button" tabindex="0" aria-label="展开中国古代九州舆图">
             <div class="minimap-head">
               <span id="minimap-zone-name">云溪山门</span>
               <span id="minimap-pct">0%</span>
             </div>
             <canvas id="minimap-canvas" width="110" height="176"></canvas>
+            <span id="minimap-expand-hint" class="minimap-expand-hint">点击展开舆图</span>
           </div>
         </div>
 
@@ -320,7 +357,10 @@
         <div class="top-center-stack">
           <div id="objective-text" class="objective-pill">第 1 关 剑启山门 · 剩余 3</div>
           <div id="boss-bar" class="boss-bar">
-            <div id="boss-name" class="boss-name">九幽剑煞 · 镇狱妖王</div>
+            <div class="boss-bar-head">
+              <div id="boss-name" class="boss-name">九幽剑煞 · 镇狱妖王</div>
+              <button id="btn-boss-inspect" class="boss-inspect-btn" type="button" aria-label="查看当前首领物理属性">查看属性</button>
+            </div>
             <div class="boss-hp-track">
               <div id="boss-hp-fill" class="boss-hp-fill"></div>
             </div>
@@ -342,6 +382,8 @@
           <div class="util-row">
             <button id="btn-lol-toggle" class="util-btn active-mode desktop-only" type="button" title="切换英雄联盟式右键移动 / 经典右键弹反">联盟鼠标</button>
             <button id="btn-wheel-toggle" class="util-btn desktop-only" type="button" title="切换手游王者轮盘 / 键鼠栏">轮盘</button>
+            <button id="btn-hud-map" class="util-btn hud-map-btn" type="button" title="展开中国古代九州舆图">舆图</button>
+            <button id="btn-hud-roster" class="util-btn hud-roster-btn" type="button" title="查看角色物理属性与人物志">人物</button>
             <button id="btn-mute" class="util-btn" type="button">音律</button>
             <button id="btn-pause" class="util-btn" type="button">暂停</button>
           </div>
@@ -423,8 +465,10 @@
             <span id="world-toast" class="shop-toast world-toast" role="status" aria-live="polite"></span>
           </div>
           <div class="world-top-actions">
-            <button id="btn-world-tp" class="util-btn world-tp-toggle" type="button">锚点传送</button>
-            <button id="btn-world-respawn" class="util-btn" type="button">重召首领</button>
+            <button id="btn-world-map" class="util-btn world-map-btn" type="button">九州舆图</button>
+            <button id="btn-world-roster" class="util-btn world-roster-btn" type="button">群英属性</button>
+            <button id="btn-world-tp" class="util-btn world-tp-toggle" type="button">传送</button>
+            <button id="btn-world-respawn" class="util-btn" type="button">重召</button>
             <button id="btn-world-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
             <button id="btn-world-camp" class="util-btn" type="button">剑庐</button>
             <button id="btn-world-title" class="util-btn" type="button">大厅</button>
@@ -441,8 +485,8 @@
           </div>
           <div id="world-guide-body" class="world-guide-body">
             <div id="world-guide-goal" class="world-guide-goal">点亮锚点 · 桃源仙驿锚点</div>
-            <div id="world-guide-dir" class="world-guide-dir">↗ 东北方向 · 约 30 米 · V骑马 / B御剑</div>
-            <div id="world-guide-howto" class="world-guide-howto">玩法：点亮4锚点开传送 · 开6宝箱/御剑采6灵瞳永久加血 · 斩4首领与宝妖爆神兵</div>
+            <div id="world-guide-dir" class="world-guide-dir">↗ 东北方向 · 约 30 米</div>
+            <div id="world-guide-howto" class="world-guide-howto">点亮九州锚点开传送 · 开宝箱采灵瞳永久加血 · 斩首领爆神兵</div>
             <div class="world-guide-actions">
               <button id="btn-world-next-goal" class="util-btn" type="button">换个目标</button>
               <button id="btn-world-auto-nav" class="util-btn world-autonav-btn" type="button">自动寻路</button>
@@ -466,8 +510,10 @@
             <span id="camp-toast" class="shop-toast camp-toast" role="status" aria-live="polite"></span>
           </div>
           <div class="camp-top-actions">
+            <button id="btn-camp-map" class="util-btn world-map-btn" type="button">舆图</button>
+            <button id="btn-camp-roster" class="util-btn world-roster-btn" type="button">人物</button>
             <button id="btn-camp-title" class="util-btn" type="button">大厅</button>
-            <button id="btn-camp-world" class="util-btn camp-shop-btn" type="button">漫游九州</button>
+            <button id="btn-camp-world" class="util-btn camp-shop-btn" type="button">九州</button>
             <button id="btn-camp-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
             <button id="btn-camp-depart" class="xianxia-btn primary camp-depart-btn" type="button">启程 · 第 1 集</button>
           </div>
@@ -555,12 +601,14 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.64</span>
+            <span id="pause-version-badge" class="version-pill">v1.65</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
           <div class="modal-actions">
             <button id="btn-resume" class="xianxia-btn primary" type="button">继续试剑</button>
+            <button id="btn-pause-map-scroll" class="xianxia-btn map-btn" type="button">九州舆图</button>
+            <button id="btn-pause-roster" class="xianxia-btn roster-btn" type="button">人物属性</button>
             <button id="btn-pause-shop" class="xianxia-btn shop-btn" type="button">藏宝阁</button>
             <button id="btn-restart-pause" class="xianxia-btn" type="button">重开本关</button>
             <button id="btn-pause-map" class="xianxia-btn" type="button">选关剑录</button>

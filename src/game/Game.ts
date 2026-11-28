@@ -60,6 +60,7 @@ import {
   type RolledGearItem,
   RARITY_LABELS,
   SHOP_ITEM_MAP,
+  computeCombatPower,
   getEquippedSkinVisual,
   getEquippedWeaponVisual,
   rollEquipmentDrop,
@@ -85,11 +86,17 @@ import {
 } from '../net/MultiplayerClient';
 import { angleDiff, clamp, damp, dampAngle } from '../utils/math';
 import { createSeededRandom } from '../utils/random';
-import { CharacterRig, type PoseName } from '../entities/CharacterRig';
+import {
+  CharacterRig,
+  type HeroArmorVisual,
+  type HeroRelicVisual,
+  type PoseName,
+} from '../entities/CharacterRig';
 import { MountRig, type MountMode } from '../entities/MountRig';
 import {
   getWorldRegionAt,
   WORLD_BOSS_SPAWNS,
+  WORLD_BOUND,
   WORLD_CHESTS,
   WORLD_MOB_CAMPS,
   WORLD_SPAWN_POS,
@@ -98,6 +105,17 @@ import {
   type WorldBossDef,
   type WorldMobCampDef,
 } from './OpenWorldData';
+import {
+  AncientMapOverlay,
+  type AncientMapBossLive,
+  type AncientMapNpcPin,
+  type AncientMapSnapshot,
+} from '../ui/AncientMapOverlay';
+import {
+  CharacterRosterOverlay,
+  type RosterLiveSnapshot,
+} from '../ui/CharacterRosterOverlay';
+import { resolveCharacterProfileId } from './CharacterRosterData';
 import {
   CAMP_MEDITATION_QUOTES,
   CAMP_TEA_QUOTES,
@@ -161,6 +179,8 @@ export class Game {
   private readonly audio: AudioEngine;
   private readonly cameraRig: CameraRig;
   private readonly hud: HudController;
+  private readonly ancientMap: AncientMapOverlay;
+  private readonly rosterOverlay: CharacterRosterOverlay;
   private readonly arena: ShushanArena;
   private readonly vfx = new VfxSystem();
   private readonly mp: MultiplayerClient;
@@ -224,6 +244,7 @@ export class Game {
   private readonly worldGuideArrow = new THREE.Group();
   private worldGuideCategory: 'auto' | 'waypoint' | 'chest' | 'orb' | 'boss' = 'auto';
   private worldAutoNav = false;
+  private worldCustomNavTarget: { x: number; z: number; label: string } | null = null;
   private worldInCombat = false;
   private worldCombatCooldown = 0;
   private worldAutoNavPausedByCombat = false;
@@ -232,6 +253,8 @@ export class Game {
   private shopPreviewActive = false;
   private shopPreviewSkinId: string | null = null;
   private shopPreviewWeaponId: string | null = null;
+  private shopPreviewArmorId: string | null = null;
+  private shopPreviewRelicId: string | null = null;
   private shopPreviewYaw = 0;
   private shopPreviewAutoSpin = true;
 
@@ -716,8 +739,14 @@ export class Game {
         this.audio.playDialogueStep(false);
         this.hud.showStageDialogue(replayDef);
       },
-      onShopPreview: (active: boolean, skinId?: string | null, weaponId?: string | null) => {
-        this.setShopPreview(active, skinId ?? null, weaponId ?? null);
+      onShopPreview: (
+        active: boolean,
+        skinId?: string | null,
+        weaponId?: string | null,
+        armorId?: string | null,
+        relicId?: string | null,
+      ) => {
+        this.setShopPreview(active, skinId ?? null, weaponId ?? null, armorId ?? null, relicId ?? null);
       },
       onShopPreviewRotate: (deltaYaw: number) => {
         this.shopPreviewAutoSpin = false;
@@ -726,6 +755,48 @@ export class Game {
       onShopPreviewToggleSpin: () => {
         this.shopPreviewAutoSpin = !this.shopPreviewAutoSpin;
         return this.shopPreviewAutoSpin;
+      },
+      onOpenAncientMap: () => {
+        this.openAncientMapOverlay();
+      },
+      onOpenRoster: (focusCharId?: string) => {
+        this.openRosterOverlay(focusCharId);
+      },
+    });
+
+    const appMount = document.querySelector<HTMLElement>('#app') ?? document.body;
+    this.ancientMap = new AncientMapOverlay(appMount, {
+      onTeleport: (wpId: string) => {
+        if (this.mode !== 'world') {
+          this.enterOpenWorldMode();
+        }
+        const ok = this.teleportToWorldWaypoint(wpId);
+        if (ok) {
+          this.worldCustomNavTarget = null;
+          this.ancientMap.close();
+        }
+        return ok;
+      },
+      onNavigateTo: (x: number, z: number, label: string) => {
+        this.startWorldCustomNavigation(x, z, label);
+      },
+      onInspectCharacter: (charId: string) => {
+        this.ancientMap.close();
+        this.openRosterOverlay(charId);
+      },
+    });
+
+    this.rosterOverlay = new CharacterRosterOverlay(appMount, {
+      onLocateOnMap: (charId: string, x: number, z: number, label: string) => {
+        this.rosterOverlay.close();
+        if (charId === 'npc_wine_master' || charId === 'npc_xuanying') {
+          if (this.mode !== 'camp') {
+            this.enterCampMode();
+          }
+          this.openAncientMapOverlay();
+          return;
+        }
+        this.startWorldCustomNavigation(x, z, label);
       },
     });
 
@@ -803,6 +874,8 @@ export class Game {
     cancelAnimationFrame(this.rafId);
     window.removeEventListener('keydown', this.onGlobalKey);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
+    this.ancientMap.close();
+    this.rosterOverlay.destroy();
     this.mp.dispose();
     this.input.dispose();
     this.audio.dispose();
@@ -814,9 +887,12 @@ export class Game {
   }
 
   private onGlobalKey = (e: KeyboardEvent): void => {
-    if (e.code === 'Escape' && (this.mode === 'playing' || this.mode === 'paused')) {
-      e.preventDefault();
-      this.togglePause();
+    if (e.code === 'Escape') {
+      if (this.ancientMap.isOpen() || this.rosterOverlay.isOpen()) return;
+      if (this.mode === 'playing' || this.mode === 'paused') {
+        e.preventDefault();
+        this.togglePause();
+      }
     }
   };
 
@@ -900,20 +976,75 @@ export class Game {
     return this.saveStore.getLoadoutStats();
   }
 
+  private resolveArmorVisual(armorId: string): HeroArmorVisual {
+    const rolled = this.saveStore.getInventory().find((x) => x.uid === armorId);
+    const tplId = rolled ? rolled.templateId : armorId;
+    const item = SHOP_ITEM_MAP[tplId];
+    const rarity: EquipRarity = rolled?.rarity ?? item?.rarity ?? 'common';
+    const tintByTemplate: Record<string, string> = {
+      arm_xuanlin: '#5ce0ec',
+      arm_yunjin: '#e6b850',
+      arm_xuanwu: '#ffd864',
+    };
+    const tintByRarity: Record<EquipRarity, string | undefined> = {
+      common: undefined,
+      rare: '#5ce0ec',
+      epic: '#e6b850',
+      legendary: '#ffd864',
+    };
+    return {
+      rarity,
+      tintHex: tintByTemplate[tplId] ?? tintByRarity[rarity],
+    };
+  }
+
+  private resolveRelicVisual(relicId: string): HeroRelicVisual {
+    const rolled = this.saveStore.getInventory().find((x) => x.uid === relicId);
+    const tplId = rolled ? rolled.templateId : relicId;
+    const item = SHOP_ITEM_MAP[tplId];
+    const rarity: EquipRarity = rolled?.rarity ?? item?.rarity ?? 'common';
+    const auraByTemplate: Record<string, string> = {
+      rel_hulu: '#e8c474',
+      rel_yupei: '#4cf0d2',
+      rel_shihun: '#c872ff',
+      rel_bagua: '#ffe066',
+    };
+    const auraByRarity: Record<EquipRarity, string> = {
+      common: '#e8c474',
+      rare: '#4cf0d2',
+      epic: '#c872ff',
+      legendary: '#ffe066',
+    };
+    return {
+      rarity,
+      auraHex: auraByTemplate[tplId] ?? auraByRarity[rarity],
+    };
+  }
+
   private applyCurrentLoadoutVisuals(): void {
     const equipped = this.saveStore.getEquipped();
     this.hero.rig.applyHeroAppearance(
       getEquippedSkinVisual(equipped),
       getEquippedWeaponVisual(equipped, this.saveStore.getInventory()),
+      this.resolveArmorVisual(equipped.armor),
+      this.resolveRelicVisual(equipped.relic),
     );
   }
 
-  private setShopPreview(active: boolean, skinId: string | null = null, weaponId: string | null = null): void {
+  private setShopPreview(
+    active: boolean,
+    skinId: string | null = null,
+    weaponId: string | null = null,
+    armorId: string | null = null,
+    relicId: string | null = null,
+  ): void {
     if (!active) {
       if (!this.shopPreviewActive) return;
       this.shopPreviewActive = false;
       this.shopPreviewSkinId = null;
       this.shopPreviewWeaponId = null;
+      this.shopPreviewArmorId = null;
+      this.shopPreviewRelicId = null;
       this.applyCurrentLoadoutVisuals();
       this.hero.rig.setWeaponDrawn(
         this.mode === 'playing' || this.mode === 'camp' || this.mode === 'showcase' || this.mountMode === 'horse',
@@ -934,12 +1065,276 @@ export class Game {
     }
     this.shopPreviewSkinId = skinId ?? equipped.skin;
     this.shopPreviewWeaponId = weaponId ?? equipped.weapon;
+    this.shopPreviewArmorId = armorId ?? equipped.armor;
+    this.shopPreviewRelicId = relicId ?? equipped.relic;
+
+    const inv = this.saveStore.getInventory();
     const skinVis = SHOP_ITEM_MAP[this.shopPreviewSkinId]?.skinVisual ?? getEquippedSkinVisual(equipped);
     const wpnVis =
       SHOP_ITEM_MAP[this.shopPreviewWeaponId]?.weaponVisual ??
-      getEquippedWeaponVisual({ ...equipped, weapon: this.shopPreviewWeaponId }, this.saveStore.getInventory());
-    this.hero.rig.applyHeroAppearance(skinVis, wpnVis);
+      getEquippedWeaponVisual({ ...equipped, weapon: this.shopPreviewWeaponId }, inv);
+    const armorVis = this.resolveArmorVisual(this.shopPreviewArmorId);
+    const relicVis = this.resolveRelicVisual(this.shopPreviewRelicId);
+
+    this.hero.rig.applyHeroAppearance(skinVis, wpnVis, armorVis, relicVis);
     this.hero.rig.setWeaponDrawn(true);
+  }
+
+  private openAncientMapOverlay(): void {
+    if (this.rosterOverlay.isOpen()) this.rosterOverlay.close();
+    this.ancientMap.open(this.buildAncientMapSnapshot());
+  }
+
+  private openRosterOverlay(focusCharId?: string): void {
+    if (this.ancientMap.isOpen()) this.ancientMap.close();
+    const resolvedId =
+      focusCharId === '__active_boss__'
+        ? this.resolveActiveBossCharId()
+        : focusCharId
+          ? resolveCharacterProfileId(focusCharId)
+          : 'char_xiaoyao';
+    this.rosterOverlay.open(this.buildRosterSnapshot(), resolvedId);
+  }
+
+  private resolveActiveBossCharId(): string {
+    const boss = this.mode === 'world' ? this.findNearestBossInRange(34) : this.getActiveBoss();
+    if (!boss) return 'char_xiaoyao';
+    if (boss.worldBossId) return resolveCharacterProfileId(boss.worldBossId);
+    return resolveCharacterProfileId(boss.name);
+  }
+
+  private buildAncientMapSnapshot(): AncientMapSnapshot {
+    const mapMode: AncientMapSnapshot['hero']['mode'] =
+      this.mode === 'world'
+        ? 'world'
+        : this.mode === 'camp'
+          ? 'camp'
+          : this.mode === 'playing' || this.mode === 'paused' || this.mode === 'cutscene'
+            ? 'playing'
+            : 'title';
+
+    const curStage = this.getActiveStageDef();
+    const curZoneIdx = this.arena.getZoneIndexAtZ(this.hero.pos.z);
+    const zoneName = this.arena.getZoneName(curZoneIdx);
+    const regionName =
+      mapMode === 'world'
+        ? getWorldRegionAt(this.hero.pos.x, this.hero.pos.z).name
+        : mapMode === 'camp'
+          ? '云来剑庐 · 清修别院'
+          : mapMode === 'playing'
+            ? `${BIOME_LABELS[curStage.biome]} · ${zoneName}`
+            : '蜀山云台 · 九州枢纽';
+
+    const litWaypoints = new Set<string>(
+      WORLD_WAYPOINTS.filter((w) => this.saveStore.isWorldWaypointLit(w.id)).map((w) => w.id),
+    );
+    const openedChests = new Set<string>(
+      WORLD_CHESTS.filter((c) => this.saveStore.isWorldChestOpened(c.id)).map((c) => c.id),
+    );
+    const collectedOrbs = new Set<string>(
+      WORLD_SPIRIT_ORBS.filter((o) => this.saveStore.isWorldOrbCollected(o.id)).map((o) => o.id),
+    );
+
+    const bosses: AncientMapBossLive[] = [];
+    if (mapMode === 'playing') {
+      for (const e of this.enemies) {
+        if (e.aiState === 'dead' || e.isDummy) continue;
+        if (e.kind === 'boss' || e.kind === 'elite') {
+          bosses.push({
+            id: `stage_e_${e.id}`,
+            charId: e.kind === 'boss' ? resolveCharacterProfileId(e.name) : 'mob_elite',
+            name: e.name,
+            regionName: `${curStage.name} · ${zoneName}`,
+            x: e.pos.x,
+            z: e.pos.z,
+            alive: true,
+            hp: Math.ceil(e.hp),
+            maxHp: Math.ceil(e.maxHp),
+          });
+        }
+      }
+    } else {
+      for (const wb of WORLD_BOSS_SPAWNS) {
+        const live = this.enemies.find((e) => e.worldBossId === wb.id && e.aiState !== 'dead');
+        const remain = Math.ceil(this.worldBossTimers.get(wb.id) ?? 0);
+        const alive = mapMode === 'world' ? Boolean(live) : true;
+        bosses.push({
+          id: wb.id,
+          charId: wb.id,
+          name: wb.name,
+          regionName: wb.regionName,
+          x: live ? live.pos.x : wb.x,
+          z: live ? live.pos.z : wb.z,
+          alive,
+          hp: live ? Math.ceil(live.hp) : Math.round(ENEMY_BASE_STATS.boss.hp * wb.hpMult),
+          maxHp: live ? Math.ceil(live.maxHp) : Math.round(ENEMY_BASE_STATS.boss.hp * wb.hpMult),
+          respawnRemainSec: alive ? 0 : remain,
+        });
+      }
+      if (this.worldEventEnemyId !== null) {
+        const goblin = this.enemies.find((e) => e.id === this.worldEventEnemyId && e.aiState !== 'dead');
+        if (goblin) {
+          bosses.push({
+            id: 'event_goblin',
+            charId: 'event_goblin',
+            name: goblin.name,
+            regionName: getWorldRegionAt(goblin.pos.x, goblin.pos.z).name,
+            x: goblin.pos.x,
+            z: goblin.pos.z,
+            alive: true,
+            hp: Math.ceil(goblin.hp),
+            maxHp: Math.ceil(goblin.maxHp),
+          });
+        }
+      }
+    }
+
+    const npcs: AncientMapNpcPin[] = [];
+    if (mapMode === 'camp') {
+      if (this.campNpcWineMaster) {
+        npcs.push({
+          id: 'camp_npc_wine',
+          charId: 'npc_wine_master',
+          name: '酒剑仙 · 司徒钟',
+          title: '云来剑庐师尊',
+          x: this.campNpcWineMaster.pos.x,
+          z: this.campNpcWineMaster.pos.z,
+        });
+      }
+      if (this.campNpcXuanying) {
+        npcs.push({
+          id: 'camp_npc_xuanying',
+          charId: 'npc_xuanying',
+          name: '玄影师兄',
+          title: '蜀山外门首席',
+          x: this.campNpcXuanying.pos.x,
+          z: this.campNpcXuanying.pos.z,
+        });
+      }
+    }
+
+    const activeGuide = mapMode === 'world' ? this.resolveWorldGuideTarget() : null;
+    const activeTarget = this.worldCustomNavTarget
+      ? {
+          x: this.worldCustomNavTarget.x,
+          z: this.worldCustomNavTarget.z,
+          label: this.worldCustomNavTarget.label,
+        }
+      : activeGuide
+        ? { x: activeGuide.x, z: activeGuide.z, label: activeGuide.label }
+        : null;
+
+    return {
+      hero: {
+        x: this.hero.pos.x,
+        z: this.hero.pos.z,
+        yaw: this.hero.yaw,
+        regionName,
+        mode: mapMode,
+        stageId: this.currentStageId,
+        stageName: `第 ${curStage.episodeNum} 集 · ${curStage.name}`,
+        zoneName,
+        progressPct: this.arena.getProgressPct(this.hero.pos.z),
+      },
+      litWaypoints,
+      openedChests,
+      collectedOrbs,
+      bosses,
+      npcs,
+      activeTarget,
+    };
+  }
+
+  private buildRosterSnapshot(): RosterLiveSnapshot {
+    const loadout = this.getLoadoutStats();
+    const realm = getSwordRealm(this.saveStore.getTotalStars());
+    const cult = this.saveStore.getCultivationBonus();
+    const power = computeCombatPower(realm.hpBonus, realm.dmgMult, loadout);
+    const atk = Math.round(44 * this.getHeroDamageScale());
+    const speedMult =
+      loadout.speedMult *
+      this.blessings.speedMult *
+      (1 + this.activeMealBuff.speedBonus + this.episodeChoiceBuff.speedBonus);
+    const moveSpeed = Number((7.2 * speedMult).toFixed(2));
+    const poise = Math.round(100 * loadout.poiseMult);
+    const parryWindowMs = Math.round((0.26 + loadout.parryWindowBonus) * 1000);
+    const cdReducePct = Math.round(clamp((1 - this.getCdMult()) * 100, 0, 65));
+
+    const liveWorldBosses: Record<
+      string,
+      { alive: boolean; hp: number; maxHp: number; respawnRemainSec: number }
+    > = {};
+    for (const wb of WORLD_BOSS_SPAWNS) {
+      const live = this.enemies.find((e) => e.worldBossId === wb.id && e.aiState !== 'dead');
+      const fallbackMax = Math.round(ENEMY_BASE_STATS.boss.hp * wb.hpMult);
+      const alive = this.mode === 'world' ? Boolean(live) : true;
+      liveWorldBosses[wb.id] = {
+        alive,
+        hp: live ? Math.ceil(live.hp) : fallbackMax,
+        maxHp: live ? Math.ceil(live.maxHp) : fallbackMax,
+        respawnRemainSec: alive ? 0 : Math.ceil(this.worldBossTimers.get(wb.id) ?? 0),
+      };
+    }
+    if (this.worldEventEnemyId !== null) {
+      const goblin = this.enemies.find((e) => e.id === this.worldEventEnemyId && e.aiState !== 'dead');
+      if (goblin) {
+        liveWorldBosses.event_goblin = {
+          alive: true,
+          hp: Math.ceil(goblin.hp),
+          maxHp: Math.ceil(goblin.maxHp),
+          respawnRemainSec: 0,
+        };
+      }
+    }
+
+    const ultBonusTxt = cult.startUltBonus > 0 ? ` · 起手剑意+${cult.startUltBonus}` : '';
+    return {
+      hero: {
+        hp: Math.ceil(this.hero.hp),
+        maxHp: Math.ceil(this.hero.maxHp),
+        spirit: Math.round(this.hero.spirit),
+        maxSpirit: Math.round(this.hero.maxSpirit),
+        stamina: Math.round(this.hero.stamina),
+        maxStamina: Math.round(this.hero.maxStamina),
+        realmName: realm.title,
+        combatPower: power,
+        atk,
+        dmgReducePct: Math.round(loadout.dmgReduce * 100),
+        critRatePct: Math.round(loadout.critRate * 100),
+        critDmgPct: Math.round(loadout.critMult * 100),
+        moveSpeed,
+        poise,
+        parryWindowMs,
+        parryReflectPct: Math.round(loadout.parryReflectBonus * 100),
+        lifestealPct: Math.round(loadout.lifesteal * 100),
+        cdReducePct,
+        equippedNames: {
+          weapon: this.saveStore.getEquippedItemName('weapon'),
+          armor: this.saveStore.getEquippedItemName('armor'),
+          relic: this.saveStore.getEquippedItemName('relic'),
+          skin: this.saveStore.getEquippedItemName('skin'),
+        },
+        orbHpBonus: this.saveStore.getWorldOrbHpBonus(),
+        cultivationSummary: `${cult.current.name} (Lv.${cult.current.level}) · 气血+${cult.hpBonus} · 剑伤+${cult.atkPct}%${ultBonusTxt}`,
+      },
+      liveWorldBosses,
+      defeatedBossIds: Object.keys(this.saveStore.data.worldBossKills ?? {}),
+      totalKills: this.saveStore.data.stats.totalKills ?? 0,
+      inWorld: this.mode === 'world',
+    };
+  }
+
+  private startWorldCustomNavigation(x: number, z: number, label: string): void {
+    if (this.mode !== 'world') {
+      this.enterOpenWorldMode();
+    }
+    const cx = clamp(x, -(WORLD_BOUND - 2), WORLD_BOUND - 2);
+    const cz = clamp(z, -(WORLD_BOUND - 2), WORLD_BOUND - 2);
+    this.worldCustomNavTarget = { x: cx, z: cz, label: label || '舆图标点' };
+    this.worldAutoNav = true;
+    this.worldAutoNavPausedByCombat = false;
+    this.ancientMap.close();
+    this.hud.showWorldToast(`舆图指引：自动寻路前往【${this.worldCustomNavTarget.label}】`, true, 3200);
   }
 
   private hasNearbyWorldHostile(radius = 13.5): boolean {
@@ -1074,6 +1469,7 @@ export class Game {
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.worldCustomNavTarget = null;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
     this.worldAutoNavPausedByCombat = false;
@@ -1148,6 +1544,7 @@ export class Game {
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.worldCustomNavTarget = null;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
     this.worldAutoNavPausedByCombat = false;
@@ -1197,7 +1594,12 @@ export class Game {
     this.audio.setMood('title');
     this.cameraRig.snapTo(this.hero.pos);
     this.updateCampNpcs(0.016);
-    this.showStorySubtitle('云来剑庐：可走近师尊酒剑仙、玄影师兄、蒲团或篝火茶席互动（按 G 键）', 3.4);
+    this.showStorySubtitle(
+      this.hud.isMobileUi()
+        ? '云来剑庐：走近师尊酒剑仙、玄影师兄、蒲团或茶席，点击下方「互动」'
+        : '云来剑庐：可走近师尊酒剑仙、玄影师兄、蒲团或篝火茶席互动（按 G 键）',
+      3.4,
+    );
     this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, 'none', this.buildTacticalState());
   }
 
@@ -1258,6 +1660,7 @@ export class Game {
     this.setShopPreview(false);
     this.setMountMode('none', true);
     this.worldAutoNav = false;
+    this.worldCustomNavTarget = null;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
     this.worldAutoNavPausedByCombat = false;
@@ -1330,7 +1733,12 @@ export class Game {
     this.hud.setWorldInteractPrompt(null);
     this.audio.setMood('skirmish');
     this.cameraRig.snapTo(this.hero.pos);
-    this.showStorySubtitle('九州仙域已开启：按 V 唤战马、按 B 御剑飞渡，探索四方锚点、玄铁宝箱与野外首领！', 4.0);
+    this.showStorySubtitle(
+      this.hud.isMobileUi()
+        ? '九州仙域已开启：点右侧「骑马」「御剑」驰骋六境，点「九州舆图」查看全图！'
+        : '九州仙域已开启：按 V 唤战马、按 B 御剑飞渡，探索九州六境锚点、宝箱与野外首领！',
+      4.0,
+    );
     this.hud.update(this.hero, '九州仙域 · 自由驰骋', null, null, 'none', this.buildTacticalState());
   }
 
@@ -1458,7 +1866,11 @@ export class Game {
       if (this.worldLavaBurnTimer <= 0) {
         this.worldLavaBurnTimer = 0.9;
         this.tryHitHero(null, 14, true);
-        this.spawnWorldCallout('赤焰灼体！按 B 御剑飞渡！', h.pos.clone().add(new THREE.Vector3(0, 1.3, 0)), 'crit');
+        this.spawnWorldCallout(
+          this.hud.isMobileUi() ? '赤焰灼体！点右侧「御剑」飞渡！' : '赤焰灼体！按 B 御剑飞渡！',
+          h.pos.clone().add(new THREE.Vector3(0, 1.3, 0)),
+          'crit',
+        );
       }
     } else {
       this.worldLavaBurnTimer = 0;
@@ -1466,13 +1878,18 @@ export class Game {
 
     let nextPrompt: { kind: 'waypoint' | 'chest'; id: string; label: string } | null = null;
     let bestDist = 4.4;
+    const isMobUi = this.hud.isMobileUi();
 
     for (const wp of WORLD_WAYPOINTS) {
       if (this.saveStore.isWorldWaypointLit(wp.id)) continue;
       const d = Math.hypot(h.pos.x - wp.x, h.pos.z - wp.z);
       if (d <= 4.2 && d < bestDist) {
         bestDist = d;
-        nextPrompt = { kind: 'waypoint', id: wp.id, label: `点亮传送锚点 · ${wp.name} (G)` };
+        nextPrompt = {
+          kind: 'waypoint',
+          id: wp.id,
+          label: isMobUi ? `点击互动 · 点亮 ${wp.name}` : `点亮传送锚点 · ${wp.name} (G)`,
+        };
       }
     }
 
@@ -1481,7 +1898,11 @@ export class Game {
       const d = Math.hypot(h.pos.x - ch.x, h.pos.z - ch.z);
       if (d <= 3.8 && d < bestDist) {
         bestDist = d;
-        nextPrompt = { kind: 'chest', id: ch.id, label: `开启宝箱 · ${ch.name} (G)` };
+        nextPrompt = {
+          kind: 'chest',
+          id: ch.id,
+          label: isMobUi ? `点击互动 · 开启 ${ch.name}` : `开启宝箱 · ${ch.name} (G)`,
+        };
       }
     }
 
@@ -1527,6 +1948,7 @@ export class Game {
           this.worldAutoNav = false;
           this.rmbMoveTarget = null;
           if (dist <= 2.6) {
+            this.worldCustomNavTarget = null;
             this.hud.showWorldToast(`已抵达【${guide.label}】附近！${guide.actionHint}`, true, 3600);
           }
         } else {
@@ -1543,7 +1965,7 @@ export class Game {
       this.hud.setWorldGuide(
         guide.label,
         `${dirText} · 约 ${Math.round(dist)} 米 · ${guide.actionHint}`,
-        '玩法：点亮4锚点开传送 · 开6宝箱/御剑采6灵瞳永久加血 · 斩4首领与宝妖爆神兵',
+        `玩法：点亮${WORLD_WAYPOINTS.length}锚点开传送 · 开${WORLD_CHESTS.length}宝箱/御剑采${WORLD_SPIRIT_ORBS.length}灵瞳加血 · 斩${WORLD_BOSS_SPAWNS.length}首领爆神兵`,
         this.worldAutoNav,
         resumeLabel,
       );
@@ -1575,6 +1997,18 @@ export class Game {
     kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss';
   } | null {
     const h = this.hero.pos;
+    const isMobUi = this.hud.isMobileUi();
+
+    if (this.worldCustomNavTarget) {
+      return {
+        x: this.worldCustomNavTarget.x,
+        z: this.worldCustomNavTarget.z,
+        label: this.worldCustomNavTarget.label,
+        actionHint: '舆图指定目标 · 自动寻路前往',
+        kind: 'waypoint',
+      };
+    }
+
     const pickNearest = <T extends { x: number; z: number }>(arr: T[]): T | null => {
       let best: T | null = null;
       let bestD = Infinity;
@@ -1595,7 +2029,7 @@ export class Game {
           x: goblin.pos.x,
           z: goblin.pos.z,
           label: '奇遇 · 追击赤金宝妖',
-          actionHint: '左键/J 斩杀必爆神兵',
+          actionHint: isMobUi ? '点击出剑斩杀必爆神兵' : '左键/J 斩杀必爆神兵',
           kind: 'event',
         };
       }
@@ -1611,19 +2045,37 @@ export class Game {
         const unlit = WORLD_WAYPOINTS.filter((w) => !this.saveStore.isWorldWaypointLit(w.id));
         const wp = pickNearest(unlit);
         if (wp) {
-          return { x: wp.x, z: wp.z, label: `点亮锚点 · ${wp.name}`, actionHint: '靠近按 G 激活传送', kind: 'waypoint' };
+          return {
+            x: wp.x,
+            z: wp.z,
+            label: `点亮锚点 · ${wp.name}`,
+            actionHint: isMobUi ? '靠近点击下方「互动」激活传送' : '靠近按 G 激活传送',
+            kind: 'waypoint',
+          };
         }
       } else if (cat === 'chest') {
         const unopened = WORLD_CHESTS.filter((c) => !this.saveStore.isWorldChestOpened(c.id));
         const ch = pickNearest(unopened);
         if (ch) {
-          return { x: ch.x, z: ch.z, label: `开启宝箱 · ${ch.name}`, actionHint: '靠近按 G 领神兵', kind: 'chest' };
+          return {
+            x: ch.x,
+            z: ch.z,
+            label: `开启宝箱 · ${ch.name}`,
+            actionHint: isMobUi ? '靠近点击下方「互动」领神兵' : '靠近按 G 领神兵',
+            kind: 'chest',
+          };
         }
       } else if (cat === 'orb') {
         const uncol = WORLD_SPIRIT_ORBS.filter((o) => !this.saveStore.isWorldOrbCollected(o.id));
         const orb = pickNearest(uncol);
         if (orb) {
-          return { x: orb.x, z: orb.z, label: `御剑采瞳 · ${orb.name}`, actionHint: '按 B 御剑靠近自动吸收', kind: 'orb' };
+          return {
+            x: orb.x,
+            z: orb.z,
+            label: `御剑采瞳 · ${orb.name}`,
+            actionHint: isMobUi ? '点右侧「御剑」靠近自动吸收' : '按 B 御剑靠近自动吸收',
+            kind: 'orb',
+          };
         }
       } else if (cat === 'boss') {
         const liveBosses = this.enemies
@@ -1661,6 +2113,7 @@ export class Game {
     const nextIdx = (seq.indexOf(this.worldGuideCategory) + 1) % seq.length;
     this.worldGuideCategory = seq[nextIdx];
     this.worldAutoNav = false;
+    this.worldCustomNavTarget = null;
     this.rmbMoveTarget = null;
     this.hud.showWorldToast(`指引切换为【${labels[this.worldGuideCategory]}】`, true);
   }
@@ -1670,6 +2123,7 @@ export class Game {
     this.worldAutoNav = !this.worldAutoNav;
     this.worldAutoNavPausedByCombat = false;
     if (!this.worldAutoNav) {
+      this.worldCustomNavTarget = null;
       this.rmbMoveTarget = null;
       this.hud.showWorldToast('已停止自动寻路', true);
     } else {
@@ -1708,10 +2162,11 @@ export class Game {
       if (existing) return existing.id;
     }
     const candidates = [
-      { x: 18, z: -18, label: '翠竹桃源林' },
-      { x: -18, z: -18, label: '古剑残碑原' },
-      { x: -16, z: 18, label: '赤焰熔岩谷' },
-      { x: 18, z: 18, label: '星穹天坛遗迹' },
+      { x: 26, z: -24, label: '翠竹桃源林' },
+      { x: -26, z: -24, label: '古剑残碑原' },
+      { x: -24, z: 24, label: '赤焰熔岩谷' },
+      { x: 26, z: 24, label: '星穹天坛遗迹' },
+      { x: 0, z: -34, label: '北溟幽冥古道' },
     ];
     const spot = candidates[Math.floor(this.rng() * candidates.length)];
     const e = this.spawnEnemy('elite', spot.x, spot.z, undefined, {
@@ -1850,7 +2305,7 @@ export class Game {
       }
     }
     this.audio.playBossAppearSting();
-    this.hud.showWorldToast(count > 0 ? `已重新召出 ${count} 尊四方野外首领！` : '四方野外首领皆在阵中！', true);
+    this.hud.showWorldToast(count > 0 ? `已重新召出 ${count} 尊九州野外首领！` : '九州野外首领皆在阵中！', true);
   }
 
   private startNewRun(jumpToBoss: boolean, stageId = 1, keepBlessings = false, skipDialogue = false): void {
@@ -2117,7 +2572,12 @@ export class Game {
         this.hero.cdE = 0;
         this.hero.cdR = 0;
         this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(0.55, 2.2, 2.3), 0.35, 2.6, 0.45);
-        this.showStorySubtitle('玄影：「真气剑意已满！先拿木人桩试试 Q 追影与三印万剑归宗！」', 3.0);
+        this.showStorySubtitle(
+          this.hud.isMobileUi()
+            ? '玄影：「真气剑意已满！先拿木人桩试试御剑追影与三印万剑归宗！」'
+            : '玄影：「真气剑意已满！先拿木人桩试试 Q 追影与三印万剑归宗！」',
+          3.0,
+        );
         this.hud.showCampToast('同门演武：真气与剑意已满，可随时试剑', true);
       }
       this.hud.update(this.hero, '云来剑庐 · 自由演武', null, null, 'none', this.buildTacticalState());
@@ -2670,13 +3130,24 @@ export class Game {
         0,
       );
       this.arena.update(animDt, this.elapsed, this.hero.pos);
-      const isPortrait = window.innerWidth <= 820 && window.innerHeight > window.innerWidth;
-      this.cameraRig.updateShopPreview(this.hero.pos, this.hero.yaw, this.shopPreviewYaw, isPortrait);
+      const isPortrait = window.innerHeight > window.innerWidth;
+      const leftPanelRatio = window.innerWidth <= 960 || isPortrait ? 0.44 : undefined;
+      this.cameraRig.updateShopPreview(
+        this.hero.pos,
+        this.hero.yaw,
+        this.shopPreviewYaw,
+        isPortrait,
+        leftPanelRatio,
+      );
       this.syncMoonKeyLightToHero();
       if (doRender) this.pipeline.render();
       this.input.endFrame();
       this.publishDiagnostics();
       return;
+    }
+
+    if (this.ancientMap.isOpen() && this.frame % 15 === 0) {
+      this.ancientMap.update(this.buildAncientMapSnapshot());
     }
 
     if (this.mode === 'title') {
@@ -7178,9 +7649,18 @@ export class Game {
           .filter((e) => e.kind === 'boss' && e.aiState !== 'dead')
           .map((b) => b.bossArchetype ?? 'default'),
         worldProgress: this.saveStore.getWorldProgress(),
+        worldBound: WORLD_BOUND,
+        ancientMapOpen: this.ancientMap.isOpen(),
+        rosterOpen: this.rosterOverlay.isOpen(),
+        rosterFocusCharId: this.rosterOverlay.isOpen() ? this.rosterOverlay.getFocusedCharId() : '',
         shopPreviewActive: this.shopPreviewActive,
+        shopPreviewCategory: this.hud.getActiveShopCategory(),
+        shopEquippedSlotsCount: this.hud.getShopEquippedSlotsCount(),
         shopPreviewSkinId: this.shopPreviewSkinId,
         shopPreviewWeaponId: this.shopPreviewWeaponId,
+        shopPreviewArmorId: this.shopPreviewArmorId,
+        shopPreviewRelicId: this.shopPreviewRelicId,
+        mobileNotifyText: this.hud.getMobileNotifyText(),
         worldInCombat: this.worldInCombat,
         worldAutoNav: this.worldAutoNav,
         worldAutoNavPausedByCombat: this.worldAutoNavPausedByCombat,
@@ -7280,6 +7760,36 @@ export class Game {
         }
         if (action === 'worldToggleAutoNav') {
           this.toggleWorldAutoNav();
+          this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action === 'openAncientMap') {
+          this.openAncientMapOverlay();
+          return true;
+        }
+        if (action === 'closeAncientMap') {
+          this.ancientMap.close();
+          return true;
+        }
+        if (action === 'openRoster') {
+          this.openRosterOverlay('char_xiaoyao');
+          return true;
+        }
+        if (action.startsWith('openRoster:')) {
+          const charId = action.slice('openRoster:'.length);
+          this.openRosterOverlay(charId || 'char_xiaoyao');
+          return true;
+        }
+        if (action === 'closeRoster') {
+          this.rosterOverlay.close();
+          return true;
+        }
+        if (action.startsWith('worldNavigateTo:')) {
+          const parts = action.slice('worldNavigateTo:'.length).split(',');
+          const nx = Number(parts[0]);
+          const nz = Number(parts[1]);
+          if (!Number.isFinite(nx) || !Number.isFinite(nz)) return false;
+          this.startWorldCustomNavigation(nx, nz, '舆图标点');
           this.stepFrame(0.05, true);
           return true;
         }
@@ -7537,11 +8047,12 @@ export class Game {
         );
         const stageLayouts = new Set(CAMPAIGN_STAGES.map((s) => s.stageLayout).filter(Boolean));
         const mountsAndOpenWorldOk =
-          WORLD_WAYPOINTS.length === 4 &&
-          WORLD_CHESTS.length === 6 &&
-          WORLD_SPIRIT_ORBS.length === 6 &&
-          WORLD_BOSS_SPAWNS.length === 4 &&
-          WORLD_MOB_CAMPS.length === 4 &&
+          WORLD_BOUND >= 78 &&
+          WORLD_WAYPOINTS.length >= 5 &&
+          WORLD_CHESTS.length >= 8 &&
+          WORLD_SPIRIT_ORBS.length >= 8 &&
+          WORLD_BOSS_SPAWNS.length >= 5 &&
+          WORLD_MOB_CAMPS.length >= 5 &&
           bossArchetypes.size >= 5 &&
           stageLayouts.has('pillars') &&
           stageLayouts.has('islands');

@@ -100,24 +100,50 @@ export class CameraRig {
     this.camera.lookAt(this.currentLook);
   }
 
-  /** Live 3D Skin & Weapon Dressing-Room Preview Camera: frames Li Xiaoyao cleanly beside the shop card. */
-  updateShopPreview(heroPos: THREE.Vector3, heroYaw: number, yawOffset: number, isPortrait: boolean): void {
-    const dist = isPortrait ? 4.9 : 4.25;
-    const camY = heroPos.y + (isPortrait ? 1.56 : 1.52);
-    const lookY = heroPos.y + (isPortrait ? 0.65 : 1.18);
-    const orbitYaw = heroYaw + yawOffset;
-    const camX = heroPos.x + Math.sin(orbitYaw) * dist;
-    const camZ = heroPos.z + Math.cos(orbitYaw) * dist;
+  /**
+   * Live 3D Skin, Weapon, Armor & Relic Dressing-Room Preview Camera:
+   * Frames Li Xiaoyao squarely centered inside the LEFT viewport pane (44% on mobile
+   * portrait & landscape, ~47% on desktop) across all 360° orbit angles.
+   */
+  updateShopPreview(
+    heroPos: THREE.Vector3,
+    heroYaw: number,
+    yawOffset: number,
+    isPortrait: boolean,
+    leftPanelRatio?: number,
+  ): void {
+    const aspect = Math.max(0.35, this.camera.aspect || (isPortrait ? 390 / 844 : 844 / 390));
+    const portraitView = isPortrait || aspect < 1;
+    // Left pane occupies 44% width on mobile portrait & landscape, ~47% on desktop
+    const panelRatio = leftPanelRatio ?? (portraitView ? 0.44 : aspect > 1.9 ? 0.44 : 0.47);
+    // Adaptive distance so full head-to-toe hero + held sword fits cleanly between top slots & bottom preview HUD
+    const dist = portraitView
+      ? clamp(2.22 / Math.max(0.38, aspect), 4.15, 5.1)
+      : aspect > 1.9
+        ? 4.3
+        : 3.78;
 
-    // Offset look target along camera right vector so hero stands centered in left (landscape) or top (portrait) stage
-    let lookX = heroPos.x;
-    let lookZ = heroPos.z;
-    if (!isPortrait) {
-      const rightX = Math.cos(orbitYaw);
-      const rightZ = -Math.sin(orbitYaw);
-      lookX += rightX * 0.92;
-      lookZ += rightZ * 0.92;
-    }
+    const fovRad = THREE.MathUtils.degToRad(this.camera.fov || 40);
+    const halfH = dist * Math.tan(fovRad * 0.5);
+    const halfW = halfH * aspect;
+
+    // Desired NDC X for the center of the left pane: 2 * (panelRatio / 2) - 1 = panelRatio - 1 (e.g. -0.56 for 44%)
+    const targetNdcX = clamp(panelRatio - 1, -0.72, -0.35);
+    const rightShift = Math.abs(targetNdcX) * halfW;
+
+    // Slight vertical framing lift so hero stands centered in the clear window between top equipped badges & bottom HUD
+    const lookY = heroPos.y + (portraitView ? 0.87 : aspect > 1.9 ? 0.88 : 0.84);
+    const camY = lookY + (portraitView ? 0.34 : 0.34);
+
+    const orbitYaw = heroYaw + yawOffset;
+    const rightX = Math.cos(orbitYaw);
+    const rightZ = -Math.sin(orbitYaw);
+
+    // Shift both camera and lookAt along +right so the hero projects cleanly onto targetNdcX with zero perspective skew
+    const lookX = heroPos.x + rightX * rightShift;
+    const lookZ = heroPos.z + rightZ * rightShift;
+    const camX = lookX + Math.sin(orbitYaw) * dist;
+    const camZ = lookZ + Math.cos(orbitYaw) * dist;
 
     this.currentPos.set(camX, camY, camZ);
     this.currentLook.set(lookX, lookY, lookZ);

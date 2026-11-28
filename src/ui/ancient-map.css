@@ -1,0 +1,1123 @@
+/* ==========================================================================
+   中国古代水墨羊皮舆图 · Ancient Chinese Shan-Shui Scroll Map Overlay
+   Mobile-First: Portrait (Vertical Hanging Scroll 立轴) & Landscape (Handscroll 手卷)
+   ========================================================================== */
+
+#ancient-map-overlay.ancient-map-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 82;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+  background: radial-gradient(circle at 50% 44%, rgba(20, 14, 10, 0.74) 0%, rgba(7, 5, 6, 0.92) 100%);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.24s ease, visibility 0s linear 0.24s;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+#ancient-map-overlay.ancient-map-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.24s ease, visibility 0s linear 0s;
+}
+
+#ancient-map-overlay:not(.visible),
+#ancient-map-overlay:not(.visible) * {
+  pointer-events: none !important;
+}
+
+#ancient-map-overlay *,
+#ancient-map-overlay *::before,
+#ancient-map-overlay *::after {
+  box-sizing: border-box;
+}
+
+/* Scroll Shell (Vertical Hanging Scroll on Portrait; Horizontal Handscroll on Landscape/Desktop) */
+.amap-scroll {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1080px;
+  height: 100%;
+  max-height: 820px;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.78),
+    0 0 0 1px rgba(196, 154, 86, 0.34);
+  transform: scale(0.97);
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#ancient-map-overlay.visible .amap-scroll {
+  transform: scale(1);
+}
+
+/* Carved Rosewood & Jade Scroll Rollers (卷轴木轴) */
+.amap-roller {
+  flex: 0 0 auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 14px;
+  background: linear-gradient(
+    180deg,
+    #6a3c20 0%,
+    #4c2612 36%,
+    #2e1409 78%,
+    #583018 100%
+  );
+  border-top: 1px solid rgba(230, 190, 118, 0.45);
+  border-bottom: 1px solid rgba(28, 12, 5, 0.9);
+  box-shadow: inset 0 1px 2px rgba(255, 224, 168, 0.25);
+  z-index: 3;
+}
+
+.amap-roller::before,
+.amap-roller::after {
+  content: '';
+  display: block;
+  width: 24px;
+  height: 100%;
+  background: linear-gradient(
+    180deg,
+    #e8cf8a 0%,
+    #b68a3e 45%,
+    #77531d 85%,
+    #d2ad62 100%
+  );
+  border-inline: 1px solid rgba(64, 38, 12, 0.75);
+}
+
+.amap-roller-center-gem {
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #256f66, #6ee2d2, #256f66);
+  border: 1px solid rgba(235, 206, 138, 0.55);
+  box-shadow: 0 0 8px rgba(96, 226, 206, 0.4);
+}
+
+/* Silk Brocade Frame (绫绢装裱) */
+.amap-brocade {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(218, 184, 114, 0.06) 0 6px,
+      transparent 6px 12px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(218, 184, 114, 0.05) 0 6px,
+      transparent 6px 12px
+    ),
+    linear-gradient(180deg, #3c2b1c 0%, #2a1e14 52%, #3a291a 100%);
+  border-inline: 2px solid rgba(188, 148, 82, 0.42);
+  overflow: hidden;
+}
+
+.amap-inner {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  border: 1.5px solid rgba(184, 140, 74, 0.65);
+  box-shadow:
+    inset 0 0 0 1px rgba(40, 26, 14, 0.72),
+    inset 0 0 28px rgba(68, 44, 18, 0.25);
+  background: linear-gradient(180deg, #ebdcc0 0%, #e0cca4 54%, #d6be90 100%);
+  color: #261b12;
+  overflow: hidden;
+}
+
+/* Top Header Bar */
+.amap-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  background: linear-gradient(180deg, rgba(44, 30, 18, 0.94) 0%, rgba(30, 20, 12, 0.96) 100%);
+  border-bottom: 1.5px solid rgba(204, 162, 88, 0.56);
+  color: #f6e7c8;
+  min-height: 52px;
+}
+
+.amap-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.amap-seal-stamp {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 16px;
+  font-weight: 800;
+  color: #fdf2df;
+  background: linear-gradient(145deg, #b83228 0%, #891c16 100%);
+  border: 1.5px solid #e6a890;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(255, 224, 202, 0.3);
+}
+
+.amap-title-texts {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.amap-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.amap-title {
+  margin: 0;
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f8e4b4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.amap-mode-chip {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #7ef2e0;
+  background: rgba(34, 126, 114, 0.34);
+  border: 1px solid rgba(114, 232, 214, 0.48);
+  white-space: nowrap;
+}
+
+.amap-subtitle {
+  font-size: 10.5px;
+  color: #cbb896;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.amap-header-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.amap-close-btn {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(223, 188, 118, 0.62);
+  background: linear-gradient(180deg, rgba(132, 42, 32, 0.9) 0%, rgba(88, 24, 18, 0.96) 100%);
+  color: #fff2dc;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.14s ease, filter 0.14s ease;
+}
+
+.amap-close-btn:active {
+  transform: scale(0.95);
+  filter: brightness(1.12);
+}
+
+/* Live "You Are Here" Location Ribbon */
+.amap-loc-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 10px;
+  background: linear-gradient(180deg, rgba(226, 206, 168, 0.95) 0%, rgba(214, 190, 146, 0.95) 100%);
+  border-bottom: 1px solid rgba(116, 84, 46, 0.32);
+  font-size: 11.5px;
+  color: #2f2115;
+  min-height: 34px;
+}
+
+.amap-loc-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.amap-loc-pulse {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b82c24;
+  box-shadow: 0 0 0 3px rgba(31, 138, 122, 0.32);
+  animation: amap-beacon-pulse 1.8s ease-in-out infinite;
+}
+
+.amap-loc-label {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: #6b4e2f;
+  font-weight: 600;
+}
+
+.amap-region-name {
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #1f160e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.amap-coord-pill {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #1c5a52;
+  background: rgba(31, 114, 102, 0.14);
+  border: 1px solid rgba(31, 114, 102, 0.3);
+  white-space: nowrap;
+}
+
+.amap-hero-quick-btn {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 44, 34, 0.48);
+  background: rgba(164, 46, 36, 0.12);
+  color: #8c231b;
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.amap-hero-quick-btn:active {
+  background: rgba(164, 46, 36, 0.24);
+}
+
+/* Filter Pill Row */
+.amap-filters {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  background: rgba(206, 180, 134, 0.52);
+  border-bottom: 1px solid rgba(116, 84, 46, 0.26);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.amap-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.amap-filter-pill {
+  flex: 1 0 auto;
+  min-width: 44px;
+  min-height: 30px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(114, 82, 46, 0.38);
+  background: rgba(246, 236, 212, 0.72);
+  color: #3f2d1b;
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.amap-filter-pill.active {
+  background: linear-gradient(180deg, #b53226 0%, #8f2219 100%);
+  color: #fdf4e4;
+  border-color: #701911;
+  box-shadow: 0 2px 6px rgba(132, 32, 22, 0.35);
+}
+
+/* Workspace: Canvas Stage + Inspect Drawer */
+.amap-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Interactive Parchment Map Stage */
+.amap-stage {
+  flex: 1 1 auto;
+  min-height: 220px;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: manipulation;
+  background: radial-gradient(circle at 50% 48%, #ede0c4 0%, #dfc89c 68%, #ccb07d 100%);
+}
+
+.amap-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.amap-pin-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.amap-stage-hint {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(54, 38, 22, 0.86);
+  background: rgba(244, 232, 206, 0.78);
+  border: 1px solid rgba(136, 98, 52, 0.3);
+  pointer-events: none;
+  max-width: calc(100% - 16px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Interactive Map Pins */
+.amap-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  z-index: 4;
+  transition: transform 0.14s ease, filter 0.14s ease;
+}
+
+#ancient-map-overlay.visible .amap-pin {
+  pointer-events: auto;
+}
+
+.amap-pin:focus-visible {
+  outline: 2px solid #a82820;
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.amap-pin.selected {
+  z-index: 12;
+  transform: translate(-50%, -50%) scale(1.16);
+}
+
+.amap-pin-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(32, 20, 10, 0.42);
+  position: relative;
+}
+
+.amap-pin-tag {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 9.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  color: #2b1d12;
+  background: rgba(248, 238, 216, 0.9);
+  border: 1px solid rgba(126, 88, 46, 0.36);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+
+/* Hero "You Are Here" Live Beacon */
+.amap-pin--hero {
+  z-index: 15;
+  min-width: 38px;
+  min-height: 38px;
+}
+
+.amap-hero-ring {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(25, 134, 120, 0.8);
+  background: rgba(54, 214, 194, 0.2);
+  animation: amap-beacon-ring 2s ease-out infinite;
+  pointer-events: none;
+}
+
+.amap-hero-arrow {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.amap-hero-arrow::before {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #a8221a;
+  margin-top: -5px;
+  filter: drop-shadow(0 1px 1px rgba(255, 245, 224, 0.85));
+}
+
+.amap-pin--hero .amap-pin-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 11px;
+  color: #fff8ea;
+  background: radial-gradient(circle at 35% 35%, #2bb5a2 0%, #146c62 72%, #0e4a44 100%);
+  border: 2px solid #f7df9d;
+  box-shadow: 0 0 0 2px rgba(176, 38, 28, 0.72), 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.amap-pin--hero .amap-pin-tag {
+  color: #fdf4e3;
+  background: rgba(164, 38, 28, 0.92);
+  border-color: rgba(246, 212, 146, 0.75);
+}
+
+/* Waypoint Pin */
+.amap-pin--waypoint .amap-pin-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  transform: rotate(45deg);
+  font-size: 10.5px;
+  color: #f8fffc;
+  background: linear-gradient(135deg, #279989, #155c54);
+  border: 1.5px solid #f2d58b;
+}
+
+.amap-pin--waypoint .amap-pin-badge > span {
+  transform: rotate(-45deg);
+  display: inline-block;
+}
+
+.amap-pin--waypoint.is-unlit .amap-pin-badge {
+  background: linear-gradient(135deg, #7e766b, #544e46);
+  border-color: #d1c2a5;
+  color: #efe4cf;
+}
+
+/* World Boss / Stage Boss Pin */
+.amap-pin--boss {
+  z-index: 8;
+}
+
+.amap-pin--boss .amap-pin-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 12px;
+  color: #fff4df;
+  background: radial-gradient(circle at 32% 30%, #d93e32 0%, #8f1a14 75%, #5c0e0a 100%);
+  border: 2px solid #f3cd78;
+  box-shadow: 0 0 0 2px rgba(170, 32, 24, 0.34), 0 3px 8px rgba(48, 10, 6, 0.48);
+}
+
+.amap-pin--boss.is-dead .amap-pin-badge {
+  background: linear-gradient(180deg, #74695f, #4c443d);
+  border-color: #c5b497;
+  color: #e2d6c0;
+  opacity: 0.84;
+}
+
+.amap-pin--boss .amap-pin-tag {
+  color: #7c1812;
+  background: rgba(255, 240, 224, 0.92);
+  border-color: rgba(164, 42, 32, 0.45);
+}
+
+/* Mob Camp Pin */
+.amap-pin--camp .amap-pin-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #fff3da;
+  background: linear-gradient(180deg, #9a5426, #693312);
+  border: 1.5px solid #e6bf78;
+}
+
+/* Chest Pin */
+.amap-pin--chest .amap-pin-badge {
+  width: 20px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #362009;
+  background: linear-gradient(180deg, #f8d878, #c79234);
+  border: 1.5px solid #6e4512;
+}
+
+.amap-pin--chest.is-legendary .amap-pin-badge {
+  background: linear-gradient(180deg, #ffe788, #e68c24);
+  border-color: #9e2418;
+  box-shadow: 0 0 10px rgba(242, 168, 42, 0.72);
+}
+
+.amap-pin--chest.is-opened .amap-pin-badge {
+  opacity: 0.48;
+  filter: grayscale(0.65);
+}
+
+/* Spirit Orb Pin */
+.amap-pin--orb .amap-pin-badge {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: #0b3c39;
+  background: radial-gradient(circle at 35% 35%, #9afef2, #30b8ac);
+  border: 1.5px solid #fff0be;
+}
+
+.amap-pin--orb.is-collected .amap-pin-badge {
+  opacity: 0.4;
+  filter: grayscale(0.7);
+}
+
+/* NPC / Companion Pin */
+.amap-pin--npc {
+  z-index: 9;
+}
+
+.amap-pin--npc .amap-pin-badge {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  font-size: 11.5px;
+  color: #fdf6e4;
+  background: linear-gradient(180deg, #2b7b72, #184e49);
+  border: 1.5px solid #ebd08c;
+}
+
+/* Region Seal Pin (clickable hub/region anchor) */
+.amap-pin--region {
+  z-index: 3;
+}
+
+.amap-pin--region .amap-pin-badge {
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: #fff2df;
+  background: rgba(162, 38, 28, 0.88);
+  border: 1px solid rgba(245, 208, 160, 0.72);
+}
+
+/* Custom Ground Target Pin */
+.amap-pin--custom {
+  z-index: 14;
+}
+
+.amap-pin--custom .amap-pin-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 50% 50% 50% 2px;
+  transform: rotate(-45deg);
+  font-size: 10.5px;
+  color: #fff6e4;
+  background: linear-gradient(135deg, #c93b2c, #8c1e16);
+  border: 1.5px solid #f7dc92;
+}
+
+.amap-pin--custom .amap-pin-badge > span {
+  transform: rotate(45deg);
+  display: inline-block;
+}
+
+/* Selected Highlight Halo */
+.amap-pin.selected::before {
+  content: '';
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px dashed #a82820;
+  pointer-events: none;
+  animation: amap-spin-slow 7s linear infinite;
+}
+
+/* Interactive Inspect Drawer (Bottom Sheet on Portrait, Right Rail on Landscape/Desktop) */
+.amap-drawer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, #f3e6cb 0%, #e4d0a8 100%);
+  border-top: 1.5px solid rgba(132, 94, 48, 0.45);
+  box-shadow: 0 -6px 18px rgba(48, 30, 12, 0.16);
+  color: #261b12;
+  max-height: 205px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.amap-drawer.collapsed {
+  padding: 7px 10px;
+  max-height: 60px;
+}
+
+.amap-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.amap-drawer-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.amap-drawer-kind {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fdf4e4;
+  background: #8f261d;
+  white-space: nowrap;
+}
+
+.amap-drawer-kind.kind-waypoint,
+.amap-drawer-kind.kind-orb,
+.amap-drawer-kind.kind-npc {
+  background: #1d6d63;
+}
+
+.amap-drawer-kind.kind-chest {
+  background: #9f6a1a;
+}
+
+.amap-drawer-kind.kind-hero {
+  background: #1f5d7a;
+}
+
+.amap-drawer-name {
+  margin: 0;
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 14.5px;
+  font-weight: 800;
+  color: #21160d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.amap-drawer-dist {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b4b28;
+  white-space: nowrap;
+}
+
+.amap-drawer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.amap-meta-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #46311d;
+  background: rgba(154, 114, 62, 0.16);
+  border: 1px solid rgba(134, 96, 48, 0.28);
+}
+
+.amap-meta-chip.status-alive {
+  color: #8f1d16;
+  background: rgba(190, 48, 36, 0.14);
+  border-color: rgba(176, 42, 32, 0.34);
+}
+
+.amap-meta-chip.status-lit {
+  color: #165f56;
+  background: rgba(31, 134, 120, 0.14);
+  border-color: rgba(31, 134, 120, 0.34);
+}
+
+.amap-drawer-desc {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #44311e;
+}
+
+.amap-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.amap-act-btn {
+  flex: 1 1 auto;
+  min-width: 104px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(114, 78, 38, 0.52);
+  font-family: var(--font-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: transform 0.12s ease, filter 0.14s ease;
+}
+
+.amap-act-btn:active {
+  transform: scale(0.97);
+  filter: brightness(1.08);
+}
+
+.amap-act-btn--primary {
+  background: linear-gradient(180deg, #b83428 0%, #8c2017 100%);
+  border-color: #6b160e;
+  color: #fff6e6;
+  box-shadow: 0 3px 10px rgba(138, 32, 22, 0.32);
+}
+
+.amap-act-btn--jade {
+  background: linear-gradient(180deg, #248477 0%, #155c54 100%);
+  border-color: #0e433d;
+  color: #f4fffd;
+  box-shadow: 0 3px 10px rgba(21, 92, 84, 0.3);
+}
+
+.amap-act-btn--ink {
+  background: linear-gradient(180deg, #4b3826 0%, #312316 100%);
+  border-color: #7c5c36;
+  color: #fae8c4;
+}
+
+/* Animations */
+@keyframes amap-beacon-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 2px rgba(31, 138, 122, 0.36);
+  }
+  50% {
+    transform: scale(1.16);
+    box-shadow: 0 0 0 6px rgba(31, 138, 122, 0.1);
+  }
+}
+
+@keyframes amap-beacon-ring {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.88;
+  }
+  100% {
+    transform: scale(1.48);
+    opacity: 0;
+  }
+}
+
+@keyframes amap-spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ==========================================================================
+   Horizontal Handscroll (手卷) — Mobile Landscape (844x390) & Desktop (>=720px wide)
+   ========================================================================== */
+@media (min-width: 680px), (orientation: landscape) and (max-height: 540px) {
+  .amap-scroll {
+    flex-direction: row;
+  }
+
+  .amap-roller {
+    width: 14px;
+    height: auto;
+    flex-direction: column;
+    background: linear-gradient(
+      90deg,
+      #6a3c20 0%,
+      #4c2612 36%,
+      #2e1409 78%,
+      #583018 100%
+    );
+    border-top: 0;
+    border-bottom: 0;
+    border-inline: 1px solid rgba(230, 190, 118, 0.42);
+  }
+
+  .amap-roller::before,
+  .amap-roller::after {
+    width: 100%;
+    height: 26px;
+    background: linear-gradient(
+      90deg,
+      #e8cf8a 0%,
+      #b68a3e 45%,
+      #77531d 85%,
+      #d2ad62 100%
+    );
+    border-inline: 0;
+    border-block: 1px solid rgba(64, 38, 12, 0.75);
+  }
+
+  .amap-roller-center-gem {
+    width: 5px;
+    height: 44px;
+    background: linear-gradient(180deg, #256f66, #6ee2d2, #256f66);
+  }
+
+  .amap-brocade {
+    padding: 5px;
+    border-inline: 0;
+    border-block: 2px solid rgba(188, 148, 82, 0.42);
+  }
+
+  .amap-workspace {
+    flex-direction: row;
+  }
+
+  .amap-stage {
+    min-height: 0;
+  }
+
+  .amap-drawer,
+  .amap-drawer.collapsed {
+    flex: 0 0 264px;
+    width: 264px;
+    max-height: none;
+    height: 100%;
+    border-top: 0;
+    border-left: 1.5px solid rgba(132, 94, 48, 0.46);
+    box-shadow: -6px 0 18px rgba(48, 30, 12, 0.14);
+    padding: 10px 12px;
+    justify-content: flex-start;
+  }
+
+  .amap-drawer-actions {
+    flex-direction: column;
+    margin-top: auto;
+    padding-top: 6px;
+  }
+
+  .amap-act-btn {
+    width: 100%;
+  }
+}
+
+/* Extra-compact Mobile Landscape (e.g. 844x390) */
+@media (orientation: landscape) and (max-height: 460px) {
+  #ancient-map-overlay.ancient-map-overlay {
+    padding:
+      max(4px, env(safe-area-inset-top))
+      max(6px, env(safe-area-inset-right))
+      max(4px, env(safe-area-inset-bottom))
+      max(6px, env(safe-area-inset-left));
+  }
+
+  .amap-header {
+    padding: 3px 8px;
+    min-height: 46px;
+  }
+
+  .amap-title {
+    font-size: 14px;
+  }
+
+  .amap-subtitle {
+    display: none;
+  }
+
+  .amap-loc-strip {
+    padding: 3px 8px;
+    min-height: 28px;
+    font-size: 11px;
+  }
+
+  .amap-filters {
+    padding: 3px 8px;
+  }
+
+  .amap-filter-pill {
+    min-height: 26px;
+    padding: 2px 7px;
+    font-size: 11px;
+  }
+
+  .amap-drawer,
+  .amap-drawer.collapsed {
+    flex: 0 0 264px;
+    width: 264px;
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .amap-drawer-name {
+    font-size: 13px;
+  }
+
+  .amap-meta-chip {
+    padding: 1px 5px;
+    font-size: 10px;
+  }
+
+  .amap-drawer-desc {
+    font-size: 10.5px;
+    line-height: 1.32;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .amap-drawer-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: auto;
+    padding-top: 4px;
+  }
+
+  .amap-act-btn {
+    min-width: 0;
+    width: 100%;
+    min-height: 44px;
+    padding: 5px 6px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+}
+
+/* Compact Mobile Portrait (<= 430px wide) */
+@media (max-width: 430px) and (orientation: portrait) {
+  .amap-header {
+    padding: 5px 7px 5px 9px;
+  }
+
+  .amap-title {
+    font-size: 14.5px;
+  }
+
+  .amap-loc-label {
+    display: none;
+  }
+
+  .amap-filter-pill {
+    padding: 3px 5px;
+    font-size: 11.5px;
+  }
+
+  .amap-pin-tag {
+    font-size: 9px;
+  }
+}

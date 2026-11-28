@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, easeOutQuart, lerp, solveTwoBoneIK } from '../utils/math';
-import type { HeroSkinVisual, WeaponVisual } from '../game/EquipmentData';
+import type { EquipRarity, HeroSkinVisual, WeaponVisual } from '../game/EquipmentData';
 import {
   createForgedSteelPbr,
   createLeatherPbr,
@@ -367,6 +367,16 @@ function getSharedAssets() {
   return SHARED_ASSETS;
 }
 
+export interface HeroArmorVisual {
+  rarity: EquipRarity;
+  tintHex?: string;
+}
+
+export interface HeroRelicVisual {
+  rarity: EquipRarity;
+  auraHex?: string;
+}
+
 export class CharacterRig {
   readonly root = new THREE.Group();
   readonly bodyGroup = new THREE.Group();
@@ -414,6 +424,17 @@ export class CharacterRig {
   private readonly skinAccentMat?: THREE.MeshPhysicalMaterial;
   private readonly skinTrimMat?: THREE.MeshStandardMaterial;
   private readonly skinBronzeMat?: THREE.MeshStandardMaterial;
+  private heroArmorGroup?: THREE.Group;
+  private heroArmorPlateMat?: THREE.MeshPhysicalMaterial;
+  private heroArmorTrimMat?: THREE.MeshStandardMaterial;
+  private heroArmorRarity: EquipRarity = 'common';
+  private heroRelicGroup?: THREE.Group;
+  private heroRelicOrbitals: THREE.Object3D[] = [];
+  private heroRelicHalo?: THREE.Mesh;
+  private heroRelicOrbMat?: THREE.MeshStandardMaterial;
+  private heroRelicTalMat?: THREE.MeshStandardMaterial;
+  private heroRelicHaloMat?: THREE.MeshBasicMaterial;
+  private heroRelicRarity: EquipRarity = 'common';
   private readonly flashMats: THREE.MeshStandardMaterial[] = [];
   private readonly flashMatBase: Array<{ mat: THREE.MeshStandardMaterial; emissive: THREE.Color; intensity: number }> = [];
   private readonly gourdMesh?: THREE.Group;
@@ -679,6 +700,10 @@ export class CharacterRig {
       this.pelvis.add(this.gourdHipMount);
       this.gourdMesh = this.buildWineGourd(palette.bronze, palette.accent);
       this.gourdHipMount.add(this.gourdMesh);
+
+      if (archetype === 'xiaoyao') {
+        this.buildHeroArmorAndRelicVisuals(assets);
+      }
     } else if (archetype === 'bladesman') {
       const strap = new THREE.Mesh(assets.strapVanguard, palette.leather);
       strap.position.y = -0.09;
@@ -1608,6 +1633,143 @@ export class CharacterRig {
     return g;
   }
 
+  private buildHeroArmorAndRelicVisuals(assets: ReturnType<typeof getSharedAssets>): void {
+    // 1. Sculpted Xianxia Armor Overlay (玄甲衣袍: metallic shoulder pauldrons, shoulder rim glow, chest guard mirror, collar trim)
+    const armorGroup = new THREE.Group();
+    const plateMat = new THREE.MeshPhysicalMaterial({
+      map: assets.shanwenTex,
+      normalMap: assets.shanwenNrm,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      color: '#c4d8e8',
+      emissive: new THREE.Color('#286e88'),
+      emissiveIntensity: 0.18,
+      roughness: 0.3,
+      metalness: 0.85,
+      clearcoat: 0.58,
+      clearcoatRoughness: 0.2,
+      side: THREE.DoubleSide,
+    });
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: '#f2d482',
+      emissive: new THREE.Color('#d8a63c'),
+      emissiveIntensity: 0.55,
+      roughness: 0.22,
+      metalness: 0.92,
+    });
+
+    for (const side of [-1, 1]) {
+      const pauldron = new THREE.Mesh(assets.pauldronArmor, plateMat);
+      pauldron.scale.set(0.98, 0.9, 1.02);
+      pauldron.position.set(side * 0.224, 0.464, 0.0);
+      pauldron.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.19);
+      pauldron.castShadow = true;
+      armorGroup.add(pauldron);
+
+      const trimArc = new THREE.Mesh(
+        new THREE.TorusGeometry(0.092, 0.011, 8, 22, Math.PI * 1.12),
+        trimMat,
+      );
+      trimArc.position.set(side * 0.232, 0.462, 0.014);
+      trimArc.rotation.set(0.18, side * 0.28, side > 0 ? -0.42 : Math.PI + 0.42);
+      armorGroup.add(trimArc);
+
+      const shoulderCrest = new THREE.Mesh(new THREE.OctahedronGeometry(0.022, 0), trimMat);
+      shoulderCrest.scale.set(0.75, 1.35, 0.75);
+      shoulderCrest.position.set(side * 0.256, 0.506, 0.01);
+      shoulderCrest.rotation.z = side * -0.35;
+      armorGroup.add(shoulderCrest);
+    }
+
+    // Chest Heart-Mirror Guard (护心镜)
+    const mirrorBezel = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.012, 10, 26), trimMat);
+    mirrorBezel.position.set(0, 0.34, 0.158);
+    const mirrorDome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.072, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42),
+      plateMat,
+    );
+    mirrorDome.rotation.x = Math.PI / 2;
+    mirrorDome.scale.set(1, 0.34, 1);
+    mirrorDome.position.set(0, 0.34, 0.152);
+    const mirrorCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.018, 0), trimMat);
+    mirrorCore.scale.set(0.95, 1.15, 0.65);
+    mirrorCore.position.set(0, 0.34, 0.175);
+    armorGroup.add(mirrorBezel, mirrorDome, mirrorCore);
+
+    // Armored Collar Filigree Ring
+    const collarRim = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.009, 8, 24), trimMat);
+    collarRim.rotation.x = Math.PI / 2 + 0.14;
+    collarRim.position.set(0, 0.514, 0.014);
+    armorGroup.add(collarRim);
+
+    armorGroup.visible = false;
+    this.torso.add(armorGroup);
+    this.heroArmorGroup = armorGroup;
+    this.heroArmorPlateMat = plateMat;
+    this.heroArmorTrimMat = trimMat;
+
+    // 2. Sculpted Orbiting Spirit Talisman & Relic Aura (镇妖灵宝)
+    const relicGroup = new THREE.Group();
+    const orbMat = new THREE.MeshStandardMaterial({
+      color: '#a8fff0',
+      emissive: new THREE.Color('#48e0c8'),
+      emissiveIntensity: 1.05,
+      roughness: 0.16,
+      metalness: 0.35,
+    });
+    const talMat = new THREE.MeshStandardMaterial({
+      map: assets.talismanTex,
+      color: '#fff4d4',
+      emissive: new THREE.Color('#e6b84c'),
+      emissiveIntensity: 0.72,
+      roughness: 0.48,
+      metalness: 0.18,
+      side: THREE.DoubleSide,
+    });
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color('#ffe07a'),
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const talGeo = new THREE.PlaneGeometry(0.068, 0.175);
+    const orbGeo = new THREE.OctahedronGeometry(0.042, 1);
+    const orbRingGeo = new THREE.TorusGeometry(0.064, 0.0055, 6, 20);
+
+    for (let i = 0; i < 4; i++) {
+      const sat = new THREE.Group();
+      if (i % 2 === 0) {
+        const slip = new THREE.Mesh(talGeo, talMat);
+        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.022, 0), orbMat);
+        core.position.set(0, 0.105, 0);
+        sat.add(slip, core);
+      } else {
+        const gem = new THREE.Mesh(orbGeo, orbMat);
+        const ring = new THREE.Mesh(orbRingGeo, talMat);
+        ring.rotation.x = Math.PI * 0.38;
+        sat.add(gem, ring);
+      }
+      sat.userData.orbitPhase = (i / 4) * Math.PI * 2;
+      sat.userData.orbitIndex = i;
+      relicGroup.add(sat);
+      this.heroRelicOrbitals.push(sat);
+    }
+
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.0085, 8, 36), haloMat);
+    halo.position.set(0, 0.42, -0.25);
+    halo.visible = false;
+    relicGroup.add(halo);
+
+    relicGroup.visible = false;
+    this.torso.add(relicGroup);
+    this.heroRelicGroup = relicGroup;
+    this.heroRelicHalo = halo;
+    this.heroRelicOrbMat = orbMat;
+    this.heroRelicTalMat = talMat;
+    this.heroRelicHaloMat = haloMat;
+  }
+
   private buildWeapon(
     archetype: CharacterArchetype,
     palette: ReturnType<CharacterRig['buildPalette']>,
@@ -2007,19 +2169,122 @@ export class CharacterRig {
     }
   }
 
-  applyHeroAppearance(skin: HeroSkinVisual, weapon: WeaponVisual): void {
+  applyHeroAppearance(
+    skin: HeroSkinVisual,
+    weapon: WeaponVisual,
+    armorVisual?: HeroArmorVisual,
+    relicVisual?: HeroRelicVisual,
+  ): void {
     if (this.skinPrimaryMat) this.skinPrimaryMat.color.set(skin.primaryHex);
     if (this.skinRobeInnerMat) this.skinRobeInnerMat.color.set(skin.robeInnerHex);
     if (this.skinSecondaryMat) {
       this.skinSecondaryMat.color.set(skin.secondaryHex);
       this.skinSecondaryMat.sheenColor.set(skin.sheenHex);
+      this.skinSecondaryMat.metalness = 0.06;
+      this.skinSecondaryMat.roughness = 0.84;
     }
     if (this.skinAccentMat) {
       this.skinAccentMat.color.set(skin.accentHex);
       this.skinAccentMat.sheenColor.set(skin.sheenHex);
     }
-    if (this.skinTrimMat) this.skinTrimMat.color.set(skin.trimHex);
+    if (this.skinTrimMat) {
+      this.skinTrimMat.color.set(skin.trimHex);
+      this.skinTrimMat.emissive.set('#000000');
+      this.skinTrimMat.emissiveIntensity = 0;
+    }
     if (this.skinBronzeMat) this.skinBronzeMat.color.set(skin.bronzeHex);
+
+    // Apply Armor Visual (玄甲衣袍: metallic shoulder plates, sheen & shoulder-trim glow)
+    const armorRarity: EquipRarity = armorVisual?.rarity ?? 'common';
+    this.heroArmorRarity = armorRarity;
+    if (this.heroArmorGroup && this.heroArmorPlateMat && this.heroArmorTrimMat) {
+      if (!armorVisual || armorRarity === 'common') {
+        this.heroArmorGroup.visible = false;
+      } else {
+        this.heroArmorGroup.visible = true;
+        const defaultPlateHex =
+          armorRarity === 'legendary' ? '#e8d08e' : armorRarity === 'epic' ? '#d9c6e8' : '#a8cce0';
+        const defaultGlowHex =
+          armorRarity === 'legendary' ? '#ffd258' : armorRarity === 'epic' ? '#e4a448' : '#58dce8';
+        const tintHex = armorVisual.tintHex ?? defaultGlowHex;
+        const armorScale = armorRarity === 'legendary' ? 1.08 : armorRarity === 'epic' ? 1.03 : 0.98;
+        this.heroArmorGroup.scale.setScalar(armorScale);
+        this.heroArmorPlateMat.color.set(defaultPlateHex);
+        this.heroArmorPlateMat.emissive.set(tintHex);
+        this.heroArmorPlateMat.emissiveIntensity =
+          armorRarity === 'legendary' ? 0.34 : armorRarity === 'epic' ? 0.24 : 0.16;
+        this.heroArmorPlateMat.metalness =
+          armorRarity === 'legendary' ? 0.93 : armorRarity === 'epic' ? 0.86 : 0.78;
+        this.heroArmorPlateMat.roughness =
+          armorRarity === 'legendary' ? 0.18 : armorRarity === 'epic' ? 0.25 : 0.33;
+        this.heroArmorPlateMat.clearcoat =
+          armorRarity === 'legendary' ? 0.88 : armorRarity === 'epic' ? 0.62 : 0.42;
+
+        this.heroArmorTrimMat.color.set(tintHex);
+        this.heroArmorTrimMat.emissive.set(tintHex);
+        this.heroArmorTrimMat.emissiveIntensity =
+          armorRarity === 'legendary' ? 0.96 : armorRarity === 'epic' ? 0.68 : 0.44;
+
+        if (this.skinSecondaryMat) {
+          this.skinSecondaryMat.metalness =
+            armorRarity === 'legendary' ? 0.34 : armorRarity === 'epic' ? 0.24 : 0.16;
+          this.skinSecondaryMat.roughness =
+            armorRarity === 'legendary' ? 0.56 : armorRarity === 'epic' ? 0.66 : 0.74;
+        }
+        if (this.skinTrimMat) {
+          this.skinTrimMat.emissive.set(tintHex);
+          this.skinTrimMat.emissiveIntensity =
+            armorRarity === 'legendary' ? 0.42 : armorRarity === 'epic' ? 0.28 : 0.16;
+        }
+      }
+    }
+
+    // Apply Relic Visual (镇妖灵宝: orbiting floating jade/gold spirit talisman & halo aura)
+    const relicRarity: EquipRarity = relicVisual?.rarity ?? 'common';
+    this.heroRelicRarity = relicRarity;
+    if (this.heroRelicGroup && this.heroRelicOrbMat && this.heroRelicTalMat && this.heroRelicHaloMat) {
+      if (!relicVisual) {
+        this.heroRelicGroup.visible = false;
+      } else {
+        this.heroRelicGroup.visible = true;
+        const defaultAuraHex =
+          relicRarity === 'legendary'
+            ? '#ffe066'
+            : relicRarity === 'epic'
+              ? '#c872ff'
+              : relicRarity === 'rare'
+                ? '#4cf0d2'
+                : '#e8c474';
+        const auraHex = relicVisual.auraHex ?? defaultAuraHex;
+        const activeCount =
+          relicRarity === 'legendary' ? 4 : relicRarity === 'epic' ? 3 : relicRarity === 'rare' ? 2 : 1;
+        const orbScale =
+          relicRarity === 'legendary' ? 1.12 : relicRarity === 'epic' ? 1.0 : relicRarity === 'rare' ? 0.9 : 0.68;
+
+        this.heroRelicOrbMat.color.set(auraHex);
+        this.heroRelicOrbMat.emissive.set(auraHex);
+        this.heroRelicOrbMat.emissiveIntensity =
+          relicRarity === 'legendary' ? 1.55 : relicRarity === 'epic' ? 1.24 : relicRarity === 'rare' ? 0.96 : 0.58;
+
+        this.heroRelicTalMat.emissive.set(auraHex);
+        this.heroRelicTalMat.emissiveIntensity =
+          relicRarity === 'legendary' ? 1.05 : relicRarity === 'epic' ? 0.82 : relicRarity === 'rare' ? 0.64 : 0.36;
+
+        this.heroRelicHaloMat.color.set(auraHex);
+        this.heroRelicHaloMat.opacity =
+          relicRarity === 'legendary' ? 0.7 : relicRarity === 'epic' ? 0.46 : 0;
+
+        for (let i = 0; i < this.heroRelicOrbitals.length; i++) {
+          const sat = this.heroRelicOrbitals[i];
+          sat.visible = i < activeCount;
+          sat.scale.setScalar(orbScale);
+        }
+        if (this.heroRelicHalo) {
+          this.heroRelicHalo.visible = relicRarity === 'epic' || relicRarity === 'legendary';
+          this.heroRelicHalo.scale.setScalar(relicRarity === 'legendary' ? 1.08 : 0.92);
+        }
+      }
+    }
 
     const emCol = new THREE.Color(weapon.emissiveHex);
     const glowCol = new THREE.Color(weapon.glowHex);
@@ -2412,7 +2677,41 @@ export class CharacterRig {
       this.capeMesh.rotation.x = -0.14 - flapLift * 0.85 + Math.sin(elapsed * 2.4) * 0.04;
     }
 
-    if (this.archetype === 'caster') {
+    if (this.archetype === 'xiaoyao') {
+      if (this.heroArmorGroup?.visible && this.heroArmorTrimMat) {
+        const baseTrim =
+          this.heroArmorRarity === 'legendary' ? 0.96 : this.heroArmorRarity === 'epic' ? 0.68 : 0.44;
+        this.heroArmorTrimMat.emissiveIntensity = baseTrim * (0.86 + Math.sin(elapsed * 3.4) * 0.18);
+      }
+      if (this.heroRelicGroup?.visible) {
+        const activeCount =
+          this.heroRelicRarity === 'legendary'
+            ? 4
+            : this.heroRelicRarity === 'epic'
+              ? 3
+              : this.heroRelicRarity === 'rare'
+                ? 2
+                : 1;
+        const radius = this.heroRelicRarity === 'common' ? 0.39 : this.heroRelicRarity === 'legendary' ? 0.55 : 0.49;
+        const speed = this.heroRelicRarity === 'legendary' ? 1.55 : 1.2;
+        const baseY = this.heroRelicRarity === 'common' ? 0.14 : 0.34;
+        for (let i = 0; i < this.heroRelicOrbitals.length; i++) {
+          const sat = this.heroRelicOrbitals[i];
+          if (!sat.visible) continue;
+          const ph = (i / Math.max(1, activeCount)) * Math.PI * 2 + elapsed * speed;
+          sat.position.set(
+            Math.cos(ph) * radius,
+            baseY + Math.sin(ph * 1.8 + i) * 0.08,
+            Math.sin(ph) * radius,
+          );
+          sat.rotation.y = -ph + Math.PI * 0.5;
+          sat.rotation.z = Math.sin(elapsed * 2.4 + i) * 0.12;
+        }
+        if (this.heroRelicHalo?.visible) {
+          this.heroRelicHalo.rotation.z = elapsed * 0.85;
+        }
+      }
+    } else if (this.archetype === 'caster') {
       for (const orb of this.floatingOrbitals) {
         const ph = (orb.userData.orbitPhase as number) + elapsed * 1.65;
         orb.position.set(Math.cos(ph) * 0.76, 0.26 + Math.sin(ph * 2) * 0.09, Math.sin(ph) * 0.76);

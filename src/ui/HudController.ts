@@ -44,18 +44,27 @@ import {
 } from '../game/EndgameData';
 import type { WorldBiome } from '../world/ShushanArena';
 import type { MountMode } from '../entities/MountRig';
-import { WORLD_BOUND, WORLD_WAYPOINTS } from '../game/OpenWorldData';
+import {
+  WORLD_BOSS_SPAWNS,
+  WORLD_BOUND,
+  WORLD_CHESTS,
+  WORLD_SPIRIT_ORBS,
+  WORLD_WAYPOINTS,
+} from '../game/OpenWorldData';
 import {
   CATEGORY_LABELS,
   type EquipCategory,
+  type EquipRarity,
   MAX_FORGE_LEVEL,
   MAX_INVENTORY_SIZE,
   RARITY_LABELS,
   type RolledGearItem,
   SHOP_ITEMS,
   SHOP_ITEM_MAP,
+  type ShopItemStats,
   computeCombatPower,
   computeHeroLoadoutStats,
+  getRolledItemStats,
   getRolledUpgradeCost,
   getSalvageJade,
   getUpgradeCost,
@@ -165,9 +174,17 @@ export interface HudCallbacks {
   onClaimChapterChest?: (chestId: string) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
   onClaimTowerChest?: (starsReq: number) => { ok: boolean; jade: number; droppedItem?: RolledGearItem; reason: string };
   onReplayStory?: (kind: 'episode' | 'epilogue', id: number) => void;
-  onShopPreview?: (active: boolean, skinId?: string | null, weaponId?: string | null) => void;
+  onShopPreview?: (
+    active: boolean,
+    skinId?: string | null,
+    weaponId?: string | null,
+    armorId?: string | null,
+    relicId?: string | null,
+  ) => void;
   onShopPreviewRotate?: (deltaYaw: number) => void;
   onShopPreviewToggleSpin?: () => boolean;
+  onOpenAncientMap?: () => void;
+  onOpenRoster?: (focusCharId?: string) => void;
 }
 
 export interface ResultDisplayOptions {
@@ -235,6 +252,68 @@ const COMBO_CODEX_ENTRIES: readonly ComboCodexEntry[] = [
     isUlt: true,
   },
 ];
+
+const COMBO_CODEX_ENTRIES_MOBILE: readonly ComboCodexEntry[] = [
+  {
+    num: '1',
+    name: '普攻四连',
+    descHtml: '连点「出剑」×4 触发剑气破霸体',
+  },
+  {
+    num: '2',
+    name: '踏剑追影',
+    descHtml: '点「御剑」命中挂印 → 再点「踏剑」瞬身追斩（<b>+20剑意 · -1.5s万剑CD</b>）',
+  },
+  {
+    num: '3',
+    name: '剑印引雷',
+    descHtml: '点「御剑」挂印 → 点「万剑」额外 <b>+4</b> 追踪天剑 <b>+25%</b> 伤',
+  },
+  {
+    num: '4',
+    name: '流云破势',
+    descHtml: '点「闪避」极限闪身 / 点「弹反」→ 点「出剑」触发 <b>流云斩 / 破势处决</b>',
+  },
+  {
+    num: '5',
+    name: '万剑归宗',
+    descHtml: '6秒内打满 <b>3种不同招印</b>（斩/御/万/身）→ 点金色 <b>万剑归宗</b> <b>免费双大招</b>',
+    isUlt: true,
+  },
+];
+
+const ARMOR_SWATCH_COLORS: Record<string, [string, string]> = {
+  arm_qingshan: ['#8ea8b8', '#2a4a64'],
+  arm_xuanlin: ['#a8cce0', '#58dce8'],
+  arm_yunjin: ['#e6d09c', '#e4a448'],
+  arm_xuanwu: ['#e8d08e', '#ffd258'],
+};
+
+const RELIC_SWATCH_COLORS: Record<string, [string, string]> = {
+  rel_hulu: ['#a8682c', '#e8c474'],
+  rel_yupei: ['#4cf0d2', '#9affef'],
+  rel_shihun: ['#b458f2', '#e4a8ff'],
+  rel_bagua: ['#ffd860', '#fff0a6'],
+};
+
+function formatCompactItemStats(s: ShopItemStats): string {
+  const parts: string[] = [];
+  if (s.hpBonus) parts.push(`气血+${Math.round(s.hpBonus)}`);
+  if (s.atkPct) parts.push(`剑伤+${Math.round(s.atkPct * 100)}%`);
+  if (s.dmgReduce) parts.push(`减伤+${Math.round(s.dmgReduce * 100)}%`);
+  if (s.critRate) parts.push(`暴击+${Math.round(s.critRate * 100)}%`);
+  if (s.critDmg) parts.push(`暴伤+${Math.round(s.critDmg * 100)}%`);
+  if (s.speedPct) parts.push(`移速+${Math.round(s.speedPct * 100)}%`);
+  if (s.poisePct) parts.push(`破势+${Math.round(s.poisePct * 100)}%`);
+  if (s.cdReduce) parts.push(`冷却-${Math.round(s.cdReduce * 100)}%`);
+  if (s.lifestealPct) parts.push(`吸血+${Math.round(s.lifestealPct * 100)}%`);
+  if (s.killHealPct) parts.push(`斩回+${Math.round(s.killHealPct * 100)}%`);
+  if (s.parryWindow) parts.push(`弹窗+${Math.round(s.parryWindow * 1000)}ms`);
+  if (s.parryReflectPct) parts.push(`反伤+${Math.round(s.parryReflectPct * 100)}%`);
+  if (s.ultGainPct) parts.push(`剑意+${Math.round(s.ultGainPct * 100)}%`);
+  if (s.gourdBonus) parts.push(`灵葫+${s.gourdBonus}`);
+  return parts.slice(0, 4).join(' · ');
+}
 
 export class HudController {
   private readonly appRoot = this.q('#app');
@@ -324,6 +403,9 @@ export class HudController {
   private readonly stageBanner = this.q('#stage-banner');
   private readonly stageBannerKicker = this.q('#stage-banner-kicker');
   private readonly stageBannerTitle = this.q('#stage-banner-title');
+  private readonly mobileNotifyPill = this.q('#mobile-notify-pill');
+  private readonly mobileNotifyIcon = this.q('#mobile-notify-icon');
+  private readonly mobileNotifyText = this.q('#mobile-notify-text');
   private readonly calloutContainer = this.q('#callout-layer');
 
   // Title & 20-Stage Campaign Map elements
@@ -424,12 +506,25 @@ export class HudController {
   private worldGuidePulseTimer: number | null = null;
 
   private readonly shopPreviewStage = this.q('#shop-preview-stage');
+  private readonly shopEquippedSlotsEl = this.q('#shop-equipped-slots');
+  private readonly eqSlotBtns: Record<EquipCategory, HTMLElement> = {
+    weapon: this.q('#eq-slot-weapon'),
+    armor: this.q('#eq-slot-armor'),
+    relic: this.q('#eq-slot-relic'),
+    skin: this.q('#eq-slot-skin'),
+  };
   private readonly shopPreviewName = this.q('#shop-preview-name');
   private readonly shopPreviewSub = this.q('#shop-preview-sub');
+  private readonly shopPreviewStats = this.q('#shop-preview-stats');
   private readonly shopPreviewSpinBtn = this.q('#btn-preview-spin');
+  private readonly shopPreviewResetBtn = this.q('#btn-preview-reset');
   private readonly shopPreviewActionBtn = this.q('#btn-preview-action') as HTMLButtonElement;
+  private shopPreviewSpinOn = true;
   private previewSkinId: string | null = null;
   private previewWeaponId: string | null = null;
+  private previewArmorId: string | null = null;
+  private previewRelicId: string | null = null;
+  private previewBagUid: string | null = null;
   private previewDragPointerId: number | null = null;
   private previewDragLastX = 0;
 
@@ -497,12 +592,26 @@ export class HudController {
   private shopToastTimer: number | null = null;
   private dungeonToastTimer: number | null = null;
   private campToastTimer: number | null = null;
+  private mobileNotifyTimer: number | null = null;
+  private mobileNotifyCurrentText = '';
+  private lastMobileCodexState = false;
 
   constructor(private readonly callbacks: HudCallbacks) {
     this.appVersionBadge.textContent = `v${APP_VERSION}`;
     this.pauseVersionBadge.textContent = `v${APP_VERSION}`;
+    this.lastMobileCodexState = this.isMobileUi();
     this.populateComboCodex(this.q('#title-combo-codex'));
     this.populateComboCodex(this.q('#pause-combo-codex'));
+    this.syncShopPreviewButtonLabels();
+    window.addEventListener('resize', () => {
+      const mobileNow = this.isMobileUi();
+      if (mobileNow !== this.lastMobileCodexState) {
+        this.lastMobileCodexState = mobileNow;
+        this.populateComboCodex(this.q('#title-combo-codex'));
+        this.populateComboCodex(this.q('#pause-combo-codex'));
+      }
+      this.syncShopPreviewButtonLabels();
+    });
     const bindImg = (id: string, src: string) => {
       (this.q(id) as HTMLImageElement).src = src;
     };
@@ -568,6 +677,68 @@ export class HudController {
     });
     this.q('#btn-close-campaign').addEventListener('click', () => this.closeCampaignMap());
     this.q('#btn-close-shop').addEventListener('click', () => this.closeShop());
+
+    // Backdrop tap-to-close on mobile-friendly modals
+    this.campaignOverlay.addEventListener('click', (e) => {
+      if (e.target === this.campaignOverlay) this.closeCampaignMap();
+    });
+    this.codexOverlay.addEventListener('click', (e) => {
+      if (e.target === this.codexOverlay) this.closeStoryCodex();
+    });
+    this.shopOverlay.addEventListener('click', (e) => {
+      if (e.target === this.shopOverlay) this.closeShop();
+    });
+    this.dungeonOverlay.addEventListener('click', (e) => {
+      if (e.target === this.dungeonOverlay) this.closeDungeon();
+    });
+    this.pauseOverlay.addEventListener('click', (e) => {
+      if (e.target === this.pauseOverlay && this.currentScreenMode === 'paused') {
+        this.callbacks.onTogglePause();
+      }
+    });
+
+    // Interactive Ancient Chinese Scroll Map triggers
+    const openMapHandler = (e?: Event) => {
+      e?.stopPropagation();
+      this.callbacks.onOpenAncientMap?.();
+    };
+    this.minimapBox.addEventListener('click', openMapHandler);
+    this.minimapBox.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openMapHandler();
+      }
+    });
+    this.q('#btn-hud-map').addEventListener('click', openMapHandler);
+    this.q('#btn-world-map').addEventListener('click', openMapHandler);
+    this.q('#btn-camp-map').addEventListener('click', openMapHandler);
+    this.q('#btn-pause-map-scroll').addEventListener('click', openMapHandler);
+
+    // Character Physical Attributes & Roster Inspector triggers
+    const openRosterHandler = (e?: Event) => {
+      e?.stopPropagation();
+      this.callbacks.onOpenRoster?.('char_xiaoyao');
+    };
+    this.q('#btn-open-roster').addEventListener('click', openRosterHandler);
+    this.q('#btn-hud-roster').addEventListener('click', openRosterHandler);
+    this.q('#btn-world-roster').addEventListener('click', openRosterHandler);
+    this.q('#btn-camp-roster').addEventListener('click', openRosterHandler);
+    this.q('#btn-pause-roster').addEventListener('click', openRosterHandler);
+    this.q('#btn-boss-inspect').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.callbacks.onOpenRoster?.('__active_boss__');
+    });
+
+    // Equipped slots on the left 3D preview panel switch active shop tab
+    for (const cat of ['weapon', 'armor', 'relic', 'skin'] as EquipCategory[]) {
+      this.eqSlotBtns[cat].addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.activeShopCategory = cat;
+        this.shopGridEl.scrollTop = 0;
+        this.renderShopModal();
+      });
+    }
+
     this.q('#btn-preview-rot-l').addEventListener('click', (e) => {
       e.stopPropagation();
       this.callbacks.onShopPreviewRotate?.(-0.55);
@@ -578,31 +749,49 @@ export class HudController {
     });
     this.shopPreviewSpinBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const on = this.callbacks.onShopPreviewToggleSpin?.() ?? false;
-      this.shopPreviewSpinBtn.textContent = on ? '自动旋转: 开' : '自动旋转: 关';
+      this.shopPreviewSpinOn = this.callbacks.onShopPreviewToggleSpin?.() ?? false;
+      this.syncShopPreviewButtonLabels();
     });
-    this.q('#btn-preview-reset').addEventListener('click', (e) => {
+    this.shopPreviewResetBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.previewSkinId = null;
       this.previewWeaponId = null;
+      this.previewArmorId = null;
+      this.previewRelicId = null;
+      this.previewBagUid = null;
       this.renderShopModal();
     });
     this.shopPreviewActionBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const store = this.saveStore;
+      if (!store) return;
+      const equipped = store.getEquipped();
+      if (this.activeShopCategory === 'bag') {
+        const inv = store.getInventory();
+        const rolled = inv.find((g) => g.uid === this.previewBagUid) ?? inv[0];
+        if (!rolled) return;
+        if (equipped[rolled.category] !== rolled.uid) {
+          const ok = this.callbacks.onEquipRolled(rolled.uid);
+          if (ok) this.showShopToast(`已穿戴「${rolled.name}」`, true);
+        }
+        this.renderShopModal();
+        return;
+      }
       const targetId =
         this.activeShopCategory === 'skin'
-          ? (this.previewSkinId ?? store?.getEquipped().skin)
+          ? (this.previewSkinId ?? equipped.skin)
           : this.activeShopCategory === 'weapon'
-            ? (this.previewWeaponId ?? store?.getEquipped().weapon)
-            : null;
-      if (!store || !targetId) return;
+            ? (this.previewWeaponId ?? equipped.weapon)
+            : this.activeShopCategory === 'armor'
+              ? (this.previewArmorId ?? equipped.armor)
+              : (this.previewRelicId ?? equipped.relic);
+      if (!targetId) return;
       const item = SHOP_ITEM_MAP[targetId];
       if (!item) return;
       if (!store.isOwned(item.id)) {
         const res = this.callbacks.onShopBuy(item.id);
         this.showShopToast(res.ok ? `已购入并穿戴「${item.name}」` : res.reason, res.ok);
-      } else if (store.getEquipped()[item.category] !== item.id) {
+      } else if (equipped[item.category] !== item.id) {
         const ok = this.callbacks.onShopEquip(item.id);
         if (ok) this.showShopToast(`已换装「${item.name}」`, true);
       }
@@ -1173,17 +1362,97 @@ export class HudController {
 
   openShop(cat?: EquipCategory | 'bag'): void {
     if (cat) this.activeShopCategory = cat;
+    this.shopPreviewSpinOn = true;
     this.shopOverlay.classList.add('visible');
+    this.appRoot.classList.add('shop-preview-open');
+    this.syncShopPreviewButtonLabels();
     this.renderShopModal();
   }
 
   closeShop(): void {
+    this.previewSkinId = null;
+    this.previewWeaponId = null;
+    this.previewArmorId = null;
+    this.previewRelicId = null;
+    this.previewBagUid = null;
     this.shopOverlay.classList.remove('visible');
     this.shopOverlay.classList.remove('preview-active');
+    this.appRoot.classList.remove('shop-preview-open');
     this.callbacks.onShopPreview?.(false);
     if (this.currentScreenMode === 'camp') {
       this.renderCampPanel();
     }
+  }
+
+  private syncShopPreviewButtonLabels(): void {
+    const mob = this.isMobileUi();
+    this.shopPreviewSpinBtn.textContent = mob
+      ? this.shopPreviewSpinOn
+        ? '自旋:开'
+        : '自旋:关'
+      : this.shopPreviewSpinOn
+        ? '自动旋转: 开'
+        : '自动旋转: 关';
+    this.shopPreviewResetBtn.textContent = mob ? '恢复' : '恢复已穿';
+  }
+
+  isMobileUi(): boolean {
+    return (
+      window.matchMedia('(pointer: coarse)').matches ||
+      window.innerWidth <= 960 ||
+      this.appRoot.classList.contains('mobile-mode')
+    );
+  }
+
+  getActiveShopCategory(): EquipCategory | 'bag' {
+    return this.activeShopCategory;
+  }
+
+  getShopEquippedSlotsCount(): number {
+    return this.shopEquippedSlotsEl.querySelectorAll('.eq-slot-badge').length;
+  }
+
+  getMobileNotifyText(): string {
+    return this.mobileNotifyPill.classList.contains('visible') ? this.mobileNotifyCurrentText : '';
+  }
+
+  showMobileNotify(
+    text: string,
+    tone: 'info' | 'gold' | 'warn' | 'err' = 'info',
+    durationMs = 2800,
+  ): void {
+    const clean = text.trim();
+    if (!clean) return;
+    this.mobileNotifyCurrentText = clean;
+    this.mobileNotifyIcon.textContent =
+      tone === 'gold' ? '★' : tone === 'warn' ? '⚠' : tone === 'err' ? '✕' : '✦';
+    this.mobileNotifyText.textContent = clean;
+    this.mobileNotifyPill.classList.toggle('tone-gold', tone === 'gold');
+    this.mobileNotifyPill.classList.toggle('tone-warn', tone === 'warn');
+    this.mobileNotifyPill.classList.toggle('tone-err', tone === 'err');
+    this.mobileNotifyPill.classList.add('visible');
+    // Ensure legacy mobile banners never overlap the unified pill
+    this.worldToastEl.classList.remove('visible');
+    this.campToastEl.classList.remove('visible');
+    this.subtitleBanner.classList.remove('visible');
+    this.stageBanner.classList.remove('visible');
+    if (this.mobileNotifyTimer !== null) {
+      window.clearTimeout(this.mobileNotifyTimer);
+    }
+    this.mobileNotifyTimer = window.setTimeout(() => {
+      this.mobileNotifyPill.classList.remove('visible');
+      this.mobileNotifyCurrentText = '';
+      this.mobileNotifyTimer = null;
+    }, Math.max(1200, durationMs));
+  }
+
+  clearMobileNotify(): void {
+    if (this.mobileNotifyTimer !== null) {
+      window.clearTimeout(this.mobileNotifyTimer);
+      this.mobileNotifyTimer = null;
+    }
+    this.mobileNotifyCurrentText = '';
+    this.mobileNotifyPill.classList.remove('visible');
   }
 
   setCampTab(tab: 'cultivate' | 'meal'): void {
@@ -1204,6 +1473,10 @@ export class HudController {
   }
 
   showCampToast(text: string, ok: boolean): void {
+    if (this.isMobileUi()) {
+      this.showMobileNotify(text, ok ? 'info' : 'err', 2400);
+      return;
+    }
     this.campToastEl.textContent = text;
     this.campToastEl.classList.toggle('err', !ok);
     this.campToastEl.classList.add('visible');
@@ -1447,33 +1720,117 @@ export class HudController {
 
     this.shopGridEl.innerHTML = '';
 
-    const isPreviewTab = this.activeShopCategory === 'skin' || this.activeShopCategory === 'weapon';
+    // Populate Left-Side 4 Live Equipped Slots (武器 / 护甲 / 灵宝 / 皮肤)
+    const rarityClasses: EquipRarity[] = ['common', 'rare', 'epic', 'legendary'];
+    for (const cat of categories) {
+      const slotEl = this.eqSlotBtns[cat];
+      const eqId = equipped[cat];
+      const rolledEq = cat !== 'skin' ? inventory.find((g) => g.uid === eqId) : undefined;
+      const shopEq = SHOP_ITEM_MAP[rolledEq ? rolledEq.templateId : eqId];
+      const slotName = rolledEq ? rolledEq.name : (shopEq?.name ?? store.getEquippedItemName(cat));
+      const slotRarity: EquipRarity = rolledEq ? rolledEq.rarity : (shopEq?.rarity ?? 'common');
+      const nameEl = slotEl.querySelector<HTMLElement>('.eq-slot-name');
+      if (nameEl) nameEl.textContent = slotName;
+      for (const rc of rarityClasses) {
+        slotEl.classList.toggle(`rarity-${rc}`, rc === slotRarity);
+      }
+      slotEl.classList.toggle('active', this.activeShopCategory === cat);
+    }
+
     const isShopVisible = this.shopOverlay.classList.contains('visible');
-    this.shopOverlay.classList.toggle('preview-active', isShopVisible && isPreviewTab);
-    if (isShopVisible && isPreviewTab) {
-      const targetId =
-        this.activeShopCategory === 'skin'
-          ? (this.previewSkinId ?? equipped.skin)
-          : (this.previewWeaponId ?? equipped.weapon);
-      const pvItem = SHOP_ITEM_MAP[targetId];
-      if (pvItem) {
-        const pvOwned = store.isOwned(pvItem.id);
-        const pvEquipped = equipped[pvItem.category] === pvItem.id;
-        this.shopPreviewName.textContent = `3D 实时试穿 · ${pvItem.name}${pvEquipped ? '（已穿戴）' : pvOwned ? '（已拥有）' : '（未购入试穿中）'}`;
-        this.shopPreviewSub.textContent = `${pvItem.desc} · 拖动人物可 360° 观赏`;
-        if (pvEquipped) {
-          this.shopPreviewActionBtn.textContent = '已穿戴';
-          this.shopPreviewActionBtn.disabled = true;
-        } else if (pvOwned) {
-          this.shopPreviewActionBtn.textContent = '穿戴此装';
-          this.shopPreviewActionBtn.disabled = false;
-        } else {
-          this.shopPreviewActionBtn.textContent = `购入并穿戴 ◆${pvItem.price}`;
-          this.shopPreviewActionBtn.disabled = jade < pvItem.price;
+    this.shopOverlay.classList.toggle('preview-active', isShopVisible);
+    this.appRoot.classList.toggle('shop-preview-open', isShopVisible);
+    this.syncShopPreviewButtonLabels();
+
+    const resolveEffectivePreviewIds = (): {
+      skinId: string;
+      weaponId: string;
+      armorId: string;
+      relicId: string;
+    } => {
+      let skinId = this.previewSkinId ?? equipped.skin;
+      let weaponId = this.previewWeaponId ?? equipped.weapon;
+      let armorId = this.previewArmorId ?? equipped.armor;
+      let relicId = this.previewRelicId ?? equipped.relic;
+      if (this.activeShopCategory === 'bag' && this.previewBagUid) {
+        const rolled = inventory.find((g) => g.uid === this.previewBagUid);
+        if (rolled) {
+          if (rolled.category === 'weapon') weaponId = rolled.uid;
+          else if (rolled.category === 'armor') armorId = rolled.uid;
+          else if (rolled.category === 'relic') relicId = rolled.uid;
         }
       }
-      this.callbacks.onShopPreview?.(true, this.previewSkinId ?? equipped.skin, this.previewWeaponId ?? equipped.weapon);
-    } else if (!isShopVisible || !isPreviewTab) {
+      return { skinId, weaponId, armorId, relicId };
+    };
+
+    if (isShopVisible) {
+      const eff = resolveEffectivePreviewIds();
+      if (this.activeShopCategory === 'bag') {
+        const sortedPreview = [...inventory].sort((a, b) => b.powerScore - a.powerScore);
+        const activeBagItem =
+          (this.previewBagUid ? inventory.find((g) => g.uid === this.previewBagUid) : undefined) ??
+          sortedPreview[0];
+        if (activeBagItem) {
+          const isBagEq = equipped[activeBagItem.category] === activeBagItem.uid;
+          const rolledStatsStr = formatCompactItemStats(getRolledItemStats(activeBagItem));
+          this.shopPreviewName.textContent = `3D 试穿 · ${activeBagItem.name}${isBagEq ? '（已穿戴）' : '（背囊试穿）'}`;
+          this.shopPreviewSub.textContent = `${RARITY_LABELS[activeBagItem.rarity]} ${CATEGORY_LABELS[activeBagItem.category]} · 品质 ${activeBagItem.qualityPct}% · 拖动 360° 观赏`;
+          this.shopPreviewStats.textContent = rolledStatsStr
+            ? `战力 ${activeBagItem.powerScore} · ${rolledStatsStr}`
+            : `战力 ${activeBagItem.powerScore} · 气血+${totalHp} · 剑伤+${totalAtkPct}%`;
+          if (isBagEq) {
+            this.shopPreviewActionBtn.textContent = '已穿戴';
+            this.shopPreviewActionBtn.disabled = true;
+          } else {
+            this.shopPreviewActionBtn.textContent = '穿戴此神兵';
+            this.shopPreviewActionBtn.disabled = false;
+          }
+        } else {
+          this.shopPreviewName.textContent = `3D 实时外观 · ${store.getEquippedItemName('skin')}`;
+          this.shopPreviewSub.textContent = '背囊暂无打宝装备 · 当前展示已穿戴全套外观';
+          this.shopPreviewStats.textContent = `气血+${totalHp} · 剑伤+${totalAtkPct}% · 暴击${critPct}% · 减伤${reducePct}%`;
+          this.shopPreviewActionBtn.textContent = '已穿戴';
+          this.shopPreviewActionBtn.disabled = true;
+        }
+      } else {
+        const targetId =
+          this.activeShopCategory === 'skin'
+            ? eff.skinId
+            : this.activeShopCategory === 'weapon'
+              ? eff.weaponId
+              : this.activeShopCategory === 'armor'
+                ? eff.armorId
+                : eff.relicId;
+        const rolledMatch =
+          this.activeShopCategory !== 'skin'
+            ? inventory.find((g) => g.uid === targetId)
+            : undefined;
+        const pvItem = SHOP_ITEM_MAP[rolledMatch ? rolledMatch.templateId : targetId];
+        if (pvItem) {
+          const pvOwned = Boolean(rolledMatch) || store.isOwned(pvItem.id);
+          const pvEquipped = rolledMatch
+            ? equipped[rolledMatch.category] === rolledMatch.uid
+            : equipped[pvItem.category] === pvItem.id;
+          const displayName = rolledMatch ? rolledMatch.name : pvItem.name;
+          this.shopPreviewName.textContent = `3D 试穿 · ${displayName}${pvEquipped ? '（已穿戴）' : pvOwned ? '（已拥有）' : '（未购入试穿中）'}`;
+          this.shopPreviewSub.textContent = `${pvItem.desc} · 拖动 360° 观赏`;
+          const statStr = formatCompactItemStats(rolledMatch ? getRolledItemStats(rolledMatch) : pvItem.stats);
+          this.shopPreviewStats.textContent =
+            statStr || `总加护：气血+${totalHp} · 剑伤+${totalAtkPct}% · 暴击${critPct}% · 减伤${reducePct}%`;
+          if (pvEquipped) {
+            this.shopPreviewActionBtn.textContent = '已穿戴';
+            this.shopPreviewActionBtn.disabled = true;
+          } else if (pvOwned) {
+            this.shopPreviewActionBtn.textContent = '穿戴此装';
+            this.shopPreviewActionBtn.disabled = false;
+          } else {
+            this.shopPreviewActionBtn.textContent = `购入并穿戴 ◆${pvItem.price}`;
+            this.shopPreviewActionBtn.disabled = jade < pvItem.price;
+          }
+        }
+      }
+      this.callbacks.onShopPreview?.(true, eff.skinId, eff.weaponId, eff.armorId, eff.relicId);
+    } else {
       this.callbacks.onShopPreview?.(false);
     }
 
@@ -1503,6 +1860,7 @@ export class HudController {
       } else {
         for (const item of sorted) {
           const isEquipped = equipped[item.category] === item.uid;
+          const isBagPreviewing = this.previewBagUid === item.uid;
           const eqScore = store.getEquippedScore(item.category);
           const scoreDelta = item.powerScore - eqScore;
           const canForge = item.forgeLevel < MAX_FORGE_LEVEL;
@@ -1511,7 +1869,7 @@ export class HudController {
           const salvageJade = getSalvageJade(item);
 
           const card = document.createElement('div');
-          card.className = `shop-card bag-card rarity-${item.rarity}${isEquipped ? ' equipped' : ''}`;
+          card.className = `shop-card bag-card rarity-${item.rarity}${isEquipped ? ' equipped' : ''}${isBagPreviewing ? ' previewing' : ''}`;
           card.dataset.uid = item.uid;
 
           const lvTag = item.forgeLevel > 0 ? `<span class="forge-lv">+${item.forgeLevel}</span>` : '';
@@ -1527,6 +1885,7 @@ export class HudController {
             )
             .join('');
 
+          const tryOnBtn = `<button type="button" class="shop-act-btn preview" data-bag-act="preview">${isBagPreviewing ? '试穿中' : '试穿'}</button>`;
           const equipBtn = isEquipped
             ? '<span class="shop-done-lbl">生效中</span>'
             : `<button type="button" class="shop-act-btn equip" data-bag-act="equip">穿戴</button>`;
@@ -1550,12 +1909,25 @@ export class HudController {
               ${deltaHtml}
             </div>
             <div class="bag-affix-list">${affixHtml}</div>
-            <div class="shop-card-actions">${equipBtn}${forgeBtn}${salvageBtn}</div>
+            <div class="shop-card-actions">${tryOnBtn}${equipBtn}${forgeBtn}${salvageBtn}</div>
           `;
 
+          card.addEventListener('click', (e) => {
+            if ((e.target as HTMLElement).closest('button[data-bag-act]:not([data-bag-act="preview"])')) return;
+            this.previewBagUid = item.uid;
+            this.renderShopModal();
+          });
+          card.querySelector('[data-bag-act="preview"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.previewBagUid = item.uid;
+            this.renderShopModal();
+          });
           card.querySelector('[data-bag-act="equip"]')?.addEventListener('click', () => {
             const ok = this.callbacks.onEquipRolled(item.uid);
-            if (ok) this.showShopToast(`已穿戴「${item.name}」`, true);
+            if (ok) {
+              this.previewBagUid = item.uid;
+              this.showShopToast(`已穿戴「${item.name}」`, true);
+            }
             this.renderShopModal();
           });
           card.querySelector('[data-bag-act="upgrade"]')?.addEventListener('click', () => {
@@ -1564,6 +1936,7 @@ export class HudController {
             this.renderShopModal();
           });
           card.querySelector('[data-bag-act="salvage"]')?.addEventListener('click', () => {
+            if (this.previewBagUid === item.uid) this.previewBagUid = null;
             const res = this.callbacks.onSalvageRolled(item.uid);
             this.showShopToast(res.ok ? `分解「${item.name}」· +◆${res.jade}` : res.reason, res.ok);
             this.renderShopModal();
@@ -1597,20 +1970,25 @@ export class HudController {
         swatchHtml = `<div class="swatch-row"><span class="swatch" style="background:${item.skinVisual.primaryHex}"></span><span class="swatch" style="background:${item.skinVisual.secondaryHex}"></span><span class="swatch" style="background:${item.skinVisual.accentHex}"></span></div>`;
       } else if (item.weaponVisual) {
         swatchHtml = `<div class="swatch-row"><span class="swatch" style="background:${item.weaponVisual.steelHex}"></span><span class="swatch" style="background:${item.weaponVisual.emissiveHex}"></span></div>`;
+      } else if (item.category === 'armor' && ARMOR_SWATCH_COLORS[item.id]) {
+        const [c1, c2] = ARMOR_SWATCH_COLORS[item.id];
+        swatchHtml = `<div class="swatch-row"><span class="swatch" style="background:${c1}"></span><span class="swatch" style="background:${c2}"></span></div>`;
+      } else if (item.category === 'relic' && RELIC_SWATCH_COLORS[item.id]) {
+        const [c1, c2] = RELIC_SWATCH_COLORS[item.id];
+        swatchHtml = `<div class="swatch-row"><span class="swatch" style="background:${c1}"></span><span class="swatch" style="background:${c2}"></span></div>`;
       }
 
       const lvTag = item.category !== 'skin' && lv > 0 ? `<span class="forge-lv">+${lv}</span>` : '';
       const eqTag = isEquipped ? '<span class="eq-pill">已穿戴</span>' : '';
       const isPreviewing =
         (item.category === 'skin' && (this.previewSkinId ?? equipped.skin) === item.id) ||
-        (item.category === 'weapon' && (this.previewWeaponId ?? equipped.weapon) === item.id);
+        (item.category === 'weapon' && (this.previewWeaponId ?? equipped.weapon) === item.id) ||
+        (item.category === 'armor' && (this.previewArmorId ?? equipped.armor) === item.id) ||
+        (item.category === 'relic' && (this.previewRelicId ?? equipped.relic) === item.id);
       if (isPreviewing) card.classList.add('previewing');
 
       let actionsHtml = '';
-      const tryOnBtn =
-        item.category === 'skin' || item.category === 'weapon'
-          ? `<button type="button" class="shop-act-btn preview" data-act="preview" data-id="${item.id}">${isPreviewing ? '试穿中' : '试穿'}</button>`
-          : '';
+      const tryOnBtn = `<button type="button" class="shop-act-btn preview" data-act="preview" data-id="${item.id}">${isPreviewing ? '试穿中' : '试穿'}</button>`;
       if (!owned) {
         const afford = jade >= item.price;
         actionsHtml = `${tryOnBtn}<button type="button" class="shop-act-btn buy${afford ? '' : ' locked'}" data-act="buy" data-id="${item.id}"${afford ? '' : ' disabled'}>购入 ◆${item.price}</button>`;
@@ -1642,14 +2020,18 @@ export class HudController {
         <div class="shop-card-actions">${actionsHtml}</div>
       `;
 
-      if (item.category === 'skin' || item.category === 'weapon') {
-        card.addEventListener('click', (e) => {
-          if ((e.target as HTMLElement).closest('button[data-act]:not([data-act="preview"])')) return;
-          if (item.category === 'skin') this.previewSkinId = item.id;
-          else this.previewWeaponId = item.id;
-          this.renderShopModal();
-        });
-      }
+      const applyCardPreview = (id: string) => {
+        if (item.category === 'skin') this.previewSkinId = id;
+        else if (item.category === 'weapon') this.previewWeaponId = id;
+        else if (item.category === 'armor') this.previewArmorId = id;
+        else if (item.category === 'relic') this.previewRelicId = id;
+      };
+
+      card.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('button[data-act]:not([data-act="preview"])')) return;
+        applyCardPreview(item.id);
+        this.renderShopModal();
+      });
 
       for (const btn of Array.from(card.querySelectorAll<HTMLButtonElement>('button[data-act]'))) {
         btn.addEventListener('click', (e) => {
@@ -1657,23 +2039,18 @@ export class HudController {
           const id = btn.dataset.id ?? '';
           if (act === 'preview') {
             e.stopPropagation();
-            if (item.category === 'skin') this.previewSkinId = id;
-            else if (item.category === 'weapon') this.previewWeaponId = id;
+            applyCardPreview(id);
             this.renderShopModal();
             return;
           }
           if (act === 'buy') {
             const res = this.callbacks.onShopBuy(id);
-            if (res.ok) {
-              if (item.category === 'skin') this.previewSkinId = id;
-              else if (item.category === 'weapon') this.previewWeaponId = id;
-            }
+            if (res.ok) applyCardPreview(id);
             this.showShopToast(res.ok ? `已购入并穿戴「${item.name}」` : res.reason, res.ok);
           } else if (act === 'equip') {
             const ok = this.callbacks.onShopEquip(id);
             if (ok) {
-              if (item.category === 'skin') this.previewSkinId = id;
-              else if (item.category === 'weapon') this.previewWeaponId = id;
+              applyCardPreview(id);
               this.showShopToast(`已换装「${item.name}」`, true);
             }
           } else if (act === 'upgrade') {
@@ -1848,6 +2225,10 @@ export class HudController {
   applyMobileMode(enabled: boolean): void {
     this.appRoot.classList.toggle('mobile-mode', enabled);
     this.pauseDesc.textContent = '暂歇剑势，随时继续试剑。';
+    this.lastMobileCodexState = this.isMobileUi();
+    this.populateComboCodex(this.q('#title-combo-codex'));
+    this.populateComboCodex(this.q('#pause-combo-codex'));
+    this.syncShopPreviewButtonLabels();
     if (enabled) {
       this.setWheelForced(true);
       this.titleTagline.textContent = '写实 3D 仙侠五章二十五关闯关 · 三星评星与剑道境界养成 · 手机双摇杆王者轮盘 · 跨端双人联机。';
@@ -1918,7 +2299,9 @@ export class HudController {
       this.codexOverlay.classList.remove('visible');
     }
     if (mode === 'playing' || mode === 'cutscene' || mode === 'dialogue') {
-      this.shopOverlay.classList.remove('visible');
+      if (this.shopOverlay.classList.contains('visible')) {
+        this.closeShop();
+      }
       this.dungeonOverlay.classList.remove('visible');
     }
     const playableHud = mode === 'playing' || mode === 'camp' || mode === 'world';
@@ -1962,6 +2345,10 @@ export class HudController {
   }
 
   showStageBanner(kicker: string, title: string, duration = 2.6): void {
+    if (this.isMobileUi()) {
+      this.showMobileNotify(`${kicker} · ${title}`, 'gold', Math.round(duration * 1000));
+      return;
+    }
     this.stageBannerKicker.textContent = kicker;
     this.stageBannerTitle.textContent = title;
     this.stageBanner.classList.add('visible');
@@ -1969,6 +2356,10 @@ export class HudController {
   }
 
   showSubtitle(line: string, duration = 3.2): void {
+    if (this.isMobileUi()) {
+      this.showMobileNotify(line, 'info', Math.round(duration * 1000));
+      return;
+    }
     this.subtitleBanner.textContent = line;
     this.subtitleBanner.classList.add('visible');
     this.subtitleTimer = duration;
@@ -1979,6 +2370,7 @@ export class HudController {
     this.subtitleBanner.classList.remove('visible');
     this.stageBannerTimer = 0;
     this.stageBanner.classList.remove('visible');
+    this.clearMobileNotify();
   }
 
   tickSubtitle(dt: number): void {
@@ -2419,7 +2811,8 @@ export class HudController {
   }
 
   private populateComboCodex(container: HTMLElement): void {
-    const rowsHtml = COMBO_CODEX_ENTRIES.map(
+    const entries = this.isMobileUi() ? COMBO_CODEX_ENTRIES_MOBILE : COMBO_CODEX_ENTRIES;
+    const rowsHtml = entries.map(
       (entry) => `
       <div class="combo-codex-row${entry.isUlt ? ' is-ult' : ''}">
         <span class="combo-codex-num">${entry.num}</span>
@@ -2508,7 +2901,7 @@ export class HudController {
 
   setWorldStatus(regionName: string, waypoints: number, chests: number, bosses: number, orbs = 0): void {
     this.worldRegionName.textContent = regionName;
-    this.worldProgressPill.textContent = `锚点 ${waypoints}/4 · 宝箱 ${chests}/6 · 灵瞳 ${orbs}/6 · 首领 ${bosses}/4`;
+    this.worldProgressPill.textContent = `锚点 ${waypoints}/${WORLD_WAYPOINTS.length} · 宝箱 ${chests}/${WORLD_CHESTS.length} · 灵瞳 ${orbs}/${WORLD_SPIRIT_ORBS.length} · 首领 ${bosses}/${WORLD_BOSS_SPAWNS.length}`;
   }
 
   setWorldGuide(title: string, dirText: string, howto: string, autoNavActive: boolean, resumeLabel?: string): void {
@@ -2543,6 +2936,10 @@ export class HudController {
   }
 
   showWorldToast(text: string, ok = true, durationMs = 2800): void {
+    if (this.isMobileUi()) {
+      this.showMobileNotify(text, ok ? 'info' : 'err', durationMs);
+      return;
+    }
     this.worldToastEl.textContent = text;
     this.worldToastEl.classList.toggle('err', !ok);
     this.worldToastEl.classList.add('visible');
@@ -2596,7 +2993,7 @@ export class HudController {
     ctx.fillStyle = '#091522';
     ctx.fillRect(0, 0, w, h);
 
-    // Quadrant biome tints
+    // Quadrant biome tints + Northern Abyssal Crypt chasm tint
     const half = mapSize * 0.5;
     ctx.fillStyle = 'rgba(42, 128, 108, 0.24)'; // NE Peach
     ctx.fillRect(ox + half, oy, half, half);
@@ -2606,6 +3003,8 @@ export class HudController {
     ctx.fillRect(ox, oy + half, half, half);
     ctx.fillStyle = 'rgba(56, 136, 198, 0.24)'; // SE Celestial
     ctx.fillRect(ox + half, oy + half, half, half);
+    ctx.fillStyle = 'rgba(56, 224, 188, 0.24)'; // North Crypt Chasm
+    ctx.fillRect(ox + mapSize * 0.34, oy, mapSize * 0.32, mapSize * 0.28);
 
     // Central Shushan Terrace
     ctx.strokeStyle = 'rgba(124, 240, 224, 0.55)';
