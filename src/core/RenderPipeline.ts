@@ -5,11 +5,56 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
+export type QualityPreset = 'ultra' | 'balanced' | 'smooth';
+export type AtmosphereThemeId = 'moonlit' | 'ink_frost' | 'golden_dawn' | 'astral_violet';
+export type BloomMode = 'vivid' | 'soft' | 'minimal';
+
+export interface VisualSettingsState {
+  quality: QualityPreset;
+  atmosphereTheme: AtmosphereThemeId;
+  bloomMode: BloomMode;
+  autoNavPolicy: 'fight' | 'evade';
+  guideCompact: boolean;
+  muted: boolean;
+}
+
+export const DEFAULT_VISUAL_SETTINGS: VisualSettingsState = {
+  quality: 'balanced',
+  atmosphereTheme: 'moonlit',
+  bloomMode: 'soft',
+  autoNavPolicy: 'fight',
+  guideCompact: true,
+  muted: false,
+};
+
+const QUALITY_MAX_DPR: Record<QualityPreset, number> = {
+  ultra: 2.0,
+  balanced: 1.45,
+  smooth: 1.0,
+};
+
+const BLOOM_STRENGTH_MAP: Record<BloomMode, number> = {
+  vivid: 0.42,
+  soft: 0.25,
+  minimal: 0.10,
+};
+
+const ATMOSPHERE_PRESETS: Record<
+  AtmosphereThemeId,
+  { tint: [number, number, number]; exposure: number; contrast: number; vignette: number }
+> = {
+  moonlit: { tint: [0.98, 1.01, 1.05], exposure: 1.06, contrast: 1.055, vignette: 0.16 },
+  ink_frost: { tint: [0.93, 1.02, 1.12], exposure: 1.08, contrast: 1.075, vignette: 0.19 },
+  golden_dawn: { tint: [1.10, 1.02, 0.90], exposure: 1.12, contrast: 1.045, vignette: 0.14 },
+  astral_violet: { tint: [1.04, 0.96, 1.14], exposure: 1.05, contrast: 1.065, vignette: 0.20 },
+};
+
 const FilmicGradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uContrast: { value: 1.055 },
     uVignette: { value: 0.16 },
+    uTintColor: { value: new THREE.Vector3(1, 1, 1) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -22,6 +67,7 @@ const FilmicGradeShader = {
     uniform sampler2D tDiffuse;
     uniform float uContrast;
     uniform float uVignette;
+    uniform vec3 uTintColor;
     varying vec2 vUv;
 
     void main() {
@@ -32,6 +78,7 @@ const FilmicGradeShader = {
       vec3 shadowTint = vec3(0.95, 1.01, 1.07);
       vec3 highTint = vec3(1.04, 1.01, 0.96);
       col *= mix(shadowTint, highTint, smoothstep(0.12, 0.72, lum));
+      col *= uTintColor;
       col = (col - 0.5) * uContrast + 0.5;
       col = max(col, vec3(0.0));
       float d = length(vUv - vec2(0.5));
@@ -182,6 +229,29 @@ export class RenderPipeline {
     this.resize(true);
   }
 
+  /** Applies live quality tier, atmosphere color grading & HDR bloom strength without recreating the pipeline. */
+  applyVisualSettings(opts: {
+    quality: QualityPreset;
+    atmosphereTheme: AtmosphereThemeId;
+    bloomMode: BloomMode;
+  }): void {
+    const maxDpr = QUALITY_MAX_DPR[opts.quality] ?? QUALITY_MAX_DPR.balanced;
+    this.bloomPass.strength = BLOOM_STRENGTH_MAP[opts.bloomMode] ?? BLOOM_STRENGTH_MAP.soft;
+    this.bloomPass.enabled = this.bloomEnabled;
+
+    const preset = ATMOSPHERE_PRESETS[opts.atmosphereTheme] ?? ATMOSPHERE_PRESETS.moonlit;
+    this.setExposure(preset.exposure);
+    const uniforms = this.gradePass.uniforms as Record<string, { value: unknown }>;
+    const tintVec = uniforms['uTintColor']?.value as THREE.Vector3 | undefined;
+    if (tintVec && typeof tintVec.set === 'function') {
+      tintVec.set(preset.tint[0], preset.tint[1], preset.tint[2]);
+    }
+    if (uniforms['uContrast']) uniforms['uContrast'].value = preset.contrast;
+    if (uniforms['uVignette']) uniforms['uVignette'].value = preset.vignette;
+
+    this.setMaxDpr(maxDpr);
+  }
+
   private isMobileOrCoarseViewport(width: number, height: number): boolean {
     const coarsePointer =
       typeof window.matchMedia === 'function' &&
@@ -216,7 +286,7 @@ export class RenderPipeline {
     const height = Math.max(1, Math.floor(canvas.clientHeight || window.innerHeight));
 
     const isMobile = this.isMobileOrCoarseViewport(width, height);
-    const hardCap = isMobile ? 1.75 : 2.0;
+    const hardCap = isMobile ? (this.userMaxDpr !== null && this.userMaxDpr >= 1.9 ? 2.0 : 1.75) : 2.0;
     const effectiveMaxDpr =
       this.userMaxDpr !== null ? Math.min(this.userMaxDpr, hardCap) : hardCap;
     const pixelBudget = isMobile ? 1_150_000 : 2_600_000;

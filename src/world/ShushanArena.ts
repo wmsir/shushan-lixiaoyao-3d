@@ -21,7 +21,13 @@ import {
   createStreamStoneMaps,
 } from './Materials';
 import skyUrl from '../assets/shushan-sky.jpg';
-import { WORLD_BOUND, WORLD_CHESTS, WORLD_SPIRIT_ORBS, WORLD_WAYPOINTS } from '../game/OpenWorldData';
+import {
+  WORLD_BOUND,
+  WORLD_CHESTS,
+  WORLD_HERB_NODES,
+  WORLD_SPIRIT_ORBS,
+  WORLD_WAYPOINTS,
+} from '../game/OpenWorldData';
 
 export type ArenaLayout = 'corridor' | 'arena' | 'pillars' | 'islands' | 'openworld';
 
@@ -72,6 +78,7 @@ export class ShushanArena {
 
   private readonly skyDome: THREE.Mesh;
   private readonly baguaMat: THREE.ShaderMaterial;
+  private readonly baguaPlane: THREE.Mesh;
   private readonly bossSealMat: THREE.ShaderMaterial;
   private readonly bossRingPlane: THREE.Mesh;
   private readonly grassMat: THREE.ShaderMaterial;
@@ -179,6 +186,25 @@ export class ShushanArena {
     string,
     { group: THREE.Group; core: THREE.Mesh; ring: THREE.Mesh; baseY: number; collected: boolean }
   >();
+  private readonly worldHerbMeshes = new Map<string, THREE.Group>();
+  private readonly worldHerbVisuals = new Map<
+    string,
+    {
+      group: THREE.Group;
+      core: THREE.Object3D;
+      ring: THREE.Mesh;
+      beam: THREE.Mesh;
+      baseY: number;
+      phase: number;
+      available: boolean;
+    }
+  >();
+  private readonly owCelestialClouds: Array<{ mesh: THREE.Object3D; baseY: number; phase: number }> = [];
+  private readonly owCelestialHalos: THREE.Mesh[] = [];
+  private readonly owFortressFlames: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }> = [];
+  private readonly owFortressLights: Array<{ light: THREE.PointLight; baseIntensity: number; phase: number }> = [];
+  private readonly owFortressBanners: Array<{ mesh: THREE.Mesh; baseRotY: number; phase: number }> = [];
+  private readonly owValleyWaterMeshes: THREE.Mesh[] = [];
   private cryptRuneRing?: THREE.Mesh;
   private cryptInnerSigil?: THREE.Mesh;
   private readonly cryptFlames: THREE.Mesh[] = [];
@@ -348,6 +374,7 @@ export class ShushanArena {
     const baguaPlane = new THREE.Mesh(new THREE.PlaneGeometry(15.5, 15.5), this.baguaMat);
     baguaPlane.rotation.x = -Math.PI / 2;
     baguaPlane.position.y = 0.024;
+    this.baguaPlane = baguaPlane;
     this.group.add(baguaPlane);
 
     // Alpha-feathered Crimson-Gold Boss Barrier Sigil Ring (replaces flat opaque pink donut!)
@@ -3911,37 +3938,71 @@ export class ShushanArena {
       }
     }
 
-    // 3. Six Regional Landmark Ground Patches (layered cleanly without coplanar Z-fighting)
-    const peachPatch = new THREE.Mesh(
-      new THREE.CircleGeometry(22, 28),
-      new THREE.MeshStandardMaterial({
-        map: owTerrain.map,
-        color: '#88b498',
-        roughness: 0.9,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      }),
-    );
-    peachPatch.rotation.x = -Math.PI / 2;
-    peachPatch.position.set(46, -0.17, -44);
-    ow.add(peachPatch);
+    // Helper: crisp carved Chinese calligraphy plaque texture for Open-World landmarks
+    const makeLandmarkPlaque = (
+      title: string,
+      bgHex: string,
+      borderHex: string,
+      textHex: string,
+    ): THREE.CanvasTexture => {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 192;
+      const ctx = c.getContext('2d')!;
+      ctx.fillStyle = bgHex;
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.strokeStyle = borderHex;
+      ctx.lineWidth = 12;
+      ctx.strokeRect(10, 10, c.width - 20, c.height - 20);
+      ctx.lineWidth = 4;
+      ctx.strokeRect(24, 24, c.width - 48, c.height - 48);
+      ctx.fillStyle = textHex;
+      ctx.font = '900 84px "Noto Serif SC", "Songti SC", "KaiTi", serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(title, c.width * 0.5, c.height * 0.54);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    };
 
-    const gravePatch = new THREE.Mesh(
-      new THREE.CircleGeometry(22, 28),
-      new THREE.MeshStandardMaterial({
-        map: carvedTex,
-        color: '#463f62',
-        roughness: 0.92,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      }),
-    );
-    gravePatch.rotation.x = -Math.PI / 2;
-    gravePatch.position.set(-48, -0.17, -44);
-    ow.add(gravePatch);
+    const campWoodTex = createCampWoodTexture();
+    const streamMaps = createStreamStoneMaps();
 
+    // 3. Handcrafted Regional Terrain Grounds (NO flat circular stickers or repetitive Bagua clutter!)
+    // 3a. 东岳·翠竹山间桃谷 (Lush valley meadow patch + organic mossy ground)
+    const valleyFloorMat = new THREE.MeshStandardMaterial({
+      map: owTerrain.map,
+      color: '#5a946e',
+      roughness: 0.92,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const valleyFloor = new THREE.Mesh(new THREE.PlaneGeometry(46, 44), valleyFloorMat);
+    valleyFloor.rotation.x = -Math.PI / 2;
+    valleyFloor.position.set(47, -0.22, -45);
+    valleyFloor.receiveShadow = true;
+    ow.add(valleyFloor);
+
+    // 3b. 西陲·黑风古山寨 (Compacted rugged mountain stronghold earth yard with warm firelight bounce)
+    const fortressFloorMat = new THREE.MeshStandardMaterial({
+      map: owTerrain.map,
+      color: '#6e5742',
+      emissive: new THREE.Color('#1c1108'),
+      emissiveIntensity: 0.28,
+      roughness: 0.92,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const fortressYard = new THREE.Mesh(new THREE.PlaneGeometry(36, 36), fortressFloorMat);
+    fortressYard.rotation.x = -Math.PI / 2;
+    fortressYard.position.set(-48, -0.21, -45);
+    fortressYard.receiveShadow = true;
+    ow.add(fortressYard);
+
+    // 3c. 南冥·赤焰炼器熔谷 (Magma Pool + Boss Platform + 玄铁炼器栈桥 + 古铸剑鼎)
     const lavaMaps = createLavaCrustMaps();
     const lavaPoolMat = new THREE.MeshStandardMaterial({
       map: lavaMaps.map,
@@ -3965,23 +4026,67 @@ export class ShushanArena {
     lavaBossPlatform.receiveShadow = true;
     ow.add(lavaPatch, lavaBossPlatform);
 
-    const starPatch = new THREE.Mesh(
-      new THREE.CircleGeometry(21, 28),
-      new THREE.MeshStandardMaterial({
-        map: carvedTex,
-        color: '#6b8ea6',
-        emissive: new THREE.Color('#14304a'),
-        emissiveIntensity: 0.38,
-        roughness: 0.56,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
+    // 3d. 九霄·凌霄天庭 (Multi-stepped White-Jade Octagonal Celestial Terrace — NO flat blue circle!)
+    const whiteJadeMat = new THREE.MeshStandardMaterial({
+      map: carvedTex,
+      color: '#eef4fa',
+      emissive: new THREE.Color('#203448'),
+      emissiveIntensity: 0.24,
+      roughness: 0.42,
+      metalness: 0.08,
+    });
+    const heavenlyGoldMat = new THREE.MeshStandardMaterial({
+      color: '#e8bd5a',
+      emissive: new THREE.Color('#5a3908'),
+      emissiveIntensity: 0.42,
+      roughness: 0.28,
+      metalness: 0.78,
+    });
+    const imperialCrimsonMat = new THREE.MeshStandardMaterial({
+      map: lacquerTex,
+      color: '#9c221b',
+      roughness: 0.48,
+      metalness: 0.14,
+    });
+    const glazedRoofGoldMat = new THREE.MeshStandardMaterial({
+      color: '#e6b244',
+      emissive: new THREE.Color('#4a2d06'),
+      emissiveIntensity: 0.36,
+      roughness: 0.32,
+      metalness: 0.62,
+    });
+
+    const celestialBase = new THREE.Mesh(new THREE.CylinderGeometry(18.6, 20.2, 0.14, 8), whiteJadeMat);
+    celestialBase.rotation.y = Math.PI / 8;
+    celestialBase.position.set(50, -0.17, 46);
+    celestialBase.receiveShadow = true;
+    const celestialRim = new THREE.Mesh(
+      new THREE.RingGeometry(17.8, 18.5, 8),
+      new THREE.MeshBasicMaterial({
+        color: '#ffe082',
+        transparent: true,
+        opacity: 0.68,
+        side: THREE.DoubleSide,
       }),
     );
-    starPatch.rotation.x = -Math.PI / 2;
-    starPatch.position.set(48, -0.17, 44);
-    ow.add(starPatch);
+    celestialRim.rotation.x = -Math.PI / 2;
+    celestialRim.rotation.z = Math.PI / 8;
+    celestialRim.position.set(50, -0.09, 46);
+    const celestialBossDais = new THREE.Mesh(new THREE.CylinderGeometry(6.8, 7.6, 0.12, 8), whiteJadeMat);
+    celestialBossDais.rotation.y = Math.PI / 8;
+    celestialBossDais.position.set(54, -0.1, 48);
+    celestialBossDais.receiveShadow = true;
+    // Imperial crimson-gold carpet walkway leading from 南天门 to 凌霄玉台
+    const imperialRunner = new THREE.Mesh(
+      new THREE.BoxGeometry(3.6, 0.05, 19),
+      new THREE.MeshStandardMaterial({ color: '#9e261e', roughness: 0.72, metalness: 0.08 }),
+    );
+    imperialRunner.rotation.y = -0.58;
+    imperialRunner.position.set(42.5, -0.11, 34);
+    imperialRunner.receiveShadow = true;
+    ow.add(celestialBase, celestialRim, celestialBossDais, imperialRunner);
 
+    // 3e. 北溟·幽冥古地窟 floor
     const cryptPatch = new THREE.Mesh(
       new THREE.CircleGeometry(21, 28),
       new THREE.MeshStandardMaterial({
@@ -4000,7 +4105,303 @@ export class ShushanArena {
     cryptPatch.position.set(0, -0.16, -58);
     ow.add(cryptPatch);
 
-    // 4. Sculpted Regional Landmarks (Peach Trees, Buried Swords, Volcanic Spires, Star Columns & 北溟幽冥古地窟)
+    // =========================================================================
+    // 4A. 东岳 · 翠竹山间桃谷 (Mountain Hills, Jade Stream, Wooden Arch Bridge, Pavilion, Bamboo & Peach)
+    // =========================================================================
+    const hillMatDark = new THREE.MeshStandardMaterial({
+      map: owTerrain.map,
+      color: '#2c5b46',
+      roughness: 0.94,
+      flatShading: true,
+    });
+    const hillMatMid = new THREE.MeshStandardMaterial({
+      map: owTerrain.map,
+      color: '#3c7758',
+      roughness: 0.92,
+      flatShading: true,
+    });
+    const hillMatTop = new THREE.MeshStandardMaterial({
+      map: owTerrain.map,
+      color: '#4f8e68',
+      roughness: 0.9,
+      flatShading: true,
+    });
+    // Multi-tiered green mountain hill terraces framing the scenic valley perimeter
+    const valleyHills: Array<[number, number, number, number]> = [
+      [64, -56, 8.2, 7.6],
+      [55, -64, 7.8, 6.8],
+      [39, -65, 7.4, 6.4],
+      [27, -58, 6.6, 5.8],
+      [67, -41, 7.0, 6.2],
+    ];
+    const terraceHillGeo = new THREE.CylinderGeometry(0.68, 1.0, 1.0, 9);
+    for (const [hx, hz, hr, hh] of valleyHills) {
+      const hg = new THREE.Group();
+      hg.position.set(hx, -0.25, hz);
+      const t0 = new THREE.Mesh(terraceHillGeo, hillMatDark);
+      t0.scale.set(hr, hh * 0.42, hr * 0.88);
+      t0.position.y = hh * 0.21;
+      const t1 = new THREE.Mesh(terraceHillGeo, hillMatMid);
+      t1.scale.set(hr * 0.72, hh * 0.36, hr * 0.66);
+      t1.position.set(-hr * 0.08, hh * 0.56, -hr * 0.05);
+      const t2 = new THREE.Mesh(terraceHillGeo, hillMatTop);
+      t2.scale.set(hr * 0.44, hh * 0.3, hr * 0.42);
+      t2.position.set(hr * 0.05, hh * 0.84, hr * 0.04);
+      hg.add(t0, t1, t2);
+      ow.add(hg);
+      this.openWorldObstacles.push({ x: hx, z: hz, r: Math.min(4.6, hr * 0.56) });
+    }
+
+    // Shimmering Jade Mountain Stream winding through 翠竹山间桃谷
+    const streamBedMat = new THREE.MeshStandardMaterial({
+      map: streamMaps.map,
+      roughnessMap: streamMaps.roughnessMap,
+      color: '#467478',
+      roughness: 0.86,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const valleyWaterMat = new THREE.MeshStandardMaterial({
+      color: '#48c8bc',
+      emissive: new THREE.Color('#186e68'),
+      emissiveIntensity: 0.32,
+      roughness: 0.18,
+      metalness: 0.25,
+      transparent: true,
+      opacity: 0.78,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const streamPath: Array<[number, number]> = [
+      [27, -51],
+      [33, -44],
+      [40, -39],
+      [48, -35],
+      [57, -31],
+      [66, -28],
+    ];
+    for (let si = 0; si < streamPath.length - 1; si++) {
+      const [x0, z0] = streamPath[si];
+      const [x1, z1] = streamPath[si + 1];
+      const mx = (x0 + x1) * 0.5;
+      const mz = (z0 + z1) * 0.5;
+      const segLen = Math.hypot(x1 - x0, z1 - z0) + 1.6;
+      const segAng = Math.atan2(x1 - x0, z1 - z0);
+      const bed = new THREE.Mesh(new THREE.PlaneGeometry(4.8, segLen), streamBedMat);
+      bed.rotation.x = -Math.PI / 2;
+      bed.rotation.z = -segAng;
+      bed.position.set(mx, -0.2, mz);
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(3.9, segLen), valleyWaterMat.clone());
+      water.rotation.x = -Math.PI / 2;
+      water.rotation.z = -segAng;
+      water.position.set(mx, -0.14, mz);
+      ow.add(bed, water);
+      this.owValleyWaterMeshes.push(water);
+    }
+    // Smooth riverside mossy pebbles along banks (decorative, non-blocking)
+    const pebbleMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#586c66', roughness: 0.88, flatShading: true });
+    const pebbleGeo = new THREE.DodecahedronGeometry(0.55, 1);
+    for (const [rx, rz, sc] of [
+      [30, -49, 1.1], [36, -44, 0.9], [44, -34, 1.0], [52, -37, 1.1],
+      [60, -28, 1.0], [49, -31, 0.85], [31, -41, 0.95], [56, -35, 0.9],
+    ]) {
+      const pb = new THREE.Mesh(pebbleGeo, pebbleMat);
+      pb.scale.set(sc * 1.2, sc * 0.55, sc);
+      pb.position.set(rx, -0.05, rz);
+      ow.add(pb);
+    }
+
+    // Sculpted Curved Wooden Arch Bridge (山间木拱桥) spanning the stream at (40, -39)
+    const bridgeTimberMat = new THREE.MeshStandardMaterial({
+      map: campWoodTex,
+      color: '#9c683d',
+      roughness: 0.76,
+      metalness: 0.06,
+    });
+    const bridgeRailMat = new THREE.MeshStandardMaterial({
+      map: lacquerTex,
+      color: '#9e3226',
+      roughness: 0.56,
+      metalness: 0.1,
+    });
+    const archBridge = new THREE.Group();
+    archBridge.position.set(40, -0.14, -39);
+    archBridge.rotation.y = 0.56; // perpendicular to stream segment
+    const plankGeo = new THREE.BoxGeometry(3.4, 0.14, 0.82);
+    const bridgeSpan = 7.4;
+    const plankCount = 9;
+    for (let pi = 0; pi < plankCount; pi++) {
+      const t = pi / (plankCount - 1) - 0.5; // -0.5..0.5
+      const lz = t * bridgeSpan;
+      const archY = Math.cos(t * Math.PI) * 0.62;
+      const tilt = Math.sin(t * Math.PI) * 0.24;
+      const plank = new THREE.Mesh(plankGeo, bridgeTimberMat);
+      plank.position.set(0, archY + 0.08, lz);
+      plank.rotation.x = tilt;
+      plank.receiveShadow = true;
+      plank.castShadow = true;
+      archBridge.add(plank);
+      // Curved bridge side posts & top rails
+      if (pi % 2 === 0) {
+        for (const sgn of [-1, 1]) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 1.05, 6), bridgeRailMat);
+          post.position.set(sgn * 1.62, archY + 0.58, lz);
+          post.castShadow = true;
+          archBridge.add(post);
+          if (pi === 0 || pi === plankCount - 1) {
+            const lanternTop = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), lanternGlowMat);
+            lanternTop.position.set(sgn * 1.62, archY + 1.18, lz);
+            archBridge.add(lanternTop);
+          }
+        }
+      }
+      if (pi < plankCount - 1) {
+        const tNext = (pi + 1) / (plankCount - 1) - 0.5;
+        const archNext = Math.cos(tNext * Math.PI) * 0.62;
+        const midZ = (lz + tNext * bridgeSpan) * 0.5;
+        const midY = (archY + archNext) * 0.5 + 0.92;
+        const dz = bridgeSpan / (plankCount - 1);
+        const dy = archNext - archY;
+        const railLen = Math.hypot(dz, dy);
+        const railTilt = -Math.atan2(dy, dz);
+        for (const sgn of [-1, 1]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, railLen + 0.06), bridgeRailMat);
+          rail.position.set(sgn * 1.62, midY, midZ);
+          rail.rotation.x = railTilt;
+          archBridge.add(rail);
+        }
+      }
+    }
+    // Stone bridge abutments at both ends
+    for (const endSgn of [-1, 1]) {
+      const abut = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.34, 1.2), lanternStoneMat);
+      abut.position.set(0, 0.02, endSgn * (bridgeSpan * 0.5 + 0.35));
+      archBridge.add(abut);
+    }
+    ow.add(archBridge);
+
+    // Hexagonal Mountain-Side Pavilion (清风凉亭) at (33.5, -45.5) — directly North of wp_peach!
+    const pavRoofMat = new THREE.MeshStandardMaterial({
+      color: '#1e4a4c',
+      emissive: new THREE.Color('#092022'),
+      emissiveIntensity: 0.25,
+      roughness: 0.5,
+      metalness: 0.22,
+    });
+    const pavPlaqueMat = new THREE.MeshStandardMaterial({
+      map: makeLandmarkPlaque('清风亭', '#1e3a38', '#d9b464', '#fff2cc'),
+      roughness: 0.45,
+    });
+    const pavilion = new THREE.Group();
+    pavilion.position.set(33.5, -0.18, -45.5);
+    const pavBase = new THREE.Mesh(new THREE.CylinderGeometry(3.35, 3.65, 0.42, 6), lanternStoneMat);
+    pavBase.position.y = 0.21;
+    pavBase.receiveShadow = true;
+    pavBase.castShadow = true;
+    pavilion.add(pavBase);
+    const pavColGeo = new THREE.CylinderGeometry(0.14, 0.16, 3.4, 8);
+    const pavBenchGeo = new THREE.BoxGeometry(2.3, 0.14, 0.42);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const cx = Math.cos(a) * 2.75;
+      const cz = Math.sin(a) * 2.75;
+      const col = new THREE.Mesh(pavColGeo, imperialCrimsonMat);
+      col.position.set(cx, 2.08, cz);
+      col.castShadow = true;
+      pavilion.add(col);
+      // 美人靠 wooden benches on 4 sides (leaving front/back open)
+      if (i !== 1 && i !== 4) {
+        const aMid = a + Math.PI / 6;
+        const bench = new THREE.Mesh(pavBenchGeo, bridgeTimberMat);
+        bench.position.set(Math.cos(aMid) * 2.38, 0.78, Math.sin(aMid) * 2.38);
+        bench.rotation.y = -aMid + Math.PI / 2;
+        pavilion.add(bench);
+      }
+    }
+    const pavLowerRoof = new THREE.Mesh(new THREE.ConeGeometry(4.55, 1.55, 6), pavRoofMat);
+    pavLowerRoof.position.y = 4.48;
+    pavLowerRoof.castShadow = true;
+    const pavUpperRoof = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.35, 6), pavRoofMat);
+    pavUpperRoof.position.y = 5.65;
+    const pavFinial = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), heavenlyGoldMat);
+    pavFinial.scale.set(0.85, 1.6, 0.85);
+    pavFinial.position.y = 6.6;
+    const pavLantern = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), lanternGlowMat);
+    pavLantern.scale.set(0.85, 1.25, 0.85);
+    pavLantern.position.y = 3.25;
+    const pavPlaque = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.68, 0.14), pavPlaqueMat);
+    pavPlaque.position.set(0, 3.65, 2.75);
+    pavilion.add(pavLowerRoof, pavUpperRoof, pavFinial, pavLantern, pavPlaque);
+    // Upturned golden flying eave tips on the 6 corners
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.88, 4), heavenlyGoldMat);
+      tip.position.set(Math.cos(a) * 4.35, 3.92, Math.sin(a) * 4.35);
+      tip.rotation.z = -Math.cos(a) * 0.95;
+      tip.rotation.x = Math.sin(a) * 0.95;
+      pavilion.add(tip);
+    }
+    ow.add(pavilion);
+    this.openWorldObstacles.push({ x: 33.5, z: -45.5, r: 2.65 });
+
+    // Instanced Lush Bamboo Groves (翠竹林) clustering along the valley hills & stream banks
+    const bambooStalkMat = new THREE.MeshStandardMaterial({
+      color: '#3f8a58',
+      roughness: 0.62,
+      metalness: 0.05,
+    });
+    const bambooCanopyMat = new THREE.MeshStandardMaterial({
+      color: '#52a666',
+      emissive: new THREE.Color('#13301d'),
+      emissiveIntensity: 0.24,
+      roughness: 0.78,
+    });
+    const bambooClusters: Array<[number, number]> = [
+      [28, -44], [30, -52], [38, -54], [48, -59], [58, -56],
+      [62, -45], [60, -34], [47, -28], [26, -36], [56, -24],
+    ];
+    const stalksPerCluster = 9;
+    const totalStalks = bambooClusters.length * stalksPerCluster;
+    const stalkInst = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.08, 0.12, 6.2, 6),
+      bambooStalkMat,
+      totalStalks,
+    );
+    const leafInst = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.95, 0),
+      bambooCanopyMat,
+      totalStalks,
+    );
+    const bDummy = new THREE.Object3D();
+    let bIdx = 0;
+    for (let ci = 0; ci < bambooClusters.length; ci++) {
+      const [bx, bz] = bambooClusters[ci];
+      for (let k = 0; k < stalksPerCluster; k++) {
+        const ang = (k / stalksPerCluster) * Math.PI * 2 + ci * 0.7;
+        const rad = 0.55 + ((k * 7 + ci * 3) % 5) * 0.38;
+        const sx = bx + Math.cos(ang) * rad;
+        const sz = bz + Math.sin(ang) * rad;
+        const hScale = 0.78 + ((k * 3 + ci) % 5) * 0.14;
+        bDummy.position.set(sx, 3.0 * hScale - 0.2, sz);
+        bDummy.rotation.set(Math.sin(ang) * 0.07, ang, Math.cos(ang) * 0.07);
+        bDummy.scale.set(1, hScale, 1);
+        bDummy.updateMatrix();
+        stalkInst.setMatrixAt(bIdx, bDummy.matrix);
+
+        bDummy.position.set(sx, 5.7 * hScale - 0.1, sz);
+        bDummy.scale.set(1.25, 0.52, 1.15);
+        bDummy.updateMatrix();
+        leafInst.setMatrixAt(bIdx, bDummy.matrix);
+        bIdx++;
+      }
+    }
+    stalkInst.instanceMatrix.needsUpdate = true;
+    leafInst.instanceMatrix.needsUpdate = true;
+    ow.add(stalkInst, leafInst);
+
+    // Sculpted Blossoming Peach Trees framing 东岳·翠竹山间桃谷 (clear of stream, bridge, herbs & boss)
     const trunkMat = new THREE.MeshStandardMaterial({ map: lacquerTex, color: '#4c2c24', roughness: 0.85 });
     const blossomMat = new THREE.MeshStandardMaterial({
       color: '#f7adc9',
@@ -4011,7 +4412,7 @@ export class ShushanArena {
       opacity: 0.92,
     });
     for (const [px, pz] of [
-      [36, -38], [56, -36], [58, -52], [40, -56], [52, -31], [34, -49],
+      [42, -31], [57, -38], [59, -51], [47, -56], [36, -26], [62, -32],
     ]) {
       const tg = new THREE.Group();
       tg.position.set(px, -0.18, pz);
@@ -4042,36 +4443,426 @@ export class ShushanArena {
       this.openWorldObstacles.push({ x: px, z: pz, r: 0.55 });
     }
 
-    const buriedBladeMat = new THREE.MeshStandardMaterial({ color: '#94a2b8', roughness: 0.34, metalness: 0.82 });
-    const buriedGuardMat = new THREE.MeshStandardMaterial({ color: '#d8b460', roughness: 0.32, metalness: 0.86 });
-    const moundMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#39364a', roughness: 0.92 });
-    for (const [gx, gz, rotZ] of [
-      [-38, -38, 0.22], [-58, -36, -0.25], [-60, -54, 0.16],
-      [-40, -56, -0.18], [-50, -31, -0.14], [-36, -49, 0.2],
+    // =========================================================================
+    // 4B. 西陲 · 黑风古山寨 (Timber Palisade Stockade, Watchtowers, Fire-Braziers, Lodges, Banners!)
+    // =========================================================================
+    const logTimberMat = new THREE.MeshStandardMaterial({
+      map: campWoodTex,
+      color: '#b0784a',
+      emissive: new THREE.Color('#3d200d'),
+      emissiveIntensity: 0.44,
+      roughness: 0.82,
+      metalness: 0.05,
+    });
+    const darkLogMat = new THREE.MeshStandardMaterial({
+      map: campWoodTex,
+      color: '#7a5032',
+      emissive: new THREE.Color('#2a1508'),
+      emissiveIntensity: 0.36,
+      roughness: 0.86,
+      metalness: 0.06,
+    });
+    const fortRoofMat = new THREE.MeshStandardMaterial({
+      color: '#4a3a32',
+      emissive: new THREE.Color('#221610'),
+      emissiveIntensity: 0.34,
+      roughness: 0.84,
+      metalness: 0.08,
+    });
+    const fortBannerMat = new THREE.MeshStandardMaterial({
+      color: '#d42a24',
+      emissive: new THREE.Color('#681410'),
+      emissiveIntensity: 0.56,
+      roughness: 0.7,
+      side: THREE.DoubleSide,
+    });
+    const fortIronMat = new THREE.MeshStandardMaterial({ color: '#4c5059', roughness: 0.46, metalness: 0.76 });
+    const fortFlameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.25, 0.34) });
+    const fortLanternMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 0.72, 0.24) });
+
+    // 4B-1. Sharpened Wooden Palisade Stockade Walls (4 open wings -> 4 HUGE >=10m gateways, ZERO trapping!)
+    const palisadeSegments: Array<[number, number, number, number]> = [
+      [-65, -33, -65, -56], // West stronghold palisade
+      [-63, -62, -49, -62], // North-West palisade (huge North gap -48..-34!)
+      [-31, -56, -31, -44], // North-East palisade (huge East/SE gate!)
+      [-60, -30, -49, -30], // South-West palisade (huge South gap -48..-38!)
+    ];
+    const logPositions: Array<[number, number, number]> = [];
+    for (const [x0, z0, x1, z1] of palisadeSegments) {
+      const len = Math.hypot(x1 - x0, z1 - z0);
+      const count = Math.max(4, Math.floor(len / 0.56));
+      for (let i = 0; i <= count; i++) {
+        const t = i / count;
+        const lx = x0 + (x1 - x0) * t;
+        const lz = z0 + (z1 - z0) * t;
+        const hVar = 2.85 + ((i * 5) % 4) * 0.24;
+        logPositions.push([lx, lz, hVar]);
+      }
+      // Horizontal binding timber beams spanning each wall wing
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, len), darkLogMat);
+      beam.position.set((x0 + x1) * 0.5, 1.9, (z0 + z1) * 0.5);
+      beam.rotation.y = Math.atan2(x1 - x0, z1 - z0);
+      ow.add(beam);
+      // Conservative circular collision nodes strictly along the wall itself
+      const obsSteps = Math.max(2, Math.floor(len / 3.4));
+      for (let oi = 0; oi <= obsSteps; oi++) {
+        const t = oi / obsSteps;
+        this.openWorldObstacles.push({
+          x: x0 + (x1 - x0) * t,
+          z: z0 + (z1 - z0) * t,
+          r: 0.95,
+        });
+      }
+    }
+    const palisadeTrunkInst = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.2, 0.24, 1.0, 6),
+      logTimberMat,
+      logPositions.length,
+    );
+    const palisadeTipInst = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.2, 0.62, 6),
+      darkLogMat,
+      logPositions.length,
+    );
+    const pDummy = new THREE.Object3D();
+    logPositions.forEach(([lx, lz, h], idx) => {
+      pDummy.position.set(lx, h * 0.5 - 0.2, lz);
+      pDummy.rotation.set(0, idx * 0.7, 0);
+      pDummy.scale.set(1, h, 1);
+      pDummy.updateMatrix();
+      palisadeTrunkInst.setMatrixAt(idx, pDummy.matrix);
+
+      pDummy.position.set(lx, h + 0.1, lz);
+      pDummy.scale.set(1, 1, 1);
+      pDummy.updateMatrix();
+      palisadeTipInst.setMatrixAt(idx, pDummy.matrix);
+    });
+    palisadeTrunkInst.instanceMatrix.needsUpdate = true;
+    palisadeTipInst.instanceMatrix.needsUpdate = true;
+    ow.add(palisadeTrunkInst, palisadeTipInst);
+
+    // 4B-2. Grand Mountain Fortress Timber Gate (黑风山寨门楼) at (-37, -34) — HUGE 8.4m open gateway!
+    const fortGatePlaqueMat = new THREE.MeshStandardMaterial({
+      map: makeLandmarkPlaque('黑风山寨', '#301c12', '#c88c42', '#ffdf9e'),
+      emissive: new THREE.Color('#5a300c'),
+      emissiveIntensity: 0.65,
+      roughness: 0.52,
+    });
+    const fortGate = new THREE.Group();
+    fortGate.position.set(-37, -0.18, -34);
+    fortGate.rotation.y = 0.42;
+    for (const sgn of [-1, 1]) {
+      const px = sgn * 4.2;
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.46, 6.4, 8), darkLogMat);
+      post.position.set(px, 3.2, 0);
+      post.castShadow = true;
+      const brace = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.2, 6), logTimberMat);
+      brace.position.set(px + sgn * 0.9, 1.5, 0);
+      brace.rotation.z = sgn * 0.42;
+      const brazierCup = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.22, 0.36, 8), fortIronMat);
+      brazierCup.position.set(px, 4.4, 0.65);
+      const flame = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), fortFlameMat);
+      flame.scale.set(0.9, 1.45, 0.9);
+      flame.position.set(px, 4.82, 0.65);
+      this.owFortressFlames.push({ mesh: flame, baseY: 4.82, phase: sgn * 1.4 });
+      fortGate.add(post, brace, brazierCup, flame);
+      // World-space obstacle for gatepost only (clear 8.4m center!)
+      const cosG = Math.cos(0.42);
+      const sinG = Math.sin(0.42);
+      this.openWorldObstacles.push({
+        x: -37 + px * cosG,
+        z: -34 - px * sinG,
+        r: 0.68,
+      });
+    }
+    const gateBeam = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.72, 0.85), darkLogMat);
+    gateBeam.position.set(0, 5.45, 0);
+    gateBeam.castShadow = true;
+    const gateRoof = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.36, 2.3), fortRoofMat);
+    gateRoof.position.set(0, 6.18, 0);
+    const gatePlaque = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.08, 0.2), fortGatePlaqueMat);
+    gatePlaque.position.set(0, 5.45, 0.5);
+    // Sharpened defensive spikes crowning the gate parapet
+    for (let si = -4; si <= 4; si++) {
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.78, 5), logTimberMat);
+      sp.position.set(si * 1.1, 6.68, 0);
+      fortGate.add(sp);
+    }
+    // Hanging warm crimson-gold fortress lanterns under the gate eaves
+    for (const lx of [-2.45, 2.45]) {
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.85, 5), fortIronMat);
+      cord.position.set(lx, 4.7, 0.45);
+      const lan = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), fortLanternMat);
+      lan.scale.set(0.88, 1.28, 0.88);
+      lan.position.set(lx, 4.1, 0.45);
+      fortGate.add(cord, lan);
+    }
+    fortGate.add(gateBeam, gateRoof, gatePlaque);
+    ow.add(fortGate);
+
+    // Warm firelight PointLights & flanking entrance fire-braziers so 黑风古山寨 glows dramatically at night!
+    const fortGateLight = new THREE.PointLight('#ff923c', 26, 30, 1.35);
+    fortGateLight.position.set(-35.5, 4.6, -33.2);
+    ow.add(fortGateLight);
+    this.owFortressLights.push({ light: fortGateLight, baseIntensity: 26, phase: 0.4 });
+
+    const fortYardLight = new THREE.PointLight('#ff8a34', 24, 30, 1.35);
+    fortYardLight.position.set(-47.5, 3.8, -42.5);
+    ow.add(fortYardLight);
+    this.owFortressLights.push({ light: fortYardLight, baseIntensity: 24, phase: 2.3 });
+
+    for (const [fx, fz, ph] of [
+      [-32.8, -31.8, 0.8],
+      [-40.2, -35.8, 1.9],
+      [-33.8, -39.2, 3.1],
+      [-42.2, -31.5, 4.2],
     ]) {
-      const sg = new THREE.Group();
-      sg.position.set(gx, -0.18, gz);
-      const mound = new THREE.Mesh(new THREE.DodecahedronGeometry(1.15, 1), moundMat);
-      mound.scale.set(1.3, 0.48, 1.15);
-      mound.position.y = 0.2;
-      const bladeWrap = new THREE.Group();
-      bladeWrap.rotation.z = rotZ;
-      const sb = new THREE.Mesh(new THREE.BoxGeometry(0.42, 4.8, 0.12), buriedBladeMat);
-      sb.position.y = 2.1;
-      sb.castShadow = true;
-      const guard = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.16, 0.26), buriedGuardMat);
-      guard.position.y = 3.85;
-      const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.82, 6), trunkMat);
-      hilt.position.y = 4.35;
-      const pommel = new THREE.Mesh(new THREE.OctahedronGeometry(0.15, 0), buriedGuardMat);
-      pommel.position.y = 4.82;
-      bladeWrap.add(sb, guard, hilt, pommel);
-      sg.add(mound, bladeWrap);
-      ow.add(sg);
-      this.openWorldObstacles.push({ x: gx, z: gz, r: 0.72 });
+      const stand = new THREE.Group();
+      stand.position.set(fx, -0.18, fz);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 2.1, 6), fortIronMat);
+      pole.position.y = 1.05;
+      const pan = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.24, 0.36, 8), fortIronMat);
+      pan.position.y = 2.18;
+      const fl = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), fortFlameMat);
+      fl.scale.set(0.95, 1.55, 0.95);
+      fl.position.y = 2.68;
+      this.owFortressFlames.push({ mesh: fl, baseY: 2.68, phase: ph });
+      stand.add(pole, pan, fl);
+      ow.add(stand);
     }
 
-    // Volcanic basalt spires framing the expanded Southern Lava Abyss
+    // 4B-3. Dual Timber Watchtowers (箭楼哨塔) with Blazing Fire-Braziers
+    const buildWatchtower = (tx: number, tz: number, rotY: number, phaseOffset: number) => {
+      const tw = new THREE.Group();
+      tw.position.set(tx, -0.18, tz);
+      tw.rotation.y = rotY;
+      const stiltGeo = new THREE.CylinderGeometry(0.18, 0.24, 5.4, 7);
+      for (const sx of [-1.25, 1.25]) {
+        for (const sz of [-1.25, 1.25]) {
+          const stilt = new THREE.Mesh(stiltGeo, darkLogMat);
+          stilt.position.set(sx, 2.7, sz);
+          stilt.castShadow = true;
+          tw.add(stilt);
+        }
+      }
+      // Elevated guard deck + notched log battlements
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.28, 3.4), logTimberMat);
+      deck.position.y = 4.4;
+      deck.castShadow = true;
+      tw.add(deck);
+      for (let side = 0; side < 4; side++) {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.92, 0.22), logTimberMat);
+        const a = (side * Math.PI) / 2;
+        wall.position.set(Math.sin(a) * 1.6, 4.95, Math.cos(a) * 1.6);
+        wall.rotation.y = a;
+        tw.add(wall);
+      }
+      // Corner upper roof posts + slanted rustic watch-roof
+      for (const sx of [-1.3, 1.3]) {
+        for (const sz of [-1.3, 1.3]) {
+          const upPost = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 2.2, 6), darkLogMat);
+          upPost.position.set(sx, 6.0, sz);
+          tw.add(upPost);
+        }
+      }
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(3.1, 1.75, 4), fortRoofMat);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.y = 7.75;
+      roof.castShadow = true;
+      tw.add(roof);
+      // Blazing War Fire-Brazier perched on front-right parapet
+      const brazier = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.28, 0.42, 8), fortIronMat);
+      brazier.position.set(1.45, 5.45, 1.45);
+      const tFlame = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), fortFlameMat);
+      tFlame.scale.set(0.95, 1.55, 0.95);
+      tFlame.position.set(1.45, 5.95, 1.45);
+      this.owFortressFlames.push({ mesh: tFlame, baseY: 5.95, phase: phaseOffset });
+      // Warm hanging lantern inside watchtower roof canopy
+      const towerLan = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8), fortLanternMat);
+      towerLan.scale.set(0.88, 1.25, 0.88);
+      towerLan.position.set(0, 6.25, 0);
+      tw.add(brazier, tFlame, towerLan);
+      // Wooden access ladder leaning against tower
+      for (const lx of [-0.32, 0.32]) {
+        const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 4.9, 5), logTimberMat);
+        rail.position.set(lx, 2.2, 1.9);
+        rail.rotation.x = -0.24;
+        tw.add(rail);
+      }
+      ow.add(tw);
+      this.openWorldObstacles.push({ x: tx, z: tz, r: 1.7 });
+    };
+    buildWatchtower(-31.5, -38.5, 0.32, 0.5);
+    buildWatchtower(-44.5, -31.0, 0.22, 2.1);
+
+    // 4B-4. Two Mountain Stronghold Wooden Lodges (聚义厅木屋 & 哨营木屋)
+    const hallPlaqueMat = new THREE.MeshStandardMaterial({
+      map: makeLandmarkPlaque('聚义厅', '#2d180e', '#d69844', '#ffe5a8'),
+      emissive: new THREE.Color('#5a300c'),
+      emissiveIntensity: 0.65,
+      roughness: 0.52,
+    });
+    const buildMountainLodge = (
+      lx: number,
+      lz: number,
+      rotY: number,
+      width: number,
+      depth: number,
+      height: number,
+      withPlaque: boolean,
+      obsRadius: number,
+    ) => {
+      const lg = new THREE.Group();
+      lg.position.set(lx, -0.18, lz);
+      lg.rotation.y = rotY;
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(width + 1.0, 0.42, depth + 1.4), lanternStoneMat);
+      plinth.position.y = 0.21;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), logTimberMat);
+      body.position.y = 0.42 + height * 0.5;
+      body.castShadow = true;
+      body.receiveShadow = true;
+      // Glowing warm interior doorway
+      const door = new THREE.Mesh(
+        new THREE.BoxGeometry(1.5, 2.3, 0.14),
+        new THREE.MeshStandardMaterial({
+          color: '#ffae4c',
+          emissive: new THREE.Color('#cc5c14'),
+          emissiveIntensity: 0.85,
+          roughness: 0.6,
+        }),
+      );
+      door.position.set(0, 1.56, depth * 0.5 + 0.04);
+      // Front veranda timber pillars + hanging red lanterns
+      for (const sx of [-width * 0.44, -width * 0.16, width * 0.16, width * 0.44]) {
+        const vp = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, height, 7), darkLogMat);
+        vp.position.set(sx, 0.42 + height * 0.5, depth * 0.5 + 0.65);
+        lg.add(vp);
+      }
+      for (const sgn of [-1, 1]) {
+        const lan = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8), fortFlameMat);
+        lan.scale.set(0.85, 1.25, 0.85);
+        lan.position.set(sgn * (width * 0.26), height - 0.1, depth * 0.5 + 0.65);
+        lg.add(lan);
+      }
+      // Pitched mountain-stronghold gable roof with crossed roof-beam horns
+      const roofGeo = new THREE.CylinderGeometry(0.12, Math.max(width, depth) * 0.78, 2.35, 4);
+      const roof = new THREE.Mesh(roofGeo, fortRoofMat);
+      roof.rotation.y = Math.PI / 4;
+      roof.scale.set(width / Math.max(width, depth) * 1.18, 1, depth / Math.max(width, depth) * 1.28);
+      roof.position.y = 0.42 + height + 1.05;
+      roof.castShadow = true;
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(width + 1.4, 0.26, 0.32), darkLogMat);
+      ridge.position.y = 0.42 + height + 2.12;
+      lg.add(plinth, body, door, roof, ridge);
+      if (withPlaque) {
+        const plq = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.88, 0.16), hallPlaqueMat);
+        plq.position.set(0, 0.42 + height - 0.18, depth * 0.5 + 0.72);
+        lg.add(plq);
+      }
+      ow.add(lg);
+      this.openWorldObstacles.push({ x: lx, z: lz, r: obsRadius });
+    };
+    buildMountainLodge(-55, -58, 0, 7.6, 4.6, 3.6, true, 3.1); // 聚义厅
+    buildMountainLodge(-61, -39, Math.PI / 2, 5.4, 3.8, 3.1, false, 2.4); // 哨营木屋
+
+    // 4B-5. Six Fluttering Crimson-Black Fortress Banners (黑风寨旗)
+    const bannerPoleGeo = new THREE.CylinderGeometry(0.07, 0.1, 6.0, 6);
+    const bannerClothGeo = new THREE.PlaneGeometry(1.15, 2.35);
+    const bannerSpecs: Array<[number, number, number]> = [
+      [-33.5, -32.2, 0.4],
+      [-40.5, -36.0, -0.3],
+      [-51.2, -55.2, 0.15],
+      [-58.8, -55.2, -0.15],
+      [-57.5, -34.5, 0.6],
+      [-32.5, -45.5, -0.5],
+    ];
+    bannerSpecs.forEach(([bx, bz, baseRot], idx) => {
+      const bg = new THREE.Group();
+      bg.position.set(bx, -0.18, bz);
+      const pole = new THREE.Mesh(bannerPoleGeo, darkLogMat);
+      pole.position.y = 3.0;
+      const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.35, 5), darkLogMat);
+      cross.rotation.z = Math.PI / 2;
+      cross.position.set(0.55, 5.45, 0);
+      const cloth = new THREE.Mesh(bannerClothGeo, fortBannerMat);
+      cloth.position.set(0.58, 4.25, 0);
+      cloth.rotation.y = baseRot;
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.14, 0.04), heavenlyGoldMat);
+      trim.position.set(0.58, 5.38, 0);
+      bg.add(pole, cross, cloth, trim);
+      ow.add(bg);
+      this.owFortressBanners.push({ mesh: cloth, baseRotY: baseRot, phase: idx * 1.15 });
+    });
+
+    // 4B-6. Stronghold Bonfire (寨心篝火), Weapon Racks (兵器架) & Wine-Jar / Crate Clusters
+    const bonfire = new THREE.Group();
+    bonfire.position.set(-47, -0.18, -40);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 0), pebbleMat);
+      st.position.set(Math.cos(a) * 0.95, 0.16, Math.sin(a) * 0.95);
+      bonfire.add(st);
+    }
+    for (let i = 0; i < 3; i++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 1.5, 6), darkLogMat);
+      log.position.y = 0.22;
+      log.rotation.z = Math.PI / 2 - 0.18;
+      log.rotation.y = (i / 3) * Math.PI;
+      bonfire.add(log);
+      const fl = new THREE.Mesh(new THREE.ConeGeometry(0.26 - i * 0.04, 1.05 + i * 0.18, 5), fortFlameMat);
+      fl.position.set((i - 1) * 0.22, 0.72, (i % 2 === 0 ? 1 : -1) * 0.14);
+      this.owFortressFlames.push({ mesh: fl, baseY: 0.72, phase: i * 1.9 + 3.0 });
+      bonfire.add(fl);
+    }
+    ow.add(bonfire);
+    this.openWorldObstacles.push({ x: -47, z: -40, r: 1.0 });
+
+    const jarMat = new THREE.MeshStandardMaterial({ color: '#7d4c32', roughness: 0.72 });
+    const buriedBladeMat = new THREE.MeshStandardMaterial({ color: '#94a2b8', roughness: 0.34, metalness: 0.82 });
+    const buriedGuardMat = new THREE.MeshStandardMaterial({ color: '#d8b460', roughness: 0.32, metalness: 0.86 });
+    // Weapon racks & wine-jar supply clusters tucked cleanly beside lodges & walls
+    for (const [wx, wz, rY] of [[-50.5, -54.5, 0.1], [-58.5, -43.5, 1.4], [-34.5, -49.0, -1.2]]) {
+      const rack = new THREE.Group();
+      rack.position.set(wx, -0.18, wz);
+      rack.rotation.y = rY;
+      for (const sgn of [-1, 1]) {
+        const up = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.75, 0.12), darkLogMat);
+        up.position.set(sgn * 0.85, 0.88, 0);
+        rack.add(up);
+      }
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.1), darkLogMat);
+      bar.position.y = 1.35;
+      rack.add(bar);
+      for (let k = -1; k <= 1; k++) {
+        const spear = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 2.35, 5), logTimberMat);
+        spear.position.set(k * 0.44, 1.15, 0.08);
+        spear.rotation.x = 0.14;
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 4), buriedBladeMat);
+        tip.position.set(k * 0.44, 2.42, 0.24);
+        const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.1, 6), buriedGuardMat);
+        collar.position.set(k * 0.44, 2.18, 0.21);
+        rack.add(spear, collar, tip);
+      }
+      ow.add(rack);
+    }
+    for (const [jx, jz] of [[-58.5, -53.2], [-57.5, -36.5], [-47.0, -32.8]]) {
+      const jg = new THREE.Group();
+      jg.position.set(jx, -0.18, jz);
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.82, 0.95), logTimberMat);
+      crate.position.set(-0.45, 0.41, 0);
+      const jar1 = new THREE.Mesh(new THREE.SphereGeometry(0.36, 8, 7), jarMat);
+      jar1.scale.set(0.92, 1.18, 0.92);
+      jar1.position.set(0.38, 0.42, 0.18);
+      const jar2 = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 7), jarMat);
+      jar2.scale.set(0.92, 1.15, 0.92);
+      jar2.position.set(0.18, 0.38, -0.42);
+      jg.add(crate, jar1, jar2);
+      ow.add(jg);
+    }
+
+    // =========================================================================
+    // 4C. 南冥 · 赤焰炼器熔谷 (Basalt Spires, Iron Forging Causeway & Ancient Forging Cauldron)
+    // =========================================================================
     const basaltMat = new THREE.MeshStandardMaterial({
       map: carvedTex,
       color: '#2b1e20',
@@ -4080,7 +4871,7 @@ export class ShushanArena {
       roughness: 0.9,
       flatShading: true,
     });
-    for (const [vx, vz, vh] of [[-31, 34, 4.4], [-63, 36, 5.2], [-62, 55, 4.8], [-36, 61, 4.2]]) {
+    for (const [vx, vz, vh] of [[-31, 34, 4.4], [-63, 36, 5.2], [-62, 55, 4.8], [-36, 63, 4.2]]) {
       const spire = new THREE.Mesh(new THREE.ConeGeometry(1.45, vh, 6), basaltMat);
       spire.position.set(vx, vh * 0.46 - 0.2, vz);
       spire.rotation.y = vx * 0.2;
@@ -4088,6 +4879,55 @@ export class ShushanArena {
       ow.add(spire);
       this.openWorldObstacles.push({ x: vx, z: vz, r: 1.15 });
     }
+
+    // 玄铁炼器栈桥 (Forged Iron Bridge overlooking the Lava Pool from NE shore)
+    const ironBridge = new THREE.Group();
+    ironBridge.position.set(-36.5, -0.04, 35.5);
+    ironBridge.rotation.y = Math.PI * 0.25;
+    const ironDeck = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.22, 9.2), fortIronMat);
+    ironDeck.receiveShadow = true;
+    ironBridge.add(ironDeck);
+    for (const sx of [-1.55, 1.55]) {
+      for (const sz of [-3.6, 0, 3.6]) {
+        const stanchion = new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.25, 0.24), fortIronMat);
+        stanchion.position.set(sx, 0.62, sz);
+        ironBridge.add(stanchion);
+      }
+      const chainBar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 7.6), fortIronMat);
+      chainBar.position.set(sx, 1.1, 0);
+      ironBridge.add(chainBar);
+    }
+    ow.add(ironBridge);
+
+    // 赤焰古铸剑鼎 (Monumental Bronze Forging Cauldron) at (-42, 61.5)
+    const bronzeCauldronMat = new THREE.MeshStandardMaterial({
+      color: '#6e5234',
+      emissive: new THREE.Color('#421c08'),
+      emissiveIntensity: 0.35,
+      roughness: 0.42,
+      metalness: 0.72,
+    });
+    const cauldron = new THREE.Group();
+    cauldron.position.set(-42, -0.18, 61.5);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.34, 1.65, 6), bronzeCauldronMat);
+      leg.position.set(Math.cos(a) * 1.45, 0.82, Math.sin(a) * 1.45);
+      cauldron.add(leg);
+    }
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 1.65, 2.0, 12), bronzeCauldronMat);
+    bowl.position.y = 2.25;
+    bowl.castShadow = true;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.18, 8, 24), heavenlyGoldMat);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 3.25;
+    const magmaCore = new THREE.Mesh(new THREE.OctahedronGeometry(1.15, 1), fortFlameMat);
+    magmaCore.scale.set(1.25, 0.9, 1.25);
+    magmaCore.position.y = 3.55;
+    this.owFortressFlames.push({ mesh: magmaCore, baseY: 3.55, phase: 4.2 });
+    cauldron.add(bowl, rim, magmaCore);
+    ow.add(cauldron);
+    this.openWorldObstacles.push({ x: -42, z: 61.5, r: 2.35 });
 
     // Scattered alpine mossy boulders framing the expanded Kyushu perimeter
     const boulderMat = new THREE.MeshStandardMaterial({ map: carvedTex, color: '#42545a', roughness: 0.9, flatShading: true });
@@ -4103,34 +4943,212 @@ export class ShushanArena {
       ow.add(rock);
     }
 
-    const starColMat = new THREE.MeshStandardMaterial({
-      map: carvedTex,
-      color: '#c8e4f2',
-      emissive: new THREE.Color('#1c4058'),
-      emissiveIntensity: 0.34,
-      roughness: 0.42,
+    // =========================================================================
+    // 4D. 九霄 · 凌霄天庭 (White-Jade Nantianmen Gate, Golden Pavilion Hall, Dragon Pillars & Cloud Sea!)
+    // =========================================================================
+    const nantianPlaqueMat = new THREE.MeshStandardMaterial({
+      map: makeLandmarkPlaque('南天门', '#18365c', '#f0ca68', '#fff4c8'),
+      emissive: new THREE.Color('#302206'),
+      emissiveIntensity: 0.42,
+      roughness: 0.34,
     });
-    const starCrystalMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.55, 1.9, 2.2) });
+    const lingxiaoPlaqueMat = new THREE.MeshStandardMaterial({
+      map: makeLandmarkPlaque('凌霄宝殿', '#7c1814', '#f4d072', '#fff6d0'),
+      emissive: new THREE.Color('#3a2006'),
+      emissiveIntensity: 0.45,
+      roughness: 0.34,
+    });
+
+    // Helper: Imperial upturned curved glazed eaves (琉璃飞檐)
+    const buildImperialEaves = (
+      parent: THREE.Group,
+      w: number,
+      d: number,
+      y: number,
+      x: number,
+      z: number,
+      roofMat: THREE.MeshStandardMaterial,
+    ) => {
+      const rg = new THREE.Group();
+      rg.position.set(x, y, z);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w, 0.38, d), roofMat);
+      body.castShadow = true;
+      const slope = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.66, 1.25, 4), roofMat);
+      slope.rotation.y = Math.PI / 4;
+      slope.scale.set(w / Math.max(w, d) * 1.05, 1, d / Math.max(w, d) * 1.05);
+      slope.position.y = 0.72;
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.65, 0.24, 0.34), heavenlyGoldMat);
+      ridge.position.y = 1.32;
+      rg.add(body, slope, ridge);
+      // Four sweeping upturned winged eave tips
+      const wingGeo = new THREE.ConeGeometry(0.38, 1.25, 4);
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const wing = new THREE.Mesh(wingGeo, heavenlyGoldMat);
+          wing.position.set(sx * (w * 0.5 + 0.24), 0.36, sz * (d * 0.5 + 0.12));
+          wing.rotation.z = sx * -1.08;
+          wing.rotation.x = sz * 0.42;
+          rg.add(wing);
+        }
+      }
+      parent.add(rg);
+    };
+
+    // 4D-1. Monumental 白玉南天门 (White-Jade Triple-Arch South Gate) at (35, 22.5) facing South (+Z)
+    // Positioned right ahead-right of wp_star (31, 31.4) for an unforgettable Heavenly Court arrival!
+    const nantianmen = new THREE.Group();
+    nantianmen.position.set(35, -0.18, 22.5);
+    // Ascending white-marble cloud stairs leading through 南天门
+    for (let si = 0; si < 5; si++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(11.6 - si * 0.4, 0.08, 0.95), whiteJadeMat);
+      step.position.set(0, 0.04 + si * 0.015, 3.6 - si * 0.9);
+      step.receiveShadow = true;
+      nantianmen.add(step);
+    }
+    const ntPillarXs = [-7.2, -3.5, 3.5, 7.2]; // Wide 7.0m center span + 3.7m side arches!
+    const dragonCollarGeo = new THREE.TorusGeometry(0.5, 0.09, 8, 18);
+    ntPillarXs.forEach((px, idx) => {
+      const inner = idx === 1 || idx === 2;
+      const h = inner ? 7.6 : 5.8;
+      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.76, 0.94, 0.85, 8), whiteJadeMat);
+      ped.position.set(px, 0.42, 0);
+      ped.castShadow = true;
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, h, 12), whiteJadeMat);
+      shaft.position.set(px, 0.85 + h * 0.5, 0);
+      shaft.castShadow = true;
+      nantianmen.add(ped, shaft);
+      // Coiled gilded dragon rings climbing each white-jade column
+      for (let ri = 0; ri < (inner ? 5 : 3); ri++) {
+        const ring = new THREE.Mesh(dragonCollarGeo, heavenlyGoldMat);
+        ring.rotation.x = Math.PI / 2 + 0.16;
+        ring.rotation.y = ri * 0.8;
+        ring.position.set(px, 2.0 + ri * 1.15, 0);
+        nantianmen.add(ring);
+      }
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.45, 1.25), imperialCrimsonMat);
+      cap.position.set(px, 0.85 + h + 0.2, 0);
+      nantianmen.add(cap);
+      this.openWorldObstacles.push({ x: 35 + px, z: 22.5, r: 0.72 });
+    });
+    const ntLowerBeam = new THREE.Mesh(new THREE.BoxGeometry(15.6, 0.68, 0.92), imperialCrimsonMat);
+    ntLowerBeam.position.set(0, 6.25, 0);
+    const ntUpperBeam = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.62, 0.96), imperialCrimsonMat);
+    ntUpperBeam.position.set(0, 8.15, 0);
+    const ntPlaque = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.22, 0.24), nantianPlaqueMat);
+    ntPlaque.position.set(0, 7.22, 0.5);
+    nantianmen.add(ntLowerBeam, ntUpperBeam, ntPlaque);
+    buildImperialEaves(nantianmen, 9.4, 2.9, 8.85, 0, 0, glazedRoofGoldMat);
+    buildImperialEaves(nantianmen, 4.4, 2.2, 6.85, -5.4, 0, glazedRoofGoldMat);
+    buildImperialEaves(nantianmen, 4.4, 2.2, 6.85, 5.4, 0, glazedRoofGoldMat);
+    ow.add(nantianmen);
+
+    // 4D-2. Grand 凌霄宝殿 (Golden Celestial Pagoda Pavilion Hall) at (56, 35) facing South (+Z)
+    const palace = new THREE.Group();
+    palace.position.set(56, -0.18, 35);
+    const pPlinth1 = new THREE.Mesh(new THREE.BoxGeometry(12.2, 0.36, 8.2), whiteJadeMat);
+    pPlinth1.position.y = 0.18;
+    const pPlinth2 = new THREE.Mesh(new THREE.BoxGeometry(10.8, 0.32, 6.8), whiteJadeMat);
+    pPlinth2.position.y = 0.52;
+    const pCore = new THREE.Mesh(new THREE.BoxGeometry(8.4, 4.6, 4.6), imperialCrimsonMat);
+    pCore.position.y = 2.95;
+    pCore.castShadow = true;
+    // Glowing gilded heavenly temple doorway & lattice windows
+    const pDoor = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 3.2, 0.18),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.9, 1.55, 0.8) }),
+    );
+    pDoor.position.set(0, 2.25, 2.34);
+    palace.add(pPlinth1, pPlinth2, pCore, pDoor);
+    // 8 Vermilion & Gold Palace Columns around veranda
+    for (const cx of [-4.6, -1.8, 1.8, 4.6]) {
+      for (const cz of [-2.85, 2.85]) {
+        const pCol = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 4.9, 10), imperialCrimsonMat);
+        pCol.position.set(cx, 3.1, cz);
+        pCol.castShadow = true;
+        const pRing = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.05, 6, 14), heavenlyGoldMat);
+        pRing.rotation.x = Math.PI / 2;
+        pRing.position.set(cx, 5.1, cz);
+        palace.add(pCol, pRing);
+      }
+    }
+    const pPlaque = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.15, 0.22), lingxiaoPlaqueMat);
+    pPlaque.position.set(0, 4.75, 2.95);
+    palace.add(pPlaque);
+    // Double-tiered imperial golden pagoda roof + lotus spire reaching y = 11.8m
+    buildImperialEaves(palace, 12.0, 7.6, 5.75, 0, 0, glazedRoofGoldMat);
+    const upperHall = new THREE.Mesh(new THREE.BoxGeometry(6.8, 2.2, 4.2), imperialCrimsonMat);
+    upperHall.position.y = 7.55;
+    palace.add(upperHall);
+    buildImperialEaves(palace, 8.6, 5.4, 8.8, 0, 0, glazedRoofGoldMat);
+    const spireBall = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), heavenlyGoldMat);
+    spireBall.scale.set(0.85, 1.85, 0.85);
+    spireBall.position.y = 11.15;
+    palace.add(spireBall);
+    ow.add(palace);
+    this.openWorldObstacles.push({ x: 56, z: 35, r: 3.3 });
+
+    // 4D-3. Four Gilded Heavenly Dragon Columns framing the Celestial Terrace
+    const starCrystalMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 1.85, 2.2) });
     for (const [sx, sz] of [
-      [38, 38], [58, 36], [60, 54], [40, 56], [50, 31], [36, 49],
+      [39, 44], [63, 47], [60, 58], [42, 57],
     ]) {
       const cg = new THREE.Group();
       cg.position.set(sx, -0.18, sz);
-      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.15, 0.46, 8), starColMat);
-      ped.position.y = 0.23;
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.66, 5.4, 6), starColMat);
-      col.position.y = 3.0;
+      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.12, 0.5, 8), whiteJadeMat);
+      ped.position.y = 0.25;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.56, 5.8, 10), whiteJadeMat);
+      col.position.y = 3.2;
       col.castShadow = true;
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.84, 0.045, 6, 20), buriedGuardMat);
-      halo.rotation.x = Math.PI / 2;
-      halo.position.y = 5.4;
-      const finial = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), starCrystalMat);
+      const goldBand = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.08, 8, 18), heavenlyGoldMat);
+      goldBand.rotation.x = Math.PI / 2;
+      goldBand.position.y = 3.4;
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.055, 8, 24), heavenlyGoldMat);
+      halo.position.y = 6.35;
+      this.owCelestialHalos.push(halo);
+      const finial = new THREE.Mesh(new THREE.OctahedronGeometry(0.38, 0), starCrystalMat);
       finial.scale.set(0.9, 1.5, 0.9);
-      finial.position.y = 6.25;
-      cg.add(ped, col, halo, finial);
+      finial.position.y = 6.35;
+      cg.add(ped, col, goldBand, halo, finial);
       ow.add(cg);
       this.openWorldObstacles.push({ x: sx, z: sz, r: 0.85 });
     }
+
+    // 4D-4. Billowing White-Gold Celestial Cloud Sea Cushions (九霄祥云) floating around 南天门 & 凌霄天庭
+    const cloudMat = new THREE.MeshStandardMaterial({
+      color: '#fff9ed',
+      emissive: new THREE.Color('#6b5e42'),
+      emissiveIntensity: 0.34,
+      roughness: 0.82,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const cloudPuffGeo = new THREE.DodecahedronGeometry(1.0, 1);
+    const cloudCoords: Array<[number, number, number, number]> = [
+      [25.5, 0.45, 22.0, 2.5], [44.5, 0.55, 22.5, 2.7],
+      [28.5, 0.25, 27.0, 1.9], [42.0, 0.35, 27.5, 2.1],
+      [33.0, 0.4, 38.5, 2.6], [30.5, 0.65, 48.0, 3.0],
+      [36.5, 0.55, 62.5, 3.1], [49.5, 0.65, 66.0, 3.3],
+      [62.5, 0.7, 64.5, 3.2], [70.0, 0.65, 53.0, 3.4],
+      [70.0, 0.55, 40.0, 3.2], [65.5, 0.6, 29.0, 2.9],
+      [54.5, 0.45, 24.5, 2.8], [46.5, 0.35, 25.5, 2.3],
+      [24.0, 0.55, 41.0, 2.4], [58.0, 0.65, 67.5, 2.9],
+      [71.5, 0.5, 46.5, 2.8], [39.0, 0.4, 65.5, 2.6],
+    ];
+    cloudCoords.forEach(([cx, cy, cz, sc], idx) => {
+      const clGroup = new THREE.Group();
+      clGroup.position.set(cx, cy, cz);
+      const p0 = new THREE.Mesh(cloudPuffGeo, cloudMat);
+      p0.scale.set(sc * 1.35, sc * 0.46, sc * 1.05);
+      const p1 = new THREE.Mesh(cloudPuffGeo, cloudMat);
+      p1.scale.set(sc * 0.92, sc * 0.42, sc * 0.84);
+      p1.position.set(sc * 0.82, 0.14, sc * 0.24);
+      const p2 = new THREE.Mesh(cloudPuffGeo, cloudMat);
+      p2.scale.set(sc * 0.85, sc * 0.38, sc * 0.78);
+      p2.position.set(-sc * 0.76, 0.1, -sc * 0.22);
+      clGroup.add(p0, p1, p2);
+      ow.add(clGroup);
+      this.owCelestialClouds.push({ mesh: clGroup, baseY: cy, phase: idx * 0.65 });
+    });
 
     // 4b. Sculpted 6th Landmark: 北溟 · 幽冥古地窟入口 (Carved Stone Cavern Archway, Steps, Jade Lanterns & Rune Seal Altar)
     const cryptStoneMat = new THREE.MeshStandardMaterial({
@@ -4407,6 +5425,184 @@ export class ShushanArena {
       ow.add(og);
       this.spiritOrbVisuals.set(orb.id, { group: og, core, ring, baseY: orb.y, collected: false });
     }
+
+    // 8. Fourteen Glowing 3D Harvestable Herb & Ore Nodes (WORLD_HERB_NODES)
+    const herbMoundMat = new THREE.MeshStandardMaterial({ color: '#394c38', roughness: 0.92 });
+    const lingzhiStemMat = new THREE.MeshStandardMaterial({ color: '#8f5e36', roughness: 0.72 });
+    const lingzhiCapMat = new THREE.MeshStandardMaterial({
+      color: '#34d890',
+      emissive: new THREE.Color('#18a868'),
+      emissiveIntensity: 0.95,
+      roughness: 0.32,
+      metalness: 0.14,
+    });
+    const lingzhiRimMat = new THREE.MeshBasicMaterial({ color: '#a8ffd8' });
+
+    const lotusBaseMat = new THREE.MeshStandardMaterial({ color: '#c4e4f4', roughness: 0.45 });
+    const lotusPetalMat = new THREE.MeshStandardMaterial({
+      color: '#9cf0ff',
+      emissive: new THREE.Color('#38b8e8'),
+      emissiveIntensity: 1.05,
+      roughness: 0.22,
+      metalness: 0.18,
+    });
+    const lotusCoreMat = new THREE.MeshBasicMaterial({ color: '#fff2a6' });
+
+    const oreRockMat = new THREE.MeshStandardMaterial({ color: '#2c2224', roughness: 0.88, flatShading: true });
+    const oreVeinMat = new THREE.MeshStandardMaterial({
+      color: '#ff7a36',
+      emissive: new THREE.Color('#e84a12'),
+      emissiveIntensity: 1.35,
+      roughness: 0.28,
+      metalness: 0.72,
+    });
+
+    const crystalBaseMat = new THREE.MeshStandardMaterial({ color: '#24223a', roughness: 0.84, flatShading: true });
+    const crystalShardMat = new THREE.MeshStandardMaterial({
+      color: '#c292ff',
+      emissive: new THREE.Color('#7842e8'),
+      emissiveIntensity: 1.25,
+      roughness: 0.18,
+      metalness: 0.45,
+    });
+
+    const herbRingGeo = new THREE.RingGeometry(0.68, 0.88, 24);
+    const herbBeamGeo = new THREE.CylinderGeometry(0.12, 0.34, 2.6, 10, 1, true);
+    const herbOrbGeo = new THREE.OctahedronGeometry(0.2, 0);
+
+    WORLD_HERB_NODES.forEach((herb, idx) => {
+      const hg = new THREE.Group();
+      hg.position.set(herb.x, -0.16, herb.z);
+      const coreWrap = new THREE.Group();
+      let baseY = 1.05;
+
+      if (herb.materialId === 'mat_lingzhi') {
+        // 九叶灵芝: mossy soil base + 3 tiered glowing emerald Lingzhi mushroom umbrellas
+        const mound = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.86, 0.22, 8), herbMoundMat);
+        mound.position.y = 0.11;
+        hg.add(mound);
+        const capSpecs: Array<[number, number, number, number]> = [
+          [0, 0.62, 0, 0.56],
+          [-0.4, 0.44, 0.24, 0.38],
+          [0.38, 0.48, -0.2, 0.42],
+        ];
+        for (const [cx, cy, cz, cr] of capSpecs) {
+          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, cy, 6), lingzhiStemMat);
+          stem.position.set(cx, cy * 0.5 + 0.1, cz);
+          const cap = new THREE.Mesh(new THREE.CylinderGeometry(cr, cr * 0.72, 0.14, 12), lingzhiCapMat);
+          cap.scale.set(1.15, 0.85, 0.92);
+          cap.position.set(cx, cy + 0.12, cz);
+          const rim = new THREE.Mesh(new THREE.TorusGeometry(cr * 0.92, 0.028, 6, 16), lingzhiRimMat);
+          rim.rotation.x = Math.PI / 2;
+          rim.position.set(cx, cy + 0.16, cz);
+          hg.add(stem, cap, rim);
+        }
+        const mote = new THREE.Mesh(herbOrbGeo, lingzhiRimMat);
+        coreWrap.add(mote);
+        baseY = 1.25;
+      } else if (herb.materialId === 'mat_xuelian') {
+        // 天山雪莲: frosted jade pedestal + two concentric rings of crystalline ice-lotus petals
+        const ped = new THREE.Mesh(new THREE.DodecahedronGeometry(0.56, 1), lotusBaseMat);
+        ped.scale.set(1.25, 0.42, 1.25);
+        ped.position.y = 0.18;
+        hg.add(ped);
+        const petalGeo = new THREE.ConeGeometry(0.18, 0.68, 4);
+        for (let tier = 0; tier < 2; tier++) {
+          const count = tier === 0 ? 7 : 5;
+          const r = tier === 0 ? 0.38 : 0.22;
+          const tilt = tier === 0 ? 0.78 : 0.42;
+          for (let pi = 0; pi < count; pi++) {
+            const a = (pi / count) * Math.PI * 2 + tier * 0.4;
+            const petal = new THREE.Mesh(petalGeo, lotusPetalMat);
+            petal.position.set(Math.cos(a) * r, 0.46 + tier * 0.14, Math.sin(a) * r);
+            petal.rotation.y = -a + Math.PI / 2;
+            petal.rotation.x = tilt;
+            hg.add(petal);
+          }
+        }
+        const stamen = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 0), lotusCoreMat);
+        coreWrap.add(stamen);
+        baseY = 0.96;
+      } else if (herb.materialId === 'mat_xuantie') {
+        // 赤炎玄铁: dark volcanic ore boulder + jagged molten red-gold iron crystal spikes
+        const base = new THREE.Mesh(new THREE.DodecahedronGeometry(0.68, 1), oreRockMat);
+        base.scale.set(1.2, 0.68, 1.12);
+        base.position.y = 0.34;
+        hg.add(base);
+        const spikeSpecs: Array<[number, number, number, number, number]> = [
+          [0, 0.72, 0, 0.14, 1.1],
+          [-0.36, 0.56, 0.26, -0.42, 0.85],
+          [0.34, 0.58, -0.22, 0.38, 0.9],
+          [0.12, 0.48, 0.36, 0.26, 0.75],
+        ];
+        for (const [sx, sy, sz, rz, sh] of spikeSpecs) {
+          const spike = new THREE.Mesh(new THREE.ConeGeometry(0.2, sh, 5), oreVeinMat);
+          spike.position.set(sx, sy, sz);
+          spike.rotation.z = rz;
+          spike.rotation.x = sz * 0.6;
+          hg.add(spike);
+        }
+        const spark = new THREE.Mesh(herbOrbGeo, new THREE.MeshBasicMaterial({ color: '#ffae5c' }));
+        coreWrap.add(spark);
+        baseY = 1.48;
+      } else {
+        // 幽冥玄晶: dark slate cluster + tilted amethyst-cyan faceted spirit crystals
+        const base = new THREE.Mesh(new THREE.DodecahedronGeometry(0.62, 0), crystalBaseMat);
+        base.scale.set(1.2, 0.5, 1.15);
+        base.position.y = 0.24;
+        hg.add(base);
+        const shardGeo = new THREE.CylinderGeometry(0.04, 0.2, 1.15, 6);
+        for (let ci = 0; ci < 4; ci++) {
+          const a = (ci / 4) * Math.PI * 2 + 0.35;
+          const sh = new THREE.Mesh(shardGeo, crystalShardMat);
+          sh.position.set(Math.cos(a) * 0.34, 0.68, Math.sin(a) * 0.34);
+          sh.rotation.z = -Math.cos(a) * 0.36;
+          sh.rotation.x = Math.sin(a) * 0.36;
+          hg.add(sh);
+        }
+        const floatCrystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), crystalShardMat);
+        floatCrystal.scale.set(0.85, 1.55, 0.85);
+        coreWrap.add(floatCrystal);
+        baseY = 1.42;
+      }
+
+      coreWrap.position.y = baseY;
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: herb.accentHex,
+        transparent: true,
+        opacity: 0.72,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const ring = new THREE.Mesh(herbRingGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.18;
+
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: herb.accentHex,
+        transparent: true,
+        opacity: 0.2,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const beam = new THREE.Mesh(herbBeamGeo, beamMat);
+      beam.position.y = 1.38;
+
+      hg.add(coreWrap, ring, beam);
+      ow.add(hg);
+      this.worldHerbMeshes.set(herb.id, hg);
+      this.worldHerbVisuals.set(herb.id, {
+        group: hg,
+        core: coreWrap,
+        ring,
+        beam,
+        baseY,
+        phase: idx * 0.85,
+        available: true,
+      });
+    });
   }
 
   getBiome(): WorldBiome {
@@ -4463,6 +5659,13 @@ export class ShushanArena {
     if (!orb) return;
     orb.collected = collected;
     orb.group.visible = !collected;
+  }
+
+  setHerbNodeAvailable(id: string, available: boolean): void {
+    const herb = this.worldHerbVisuals.get(id);
+    if (!herb) return;
+    herb.available = available;
+    herb.group.visible = available;
   }
 
   isInWorldLava(pos: THREE.Vector3): boolean {
@@ -4784,9 +5987,11 @@ export class ShushanArena {
       this.zone0FullCurb.visible = false;
       this.zone0OpenCurb.visible = false;
       this.archwayGroup.visible = false;
+      this.baguaPlane.scale.setScalar(0.55);
       this.bossRingPlane.position.set(0, 0.036, 0);
       this.skySwordRing.position.set(0, 14.5, -26);
     } else if (layout === 'arena' || layout === 'pillars' || layout === 'islands') {
+      this.baguaPlane.scale.setScalar(1.0);
       this.archwayGroup.visible = true;
       this.corridorGroup.visible = false;
       this.zone0FullCurb.visible = layout === 'arena';
@@ -4797,6 +6002,7 @@ export class ShushanArena {
       this.bossRingPlane.position.set(0, 0.036, 0);
       this.skySwordRing.position.set(0, 11.2, -23);
     } else {
+      this.baguaPlane.scale.setScalar(1.0);
       this.archwayGroup.visible = true;
       this.corridorGroup.visible = true;
       this.zone0FullCurb.visible = this.maxZone === 0;
@@ -5162,6 +6368,39 @@ export class ShushanArena {
         const fl = this.cryptFlames[i];
         fl.position.y = 1.92 + Math.sin(elapsed * 3.4 + i * 1.3) * 0.08;
         fl.rotation.y = elapsed * 1.8 + i;
+      }
+      for (const h of this.worldHerbVisuals.values()) {
+        if (!h.available) continue;
+        h.core.position.y = h.baseY + Math.sin(elapsed * 2.5 + h.phase) * 0.12;
+        h.core.rotation.y = elapsed * 1.35 + h.phase;
+        const pulse = 0.88 + 0.16 * Math.sin(elapsed * 3.1 + h.phase);
+        h.ring.scale.setScalar(pulse);
+        h.ring.rotation.z = elapsed * 0.55 + h.phase;
+        const bm = h.beam.material as THREE.MeshBasicMaterial;
+        bm.opacity = 0.16 + 0.09 * Math.sin(elapsed * 2.8 + h.phase);
+      }
+      for (const cl of this.owCelestialClouds) {
+        cl.mesh.position.y = cl.baseY + Math.sin(elapsed * 0.8 + cl.phase) * 0.24;
+      }
+      for (let i = 0; i < this.owCelestialHalos.length; i++) {
+        this.owCelestialHalos[i].rotation.z = elapsed * 0.65 * (i % 2 === 0 ? 1 : -1);
+      }
+      for (const fl of this.owFortressFlames) {
+        const s = 0.86 + 0.22 * Math.sin(elapsed * 9.2 + fl.phase);
+        fl.mesh.scale.set(0.92 + 0.1 * Math.cos(elapsed * 7.4 + fl.phase), s, 0.92);
+        fl.mesh.position.y = fl.baseY + (s - 1.0) * 0.16;
+      }
+      for (const l of this.owFortressLights) {
+        const flick = 1 + 0.14 * Math.sin(elapsed * 8.1 + l.phase) + 0.06 * Math.sin(elapsed * 14.3 + l.phase);
+        l.light.intensity = l.baseIntensity * flick;
+      }
+      for (const bn of this.owFortressBanners) {
+        bn.mesh.rotation.y = bn.baseRotY + Math.sin(elapsed * 2.4 + bn.phase) * 0.14;
+        bn.mesh.rotation.z = Math.sin(elapsed * 3.2 + bn.phase) * 0.06;
+      }
+      for (let i = 0; i < this.owValleyWaterMeshes.length; i++) {
+        const wm = this.owValleyWaterMeshes[i].material as THREE.MeshStandardMaterial;
+        wm.emissiveIntensity = 0.28 + 0.1 * Math.sin(elapsed * 2.1 + i * 0.9);
       }
     }
 

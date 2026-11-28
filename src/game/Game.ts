@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { GameInput } from '../core/Input';
-import { RenderPipeline } from '../core/RenderPipeline';
+import {
+  DEFAULT_VISUAL_SETTINGS,
+  RenderPipeline,
+  type AtmosphereThemeId,
+  type VisualSettingsState,
+} from '../core/RenderPipeline';
 import { triggerHaptic } from '../core/NativeBridge';
 import { ShushanArena, type WorldBiome } from '../world/ShushanArena';
 import { VfxSystem } from '../vfx/VfxSystem';
@@ -55,6 +60,7 @@ import {
   pickBlessingChoices,
 } from './CampaignData';
 import {
+  type EquipCategory,
   type EquipRarity,
   type HeroLoadoutStats,
   type RolledGearItem,
@@ -65,6 +71,10 @@ import {
   getEquippedWeaponVisual,
   rollEquipmentDrop,
 } from './EquipmentData';
+import {
+  CRAFT_MATERIAL_MAP,
+  type MaterialId,
+} from './AlchemyCraftData';
 import {
   getDifficultyTier,
   evaluateCombatRank,
@@ -98,11 +108,13 @@ import {
   WORLD_BOSS_SPAWNS,
   WORLD_BOUND,
   WORLD_CHESTS,
+  WORLD_HERB_NODES,
   WORLD_MOB_CAMPS,
   WORLD_SPAWN_POS,
   WORLD_SPIRIT_ORBS,
   WORLD_WAYPOINTS,
   type WorldBossDef,
+  type WorldHerbNodeDef,
   type WorldMobCampDef,
 } from './OpenWorldData';
 import {
@@ -115,6 +127,7 @@ import {
   CharacterRosterOverlay,
   type RosterLiveSnapshot,
 } from '../ui/CharacterRosterOverlay';
+import { AlchemyCraftOverlay } from '../ui/AlchemyCraftOverlay';
 import { resolveCharacterProfileId } from './CharacterRosterData';
 import {
   CAMP_MEDITATION_QUOTES,
@@ -165,6 +178,7 @@ const VALID_POSES = new Set<PoseName>([
   'bossSlam',
   'mountHorse',
   'mountSword',
+  'showcaseFlourish',
 ]);
 
 function toPoseName(raw: string): PoseName {
@@ -181,6 +195,7 @@ export class Game {
   private readonly hud: HudController;
   private readonly ancientMap: AncientMapOverlay;
   private readonly rosterOverlay: CharacterRosterOverlay;
+  private readonly craftOverlay: AlchemyCraftOverlay;
   private readonly arena: ShushanArena;
   private readonly vfx = new VfxSystem();
   private readonly mp: MultiplayerClient;
@@ -227,6 +242,24 @@ export class Game {
   private activeMealBuff = { hpBonus: 0, dmgBonus: 0, speedBonus: 0, ultBonus: 0 };
   private episodeChoiceBuff = { dmgBonus: 0, speedBonus: 0, hpBonus: 0, ultBonus: 0, extraGourd: 0 };
   private moonKeyLight: THREE.DirectionalLight | null = null;
+  private titlePortraitLight: THREE.DirectionalLight | null = null;
+
+  // Persisted Beautification & Gameplay Settings
+  private static readonly VISUAL_SETTINGS_STORAGE_KEY = 'shushan_visual_settings_v1';
+  private visualSettings: VisualSettingsState = { ...DEFAULT_VISUAL_SETTINGS };
+  private readonly urlForcedMute: boolean;
+  private lastBiomeApplied: WorldBiome = 'bamboo_canyon';
+  private lastChapterApplied: ChapterDef | undefined;
+
+  // Honor-of-Kings 360° Shop Dressing-Room Stage & Studio Lighting
+  private shopStageGroup: THREE.Group | null = null;
+  private shopPedestalSpinGroup: THREE.Group | null = null;
+  private shopPedestalInnerMat: THREE.MeshBasicMaterial | null = null;
+  private shopPedestalOuterMat: THREE.MeshBasicMaterial | null = null;
+  private shopBackdropMesh: THREE.Mesh | null = null;
+  private shopKeyLight: THREE.DirectionalLight | null = null;
+  private shopFillLight: THREE.DirectionalLight | null = null;
+  private shopRimLight: THREE.DirectionalLight | null = null;
 
   private readonly mountRig = new MountRig();
   private mountMode: MountMode = 'none';
@@ -235,8 +268,9 @@ export class Game {
   private readonly mountTrampleHitIds = new Set<number>();
   private worldMobTimers = new Map<string, number>();
   private worldBossTimers = new Map<string, number>();
+  private worldHerbTimers = new Map<string, number>();
   private worldLastRegionId = '';
-  private activeWorldInteract: { kind: 'waypoint' | 'chest'; id: string; label: string } | null = null;
+  private activeWorldInteract: { kind: 'waypoint' | 'chest' | 'herb'; id: string; label: string } | null = null;
   private worldLavaBurnTimer = 0;
   private worldEventTimer = 38;
   private worldEventEnemyId: number | null = null;
@@ -244,7 +278,11 @@ export class Game {
   private readonly worldGuideArrow = new THREE.Group();
   private worldGuideCategory: 'auto' | 'waypoint' | 'chest' | 'orb' | 'boss' = 'auto';
   private worldAutoNav = false;
-  private worldCustomNavTarget: { x: number; z: number; label: string } | null = null;
+  private worldAutoNavPolicy: 'fight' | 'evade' = 'fight';
+  private worldAutoCombatActive = false;
+  private worldAutoResumeTimer = 0;
+  private worldAutoAttackCd = 0;
+  private worldCustomNavTarget: { x: number; z: number; label: string; herbId?: string } | null = null;
   private worldInCombat = false;
   private worldCombatCooldown = 0;
   private worldAutoNavPausedByCombat = false;
@@ -256,7 +294,16 @@ export class Game {
   private shopPreviewArmorId: string | null = null;
   private shopPreviewRelicId: string | null = null;
   private shopPreviewYaw = 0;
-  private shopPreviewAutoSpin = true;
+  private shopPreviewYawVel = 0;
+  private shopPreviewPitch = 0;
+  private shopPreviewZoom = 0;
+  private shopPreviewZoomTarget = 0;
+  private shopPreviewAutoSpin = false;
+  private shopTryOnTimer = 0;
+  private readonly shopTryOnDuration = 1.15;
+  private shopTryOnCount = 0;
+  private shopLastTryOnEffect = '';
+  private shopAmbientSparkTimer = 0;
 
   private activeTowerFloor: TowerFloorDef | null = null;
   private roguelikeState: {
@@ -315,6 +362,7 @@ export class Game {
   constructor(private readonly canvas: HTMLCanvasElement) {
     const params = new URLSearchParams(window.location.search);
     const urlForcedMute = params.has('mute') || params.has('auto');
+    this.urlForcedMute = urlForcedMute;
     this.godMode = params.has('god');
 
     this.pipeline = new RenderPipeline(canvas, this.scene, this.camera);
@@ -323,6 +371,7 @@ export class Game {
     this.cameraRig = new CameraRig(this.camera);
 
     this.setupLighting();
+    this.setupShopStudioStage();
 
     this.arena = new ShushanArena(this.rng);
     this.scene.add(this.arena.group);
@@ -488,6 +537,18 @@ export class Game {
       onWorldToggleAutoNav: () => {
         this.toggleWorldAutoNav();
       },
+      onWorldToggleNavPolicy: () => {
+        const next: 'fight' | 'evade' = this.worldAutoNavPolicy === 'fight' ? 'evade' : 'fight';
+        this.applyVisualSettings({ autoNavPolicy: next }, true);
+        this.hud.showWorldToast(
+          next === 'evade'
+            ? '自动寻路策略已切为【智能绕行 · 御剑避战】'
+            : '自动寻路策略已切为【自动迎战 · 清敌续行】',
+          true,
+          2400,
+        );
+        return next;
+      },
       onCampInteract: () => {
         this.triggerCampHotspotInteract();
       },
@@ -572,6 +633,7 @@ export class Game {
         const next = !this.audio.isMuted();
         this.audio.setMuted(next);
         if (!next) this.audio.unlock();
+        this.applyVisualSettings({ muted: next }, true);
         return next;
       },
       onTogglePause: () => this.togglePause(),
@@ -745,22 +807,47 @@ export class Game {
         weaponId?: string | null,
         armorId?: string | null,
         relicId?: string | null,
+        tryOnTrigger?: { category: EquipCategory; itemId: string } | null,
       ) => {
-        this.setShopPreview(active, skinId ?? null, weaponId ?? null, armorId ?? null, relicId ?? null);
+        this.setShopPreview(
+          active,
+          skinId ?? null,
+          weaponId ?? null,
+          armorId ?? null,
+          relicId ?? null,
+          tryOnTrigger ?? null,
+        );
       },
-      onShopPreviewRotate: (deltaYaw: number) => {
+      onShopPreviewRotate: (deltaYaw: number, deltaPitch = 0, yawVelocity = 0) => {
         this.shopPreviewAutoSpin = false;
         this.shopPreviewYaw += deltaYaw;
+        this.shopPreviewPitch = clamp(this.shopPreviewPitch + deltaPitch, -0.28, 0.34);
+        this.shopPreviewYawVel = clamp(yawVelocity, -9.5, 9.5);
       },
       onShopPreviewToggleSpin: () => {
         this.shopPreviewAutoSpin = !this.shopPreviewAutoSpin;
+        if (this.shopPreviewAutoSpin) this.shopPreviewYawVel = 0;
         return this.shopPreviewAutoSpin;
+      },
+      onShopPreviewZoom: (deltaOrVal: number, absolute = false) => {
+        this.shopPreviewZoomTarget = clamp(absolute ? deltaOrVal : this.shopPreviewZoomTarget + deltaOrVal, 0, 1);
+        return this.shopPreviewZoomTarget > 0.45;
+      },
+      onShopPreviewToggleZoom: () => {
+        this.shopPreviewZoomTarget = this.shopPreviewZoomTarget > 0.45 ? 0 : 1;
+        return this.shopPreviewZoomTarget > 0.45;
       },
       onOpenAncientMap: () => {
         this.openAncientMapOverlay();
       },
       onOpenRoster: (focusCharId?: string) => {
         this.openRosterOverlay(focusCharId);
+      },
+      onUpdateVisualSetting: (patch) => {
+        this.applyVisualSettings(patch, true);
+      },
+      onOpenCraft: (tab) => {
+        this.openCraftOverlay(tab);
       },
     });
 
@@ -778,7 +865,8 @@ export class Game {
         return ok;
       },
       onNavigateTo: (x: number, z: number, label: string) => {
-        this.startWorldCustomNavigation(x, z, label);
+        const matchedHerb = WORLD_HERB_NODES.find((h) => Math.hypot(h.x - x, h.z - z) < 0.8);
+        this.startWorldCustomNavigation(x, z, label, matchedHerb?.id);
       },
       onInspectCharacter: (charId: string) => {
         this.ancientMap.close();
@@ -800,6 +888,26 @@ export class Game {
       },
     });
 
+    this.craftOverlay = new AlchemyCraftOverlay(appMount, {
+      onBrewElixir: (elixirId: string) => this.brewAndConsumeElixir(elixirId),
+      onCraftGear: (recipeId: string) => this.craftGearFromRecipe(recipeId),
+      onEquipCrafted: (uid: string) => {
+        const ok = this.saveStore.equipRolledItem(uid);
+        if (ok) {
+          this.applyCurrentLoadoutVisuals();
+          this.syncLiveHeroCapsFromLoadout();
+          this.audio.playDropChime('spirit');
+          triggerHaptic('light');
+          this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+        }
+        return ok;
+      },
+      onGoGatherMaterial: (materialId: string) => {
+        this.goGatherMaterial(materialId as MaterialId);
+      },
+    });
+
+    this.loadAndApplyVisualSettings();
     this.hud.syncCampaignProgress(this.saveStore, this.saveStore.getRecommendedStage());
 
     window.addEventListener('keydown', this.onGlobalKey);
@@ -851,6 +959,259 @@ export class Game {
     const warmFill = new THREE.DirectionalLight('#ffcf9e', 0.92);
     warmFill.position.set(11, 10, 15);
     this.scene.add(warmFill);
+
+    // Gentle front portrait fill light active only in Title Lobby so Li Xiaoyao's face shines unobstructed
+    const titleFill = new THREE.DirectionalLight('#fff2e2', 1.25);
+    titleFill.position.set(1.6, 2.7, 6.2);
+    titleFill.visible = false;
+    this.scene.add(titleFill);
+    this.scene.add(titleFill.target);
+    this.titlePortraitLight = titleFill;
+  }
+
+  private setupShopStudioStage(): void {
+    const stage = new THREE.Group();
+    stage.name = 'shop_studio_stage';
+    stage.visible = false;
+
+    // 1. Sculpted Xianxia Lotus & Bagua Turntable Pedestal beneath Hero's feet
+    const pedestalBase = new THREE.Group();
+    const stoneMat = new THREE.MeshStandardMaterial({
+      color: '#172334',
+      roughness: 0.42,
+      metalness: 0.35,
+    });
+    const trimGoldMat = new THREE.MeshStandardMaterial({
+      color: '#d8b46a',
+      roughness: 0.34,
+      metalness: 0.72,
+      emissive: '#38250a',
+      emissiveIntensity: 0.25,
+    });
+    const lowerPlinth = new THREE.Mesh(new THREE.CylinderGeometry(1.16, 1.32, 0.12, 24), stoneMat);
+    lowerPlinth.position.y = -0.06;
+    const upperPlinth = new THREE.Mesh(new THREE.CylinderGeometry(0.96, 1.10, 0.06, 24), stoneMat);
+    upperPlinth.position.y = -0.015;
+    const goldRim = new THREE.Mesh(new THREE.TorusGeometry(1.04, 0.022, 10, 40), trimGoldMat);
+    goldRim.rotation.x = Math.PI / 2;
+    goldRim.position.y = 0.012;
+    pedestalBase.add(lowerPlinth, upperPlinth, goldRim);
+
+    const spinGroup = new THREE.Group();
+    const innerMat = new THREE.MeshBasicMaterial({
+      color: '#4ce6c2',
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const outerMat = new THREE.MeshBasicMaterial({
+      color: '#7ef8e4',
+      transparent: true,
+      opacity: 0.64,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    const innerRing = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.70, 48), innerMat);
+    innerRing.rotation.x = -Math.PI / 2;
+    innerRing.position.y = 0.022;
+    const outerRing = new THREE.Mesh(new THREE.RingGeometry(1.06, 1.15, 48), outerMat);
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.y = 0.024;
+    spinGroup.add(innerRing, outerRing);
+
+    // 12 sculpted Xianxia lotus petals + 8 Bagua trigram rays around pedestal rim
+    const petalGeo = new THREE.ConeGeometry(0.16, 0.38, 4);
+    const petalMat = new THREE.MeshStandardMaterial({
+      color: '#25394f',
+      roughness: 0.36,
+      metalness: 0.45,
+      emissive: '#1e6e68',
+      emissiveIntensity: 0.32,
+      transparent: true,
+      opacity: 0.88,
+    });
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const petal = new THREE.Mesh(petalGeo, petalMat);
+      petal.scale.set(1.0, 1.0, 0.28);
+      petal.position.set(Math.sin(a) * 1.04, 0.04, Math.cos(a) * 1.04);
+      petal.rotation.order = 'YXZ';
+      petal.rotation.y = a;
+      petal.rotation.x = 1.08;
+      spinGroup.add(petal);
+    }
+    const barGeo = new THREE.PlaneGeometry(0.06, 0.32);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const bar = new THREE.Mesh(barGeo, innerMat);
+      bar.rotation.x = -Math.PI / 2;
+      bar.rotation.z = -a;
+      bar.position.set(Math.sin(a) * 0.88, 0.025, Math.cos(a) * 0.88);
+      spinGroup.add(bar);
+    }
+    pedestalBase.add(spinGroup);
+    stage.add(pedestalBase);
+
+    // 2. Dark Translucent Backdrop Vignette Curtain (keeps courtyard pillars/lanterns from cluttering Hero's face)
+    const curtainCanvas = document.createElement('canvas');
+    curtainCanvas.width = 256;
+    curtainCanvas.height = 256;
+    const cctx = curtainCanvas.getContext('2d');
+    if (cctx) {
+      const grad = cctx.createRadialGradient(128, 128, 22, 128, 128, 128);
+      grad.addColorStop(0.0, 'rgba(8, 16, 28, 0.90)');
+      grad.addColorStop(0.55, 'rgba(9, 18, 30, 0.78)');
+      grad.addColorStop(0.85, 'rgba(8, 15, 26, 0.36)');
+      grad.addColorStop(1.0, 'rgba(8, 15, 26, 0.0)');
+      cctx.fillStyle = grad;
+      cctx.fillRect(0, 0, 256, 256);
+    }
+    const curtainTex = new THREE.CanvasTexture(curtainCanvas);
+    curtainTex.colorSpace = THREE.SRGBColorSpace;
+    const backdropGeo = new THREE.CylinderGeometry(3.25, 3.25, 5.4, 28, 1, true, Math.PI * 0.56, Math.PI * 0.88);
+    const backdropMat = new THREE.MeshBasicMaterial({
+      map: curtainTex,
+      transparent: true,
+      opacity: 0.92,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const backdropMesh = new THREE.Mesh(backdropGeo, backdropMat);
+    backdropMesh.position.y = 1.45;
+    stage.add(backdropMesh);
+
+    this.scene.add(stage);
+    this.shopStageGroup = stage;
+    this.shopPedestalSpinGroup = spinGroup;
+    this.shopPedestalInnerMat = innerMat;
+    this.shopPedestalOuterMat = outerMat;
+    this.shopBackdropMesh = backdropMesh;
+
+    // 3. 3-Point Portrait Studio Lights dynamically oriented to camera orbit basis at all 360°
+    const keyLight = new THREE.DirectionalLight('#fff5e6', 2.6);
+    keyLight.visible = false;
+    this.scene.add(keyLight);
+    this.scene.add(keyLight.target);
+    this.shopKeyLight = keyLight;
+
+    const fillLight = new THREE.DirectionalLight('#b8dcff', 1.25);
+    fillLight.visible = false;
+    this.scene.add(fillLight);
+    this.scene.add(fillLight.target);
+    this.shopFillLight = fillLight;
+
+    const rimLight = new THREE.DirectionalLight('#54f0e0', 2.2);
+    rimLight.visible = false;
+    this.scene.add(rimLight);
+    this.scene.add(rimLight.target);
+    this.shopRimLight = rimLight;
+  }
+
+  private setShopStudioLightsVisible(visible: boolean): void {
+    if (this.shopStageGroup) this.shopStageGroup.visible = visible;
+    if (this.shopKeyLight) this.shopKeyLight.visible = visible;
+    if (this.shopFillLight) this.shopFillLight.visible = visible;
+    if (this.shopRimLight) this.shopRimLight.visible = visible;
+  }
+
+  private updateShopStudioStage(dt: number): void {
+    if (!this.shopStageGroup) return;
+    const hx = this.hero.pos.x;
+    const hy = this.hero.pos.y;
+    const hz = this.hero.pos.z;
+    const orbitYaw = this.hero.yaw + this.shopPreviewYaw;
+
+    this.shopStageGroup.position.set(hx, hy, hz);
+    if (this.shopPedestalSpinGroup) {
+      this.shopPedestalSpinGroup.rotation.y += dt * (this.shopTryOnTimer > 0 ? 1.8 : 0.42);
+    }
+    if (this.shopBackdropMesh) {
+      // Cylinder arc centered around -Z (theta=PI) sits directly BEHIND the hero along camera view direction
+      this.shopBackdropMesh.rotation.y = orbitYaw;
+    }
+
+    const fwdX = Math.sin(orbitYaw);
+    const fwdZ = Math.cos(orbitYaw);
+    const rightX = Math.cos(orbitYaw);
+    const rightZ = -Math.sin(orbitYaw);
+    const targetY = hy + 1.38;
+
+    if (this.shopKeyLight) {
+      this.shopKeyLight.position.set(hx + fwdX * 3.4 - rightX * 1.9, hy + 2.85, hz + fwdZ * 3.4 - rightZ * 1.9);
+      this.shopKeyLight.target.position.set(hx, targetY, hz);
+      this.shopKeyLight.target.updateMatrixWorld();
+    }
+    if (this.shopFillLight) {
+      this.shopFillLight.position.set(hx + fwdX * 2.8 + rightX * 2.6, hy + 1.85, hz + fwdZ * 2.8 + rightZ * 2.6);
+      this.shopFillLight.target.position.set(hx, targetY, hz);
+      this.shopFillLight.target.updateMatrixWorld();
+    }
+    if (this.shopRimLight) {
+      this.shopRimLight.position.set(hx - fwdX * 3.2 + rightX * 1.1, hy + 2.65, hz - fwdZ * 3.2 + rightZ * 1.1);
+      this.shopRimLight.target.position.set(hx, targetY + 0.1, hz);
+      this.shopRimLight.target.updateMatrixWorld();
+    }
+  }
+
+  private loadAndApplyVisualSettings(): void {
+    let loaded: Partial<VisualSettingsState> = {};
+    try {
+      const raw = window.localStorage.getItem(Game.VISUAL_SETTINGS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<VisualSettingsState>;
+        if (parsed && typeof parsed === 'object') loaded = parsed;
+      }
+    } catch {
+      // Ignore storage read errors
+    }
+    const merged: VisualSettingsState = {
+      quality:
+        loaded.quality === 'ultra' || loaded.quality === 'balanced' || loaded.quality === 'smooth'
+          ? loaded.quality
+          : DEFAULT_VISUAL_SETTINGS.quality,
+      atmosphereTheme:
+        loaded.atmosphereTheme === 'moonlit' ||
+        loaded.atmosphereTheme === 'ink_frost' ||
+        loaded.atmosphereTheme === 'golden_dawn' ||
+        loaded.atmosphereTheme === 'astral_violet'
+          ? loaded.atmosphereTheme
+          : DEFAULT_VISUAL_SETTINGS.atmosphereTheme,
+      bloomMode:
+        loaded.bloomMode === 'vivid' || loaded.bloomMode === 'soft' || loaded.bloomMode === 'minimal'
+          ? loaded.bloomMode
+          : DEFAULT_VISUAL_SETTINGS.bloomMode,
+      autoNavPolicy: loaded.autoNavPolicy === 'evade' ? 'evade' : 'fight',
+      guideCompact: typeof loaded.guideCompact === 'boolean' ? loaded.guideCompact : DEFAULT_VISUAL_SETTINGS.guideCompact,
+      muted: this.urlForcedMute ? true : typeof loaded.muted === 'boolean' ? loaded.muted : this.audio.isMuted(),
+    };
+    this.visualSettings = merged;
+    this.applyVisualSettings(merged, false);
+  }
+
+  private applyVisualSettings(patch: Partial<VisualSettingsState>, persist = true): void {
+    this.visualSettings = { ...this.visualSettings, ...patch };
+    this.pipeline.applyVisualSettings({
+      quality: this.visualSettings.quality,
+      atmosphereTheme: this.visualSettings.atmosphereTheme,
+      bloomMode: this.visualSettings.bloomMode,
+    });
+    this.worldAutoNavPolicy = this.visualSettings.autoNavPolicy;
+    if (patch.muted !== undefined && !this.urlForcedMute) {
+      this.audio.setMuted(this.visualSettings.muted);
+    }
+    this.applyBiomeAtmosphere(this.lastBiomeApplied, this.lastChapterApplied);
+    this.hud.syncVisualSettings(this.visualSettings);
+    if (persist) {
+      try {
+        window.localStorage.setItem(Game.VISUAL_SETTINGS_STORAGE_KEY, JSON.stringify(this.visualSettings));
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
   }
 
   start(): void {
@@ -876,6 +1237,7 @@ export class Game {
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.ancientMap.close();
     this.rosterOverlay.destroy();
+    this.craftOverlay.close();
     this.mp.dispose();
     this.input.dispose();
     this.audio.dispose();
@@ -888,7 +1250,14 @@ export class Game {
 
   private onGlobalKey = (e: KeyboardEvent): void => {
     if (e.code === 'Escape') {
-      if (this.ancientMap.isOpen() || this.rosterOverlay.isOpen()) return;
+      if (
+        this.ancientMap.isOpen() ||
+        this.rosterOverlay.isOpen() ||
+        this.craftOverlay.isOpen() ||
+        this.hud.isSettingsOpen()
+      ) {
+        return;
+      }
       if (this.mode === 'playing' || this.mode === 'paused') {
         e.preventDefault();
         this.togglePause();
@@ -1028,7 +1397,143 @@ export class Game {
       getEquippedWeaponVisual(equipped, this.saveStore.getInventory()),
       this.resolveArmorVisual(equipped.armor),
       this.resolveRelicVisual(equipped.relic),
+      equipped.skin,
     );
+  }
+
+  private getSkinThemeMeta(skinId: string): {
+    label: string;
+    accentHex: string;
+    rgb: [number, number, number];
+  } {
+    switch (skinId) {
+      case 'skin_shuangxue':
+        return { label: '❄ 霜雪剑仙 · 冰莲八卦', accentHex: '#7ce4ff', rgb: [0.55, 2.15, 2.5] };
+      case 'skin_chiyan':
+        return { label: '🔥 赤焰剑尊 · 炎浪莲火', accentHex: '#ff6e42', rgb: [2.45, 0.72, 0.28] };
+      case 'skin_zixiao':
+        return { label: '⚡ 紫霄星君 · 紫电八卦', accentHex: '#c284ff', rgb: [1.55, 0.75, 2.45] };
+      case 'skin_jinwu':
+        return { label: '☀ 金乌帝君 · 烈日神环', accentHex: '#ffd85e', rgb: [2.5, 1.95, 0.45] };
+      case 'skin_xiaoyao':
+      default:
+        return { label: '🍃 清风游侠 · 翡翠剑风', accentHex: '#4ce6c2', rgb: [0.45, 2.25, 1.95] };
+    }
+  }
+
+  private applyShopPedestalColors(accentHex: string): void {
+    if (this.shopPedestalInnerMat) this.shopPedestalInnerMat.color.set(accentHex);
+    if (this.shopPedestalOuterMat) {
+      const outer = new THREE.Color(accentHex).lerp(new THREE.Color('#ffffff'), 0.25);
+      this.shopPedestalOuterMat.color.copy(outer);
+    }
+    if (this.shopRimLight) this.shopRimLight.color.set(accentHex);
+  }
+
+  private triggerShopTryOnEffect(category: EquipCategory, itemId: string): void {
+    this.shopTryOnTimer = this.shopTryOnDuration;
+    this.shopTryOnCount += 1;
+
+    const hPos = this.hero.pos.clone();
+    const chestPos = hPos.clone().add(new THREE.Vector3(0, 1.15, 0));
+    const groundPos = new THREE.Vector3(hPos.x, 0.08, hPos.z);
+    const inv = this.saveStore.getInventory();
+    const rolled = category !== 'skin' ? inv.find((g) => g.uid === itemId) : undefined;
+    const itemDef = SHOP_ITEM_MAP[rolled ? rolled.templateId : itemId];
+    const displayName = rolled?.name ?? itemDef?.name ?? itemId;
+
+    let tagLabel = '';
+    let accentHex = '#4ce6c2';
+
+    if (category === 'skin') {
+      const meta = this.getSkinThemeMeta(itemId);
+      tagLabel = meta.label;
+      accentHex = meta.accentHex;
+      const col = new THREE.Color(meta.rgb[0], meta.rgb[1], meta.rgb[2]);
+      this.applyShopPedestalColors(accentHex);
+
+      if (itemId === 'skin_shuangxue') {
+        this.vfx.spawnBaguaArray({ pos: groundPos, radius: 2.3, color: col, duration: 1.25 });
+        this.vfx.spawnShockRing(groundPos, col, 0.3, 2.6, 0.55);
+        this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 1, 0), col, 22, this.rng);
+        this.audio.playSkillQ();
+      } else if (itemId === 'skin_chiyan') {
+        this.vfx.spawnShockRing(groundPos, col, 0.35, 3.0, 0.55);
+        this.vfx.spawnSwordArc({
+          pos: chestPos,
+          yaw: this.hero.yaw,
+          wide: true,
+          scale: 1.05,
+          colorCore: col,
+          colorEdge: new THREE.Color(2.2, 1.5, 0.3),
+          duration: 0.52,
+        });
+        this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 1, 0), new THREE.Color(2.5, 1.35, 0.35), 24, this.rng);
+        this.audio.playSkillE();
+      } else if (itemId === 'skin_zixiao') {
+        this.vfx.spawnBaguaArray({ pos: groundPos, radius: 2.45, color: col, duration: 1.3 });
+        this.vfx.spawnShockRing(chestPos, col, 0.25, 2.4, 0.5);
+        this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 1, 0), new THREE.Color(1.9, 1.2, 2.5), 22, this.rng);
+        this.audio.playParry();
+      } else if (itemId === 'skin_jinwu') {
+        this.vfx.spawnBaguaArray({ pos: groundPos, radius: 2.6, color: col, duration: 1.35 });
+        this.vfx.spawnSkySwordGate(hPos.clone().add(new THREE.Vector3(0, 2.45, 0)), 1.65, col, 1.15);
+        this.vfx.spawnShockRing(groundPos, col, 0.35, 3.2, 0.58);
+        this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 1, 0), col, 26, this.rng);
+        this.audio.playSkillR();
+      } else {
+        this.vfx.spawnShockRing(groundPos, col, 0.28, 2.5, 0.48);
+        this.vfx.spawnSwordArc({
+          pos: chestPos,
+          yaw: this.hero.yaw,
+          wide: false,
+          scale: 0.95,
+          colorCore: col,
+          colorEdge: new THREE.Color(0.35, 1.45, 1.3),
+          duration: 0.46,
+        });
+        this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 1, 0), col, 18, this.rng);
+        this.audio.playSwordSwing(2);
+      }
+    } else if (category === 'weapon') {
+      const wpnVis =
+        SHOP_ITEM_MAP[itemId]?.weaponVisual ??
+        getEquippedWeaponVisual({ ...this.saveStore.getEquipped(), weapon: itemId }, inv);
+      accentHex = wpnVis.glowHex || '#7ef8e4';
+      const core = new THREE.Color(wpnVis.trailCore[0], wpnVis.trailCore[1], wpnVis.trailCore[2]);
+      const edge = new THREE.Color(wpnVis.trailEdge[0], wpnVis.trailEdge[1], wpnVis.trailEdge[2]);
+      tagLabel = `⚔ 神兵试锋 · ${displayName}`;
+      this.vfx.spawnSwordArc({
+        pos: chestPos,
+        yaw: this.hero.yaw,
+        wide: true,
+        scale: 1.05,
+        colorCore: core,
+        colorEdge: edge,
+        duration: 0.5,
+      });
+      this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 0.8, 0.4), core, 18, this.rng);
+      this.audio.playSwordSwing(3);
+    } else if (category === 'armor') {
+      const armVis = this.resolveArmorVisual(itemId);
+      accentHex = armVis.tintHex ?? '#64e6d8';
+      const col = new THREE.Color(accentHex).multiplyScalar(1.85);
+      tagLabel = `🛡 玄甲护体 · ${displayName}`;
+      this.vfx.spawnShockRing(groundPos, col, 0.32, 2.6, 0.52);
+      this.vfx.spawnHealVortex(hPos);
+      this.audio.playParry();
+    } else {
+      const relVis = this.resolveRelicVisual(itemId);
+      accentHex = relVis.auraHex ?? '#e8c474';
+      const col = new THREE.Color(accentHex).multiplyScalar(1.9);
+      tagLabel = `✦ 灵宝共鸣 · ${displayName}`;
+      this.vfx.spawnBaguaArray({ pos: groundPos, radius: 2.15, color: col, duration: 1.1 });
+      this.vfx.spawnHitSparks(chestPos, new THREE.Vector3(0, 1, 0), col, 16, this.rng);
+      this.audio.playDropChime('spirit');
+    }
+
+    this.shopLastTryOnEffect = `${category}:${itemId}:${tagLabel}`;
+    this.hud.setShopTryOnEffectTag(tagLabel, accentHex);
   }
 
   private setShopPreview(
@@ -1037,6 +1542,7 @@ export class Game {
     weaponId: string | null = null,
     armorId: string | null = null,
     relicId: string | null = null,
+    tryOnTrigger: { category: EquipCategory; itemId: string } | null = null,
   ): void {
     if (!active) {
       if (!this.shopPreviewActive) return;
@@ -1045,12 +1551,20 @@ export class Game {
       this.shopPreviewWeaponId = null;
       this.shopPreviewArmorId = null;
       this.shopPreviewRelicId = null;
+      this.shopPreviewYawVel = 0;
+      this.shopPreviewPitch = 0;
+      this.shopPreviewZoom = 0;
+      this.shopPreviewZoomTarget = 0;
+      this.shopTryOnTimer = 0;
+      this.setShopStudioLightsVisible(false);
+      if (this.titlePortraitLight) this.titlePortraitLight.visible = this.mode === 'title';
       this.applyCurrentLoadoutVisuals();
       this.hero.rig.setWeaponDrawn(
         this.mode === 'playing' || this.mode === 'camp' || this.mode === 'showcase' || this.mountMode === 'horse',
       );
       if (this.mode === 'title') {
-        this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed);
+        const isPortrait = window.innerHeight > window.innerWidth;
+        this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed, isPortrait);
       } else {
         this.cameraRig.snapTo(this.hero.pos);
       }
@@ -1058,11 +1572,25 @@ export class Game {
     }
 
     const equipped = this.saveStore.getEquipped();
-    if (!this.shopPreviewActive) {
+    const wasActive = this.shopPreviewActive;
+    const prevSkin = this.shopPreviewSkinId;
+    const prevWeapon = this.shopPreviewWeaponId;
+    const prevArmor = this.shopPreviewArmorId;
+    const prevRelic = this.shopPreviewRelicId;
+
+    if (!wasActive) {
       this.shopPreviewActive = true;
       this.shopPreviewYaw = 0;
-      this.shopPreviewAutoSpin = true;
+      this.shopPreviewYawVel = 0;
+      this.shopPreviewPitch = 0;
+      this.shopPreviewZoom = 0;
+      this.shopPreviewZoomTarget = 0;
+      this.shopPreviewAutoSpin = false;
+      this.shopTryOnTimer = 0;
+      this.setShopStudioLightsVisible(true);
+      if (this.titlePortraitLight) this.titlePortraitLight.visible = false;
     }
+
     this.shopPreviewSkinId = skinId ?? equipped.skin;
     this.shopPreviewWeaponId = weaponId ?? equipped.weapon;
     this.shopPreviewArmorId = armorId ?? equipped.armor;
@@ -1076,17 +1604,138 @@ export class Game {
     const armorVis = this.resolveArmorVisual(this.shopPreviewArmorId);
     const relicVis = this.resolveRelicVisual(this.shopPreviewRelicId);
 
-    this.hero.rig.applyHeroAppearance(skinVis, wpnVis, armorVis, relicVis);
+    this.hero.rig.applyHeroAppearance(skinVis, wpnVis, armorVis, relicVis, this.shopPreviewSkinId);
     this.hero.rig.setWeaponDrawn(true);
+
+    const skinMeta = this.getSkinThemeMeta(this.shopPreviewSkinId);
+    this.applyShopPedestalColors(skinMeta.accentHex);
+
+    if (tryOnTrigger) {
+      this.triggerShopTryOnEffect(tryOnTrigger.category, tryOnTrigger.itemId);
+    } else if (wasActive) {
+      if (this.shopPreviewSkinId !== prevSkin) {
+        this.triggerShopTryOnEffect('skin', this.shopPreviewSkinId);
+      } else if (this.shopPreviewWeaponId !== prevWeapon) {
+        this.triggerShopTryOnEffect('weapon', this.shopPreviewWeaponId);
+      } else if (this.shopPreviewArmorId !== prevArmor) {
+        this.triggerShopTryOnEffect('armor', this.shopPreviewArmorId);
+      } else if (this.shopPreviewRelicId !== prevRelic) {
+        this.triggerShopTryOnEffect('relic', this.shopPreviewRelicId);
+      }
+    } else {
+      this.hud.setShopTryOnEffectTag(skinMeta.label, skinMeta.accentHex);
+    }
+
+    this.updateShopStudioStage(0);
+  }
+
+  private openCraftOverlay(tab?: 'elixir' | 'forge'): void {
+    if (this.ancientMap.isOpen()) this.ancientMap.close();
+    if (this.rosterOverlay.isOpen()) this.rosterOverlay.close();
+    if (this.hud.isSettingsOpen()) this.hud.closeSettings();
+    this.craftOverlay.open(this.saveStore, tab);
+  }
+
+  private brewAndConsumeElixir(elixirId: string) {
+    const res = this.saveStore.brewAndConsumeElixir(elixirId);
+    if (res.ok) {
+      this.syncLiveHeroCapsFromLoadout();
+      if (res.instantRestore) {
+        this.hero.hp = this.hero.maxHp;
+        this.hero.delayedHp = this.hero.maxHp;
+        this.hero.spirit = this.hero.maxSpirit;
+        this.hero.gourds = this.hero.maxGourds;
+      }
+      const goldCol = new THREE.Color(2.45, 1.95, 0.55);
+      this.vfx.spawnBaguaArray({ pos: this.hero.pos.clone(), radius: 3.2, color: goldCol, duration: 1.4 });
+      this.vfx.spawnHealVortex(this.hero.pos);
+      this.vfx.spawnShockRing(this.hero.pos, goldCol, 0.35, 3.8, 0.55);
+      this.audio.playDropChime('spirit');
+      triggerHaptic('heavy');
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      if (this.craftOverlay.isOpen()) this.craftOverlay.refresh(this.saveStore);
+    }
+    return res;
+  }
+
+  private craftGearFromRecipe(recipeId: string) {
+    const res = this.saveStore.craftEquipmentRecipe(recipeId, this.rng);
+    if (res.ok && res.item) {
+      this.vfx.spawnShockRing(this.hero.pos, new THREE.Color(2.4, 1.85, 0.55), 0.35, 3.6, 0.52);
+      this.audio.playGearDropChime(res.item.rarity);
+      triggerHaptic('heavy');
+      this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
+      if (this.craftOverlay.isOpen()) this.craftOverlay.refresh(this.saveStore);
+    }
+    return res;
+  }
+
+  private goGatherMaterial(materialId: MaterialId): void {
+    this.craftOverlay.close();
+    if (this.mode !== 'world') {
+      this.enterOpenWorldMode();
+    }
+    const h = this.hero.pos;
+    if (materialId === 'mat_yaodan') {
+      let bestCamp: WorldMobCampDef | null = null;
+      let bestDist = Infinity;
+      for (const camp of WORLD_MOB_CAMPS) {
+        const d = Math.hypot(camp.x - h.x, camp.z - h.z);
+        if (d < bestDist) {
+          bestDist = d;
+          bestCamp = camp;
+        }
+      }
+      if (bestCamp) {
+        this.startWorldCustomNavigation(bestCamp.x, bestCamp.z, `讨伐 · ${bestCamp.name}`);
+      }
+      return;
+    }
+    if (materialId === 'mat_longlin') {
+      const liveBosses = WORLD_BOSS_SPAWNS.filter((wb) =>
+        this.enemies.some((e) => e.worldBossId === wb.id && e.aiState !== 'dead'),
+      );
+      const pool = liveBosses.length > 0 ? liveBosses : WORLD_BOSS_SPAWNS;
+      let bestBoss: WorldBossDef | null = null;
+      let bestDist = Infinity;
+      for (const wb of pool) {
+        const d = Math.hypot(wb.x - h.x, wb.z - h.z);
+        if (d < bestDist) {
+          bestDist = d;
+          bestBoss = wb;
+        }
+      }
+      if (bestBoss) {
+        this.startWorldCustomNavigation(bestBoss.x, bestBoss.z, `征讨 · ${bestBoss.name}`);
+      }
+      return;
+    }
+    const matchingHerbs = WORLD_HERB_NODES.filter((n) => n.materialId === materialId);
+    const availableHerbs = matchingHerbs.filter((n) => !this.worldHerbTimers.has(n.id));
+    const pool = availableHerbs.length > 0 ? availableHerbs : matchingHerbs;
+    let bestHerb: WorldHerbNodeDef | null = null;
+    let bestDist = Infinity;
+    for (const node of pool) {
+      const d = Math.hypot(node.x - h.x, node.z - h.z);
+      if (d < bestDist) {
+        bestDist = d;
+        bestHerb = node;
+      }
+    }
+    if (bestHerb) {
+      this.startWorldCustomNavigation(bestHerb.x, bestHerb.z, `采摘 · ${bestHerb.name}`, bestHerb.id);
+    }
   }
 
   private openAncientMapOverlay(): void {
     if (this.rosterOverlay.isOpen()) this.rosterOverlay.close();
+    if (this.craftOverlay.isOpen()) this.craftOverlay.close();
     this.ancientMap.open(this.buildAncientMapSnapshot());
   }
 
   private openRosterOverlay(focusCharId?: string): void {
     if (this.ancientMap.isOpen()) this.ancientMap.close();
+    if (this.craftOverlay.isOpen()) this.craftOverlay.close();
     const resolvedId =
       focusCharId === '__active_boss__'
         ? this.resolveActiveBossCharId()
@@ -1224,6 +1873,11 @@ export class Game {
         ? { x: activeGuide.x, z: activeGuide.z, label: activeGuide.label }
         : null;
 
+    const herbCooldowns: Record<string, number> = {};
+    for (const [hid, rem] of this.worldHerbTimers.entries()) {
+      if (rem > 0) herbCooldowns[hid] = Math.ceil(rem);
+    }
+
     return {
       hero: {
         x: this.hero.pos.x,
@@ -1239,6 +1893,7 @@ export class Game {
       litWaypoints,
       openedChests,
       collectedOrbs,
+      herbCooldowns,
       bosses,
       npcs,
       activeTarget,
@@ -1246,7 +1901,18 @@ export class Game {
   }
 
   private buildRosterSnapshot(): RosterLiveSnapshot {
-    const loadout = this.getLoadoutStats();
+    const baseLoadout = this.getLoadoutStats();
+    const elixir = this.saveStore.getElixirBonus();
+    const loadout: HeroLoadoutStats = {
+      ...baseLoadout,
+      maxHpBonus: baseLoadout.maxHpBonus + elixir.hpBonus,
+      dmgMult: baseLoadout.dmgMult * (1 + elixir.atkPct),
+      dmgReduce: clamp(baseLoadout.dmgReduce + elixir.dmgReduce, 0, 0.72),
+      critRate: baseLoadout.critRate + elixir.critRate,
+      critMult: baseLoadout.critMult + elixir.critDmg,
+      spiritRegenMult: baseLoadout.spiritRegenMult * (1 + elixir.spiritRegenPct),
+      poiseMult: baseLoadout.poiseMult + elixir.poiseBonus / 100,
+    };
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const cult = this.saveStore.getCultivationBonus();
     const power = computeCombatPower(realm.hpBonus, realm.dmgMult, loadout);
@@ -1256,7 +1922,7 @@ export class Game {
       this.blessings.speedMult *
       (1 + this.activeMealBuff.speedBonus + this.episodeChoiceBuff.speedBonus);
     const moveSpeed = Number((7.2 * speedMult).toFixed(2));
-    const poise = Math.round(100 * loadout.poiseMult);
+    const poise = Math.round(100 * baseLoadout.poiseMult + elixir.poiseBonus);
     const parryWindowMs = Math.round((0.26 + loadout.parryWindowBonus) * 1000);
     const cdReducePct = Math.round(clamp((1 - this.getCdMult()) * 100, 0, 65));
 
@@ -1288,6 +1954,7 @@ export class Game {
     }
 
     const ultBonusTxt = cult.startUltBonus > 0 ? ` · 起手剑意+${cult.startUltBonus}` : '';
+    const elixirTxt = elixir.totalTaken > 0 ? ` · 丹药×${elixir.totalTaken}(血+${elixir.hpBonus})` : '';
     return {
       hero: {
         hp: Math.ceil(this.hero.hp),
@@ -1315,7 +1982,7 @@ export class Game {
           skin: this.saveStore.getEquippedItemName('skin'),
         },
         orbHpBonus: this.saveStore.getWorldOrbHpBonus(),
-        cultivationSummary: `${cult.current.name} (Lv.${cult.current.level}) · 气血+${cult.hpBonus} · 剑伤+${cult.atkPct}%${ultBonusTxt}`,
+        cultivationSummary: `${cult.current.name} (Lv.${cult.current.level}) · 气血+${cult.hpBonus} · 剑伤+${cult.atkPct}%${ultBonusTxt}${elixirTxt}`,
       },
       liveWorldBosses,
       defeatedBossIds: Object.keys(this.saveStore.data.worldBossKills ?? {}),
@@ -1324,16 +1991,19 @@ export class Game {
     };
   }
 
-  private startWorldCustomNavigation(x: number, z: number, label: string): void {
+  private startWorldCustomNavigation(x: number, z: number, label: string, herbId?: string): void {
     if (this.mode !== 'world') {
       this.enterOpenWorldMode();
     }
     const cx = clamp(x, -(WORLD_BOUND - 2), WORLD_BOUND - 2);
     const cz = clamp(z, -(WORLD_BOUND - 2), WORLD_BOUND - 2);
-    this.worldCustomNavTarget = { x: cx, z: cz, label: label || '舆图标点' };
+    this.worldCustomNavTarget = { x: cx, z: cz, label: label || '舆图标点', herbId };
     this.worldAutoNav = true;
+    this.worldAutoCombatActive = false;
+    this.worldAutoResumeTimer = 0;
     this.worldAutoNavPausedByCombat = false;
     this.ancientMap.close();
+    this.craftOverlay.close();
     this.hud.showWorldToast(`舆图指引：自动寻路前往【${this.worldCustomNavTarget.label}】`, true, 3200);
   }
 
@@ -1356,6 +2026,7 @@ export class Game {
     if (this.mode !== 'world') return;
     this.worldInCombat = true;
     this.worldCombatCooldown = 3.2;
+    if (this.worldAutoCombatActive) return;
     if (this.worldAutoNav) {
       this.worldAutoNav = false;
       this.worldAutoNavPausedByCombat = true;
@@ -1403,37 +2074,63 @@ export class Game {
   }
 
   private applyBiomeAtmosphere(biome: WorldBiome, chDef?: ChapterDef): void {
+    this.lastBiomeApplied = biome;
+    this.lastChapterApplied = chDef;
+    let bgHex = '#0c1522';
+    let fogHex = '#101d2c';
+    let fogDensity = 0.0138;
     if (biome === 'haven_camp') {
-      this.scene.background = new THREE.Color('#191522');
-      this.scene.fog = new THREE.FogExp2('#221b2c', 0.0115);
+      bgHex = '#191522';
+      fogHex = '#221b2c';
+      fogDensity = 0.0115;
     } else if (biome === 'peach_shrine') {
-      this.scene.background = new THREE.Color('#161124');
-      this.scene.fog = new THREE.FogExp2('#21172f', 0.0128);
+      bgHex = '#161124';
+      fogHex = '#21172f';
+      fogDensity = 0.0128;
     } else if (biome === 'sword_graveyard') {
-      this.scene.background = new THREE.Color('#100d1f');
-      this.scene.fog = new THREE.FogExp2('#18132d', 0.0132);
+      bgHex = '#100d1f';
+      fogHex = '#18132d';
+      fogDensity = 0.0132;
     } else if (biome === 'lava_abyss') {
-      this.scene.background = new THREE.Color('#1d0c0c');
-      this.scene.fog = new THREE.FogExp2('#2c1210', 0.013);
+      bgHex = '#1d0c0c';
+      fogHex = '#2c1210';
+      fogDensity = 0.013;
     } else if (biome === 'celestial_sanctum') {
-      this.scene.background = new THREE.Color('#0a1224');
-      this.scene.fog = new THREE.FogExp2('#101c36', 0.0124);
+      bgHex = '#0a1224';
+      fogHex = '#101c36';
+      fogDensity = 0.0124;
     } else if (biome === 'astral_void') {
-      this.scene.background = new THREE.Color('#090d22');
-      this.scene.fog = new THREE.FogExp2('#101736', 0.0118);
+      bgHex = '#090d22';
+      fogHex = '#101736';
+      fogDensity = 0.0118;
     } else if (chDef) {
-      this.scene.background = new THREE.Color(chDef.bgHex);
-      this.scene.fog = new THREE.FogExp2(chDef.fogHex, 0.0138);
-    } else {
-      this.scene.background = new THREE.Color('#0c1522');
-      this.scene.fog = new THREE.FogExp2('#101d2c', 0.0138);
+      bgHex = chDef.bgHex;
+      fogHex = chDef.fogHex;
+      fogDensity = 0.0138;
     }
+
+    const bgColor = new THREE.Color(bgHex);
+    const fogColor = new THREE.Color(fogHex);
+    const theme = this.visualSettings.atmosphereTheme;
+    if (theme === 'ink_frost') {
+      bgColor.lerp(new THREE.Color('#162638'), 0.34);
+      fogColor.lerp(new THREE.Color('#1f3448'), 0.36);
+    } else if (theme === 'golden_dawn') {
+      bgColor.lerp(new THREE.Color('#2c1c14'), 0.36);
+      fogColor.lerp(new THREE.Color('#3c2618'), 0.38);
+    } else if (theme === 'astral_violet') {
+      bgColor.lerp(new THREE.Color('#1b1134'), 0.38);
+      fogColor.lerp(new THREE.Color('#271848'), 0.4);
+    }
+    this.scene.background = bgColor;
+    this.scene.fog = new THREE.FogExp2(fogColor, fogDensity);
   }
 
   private syncLiveHeroCapsFromLoadout(): void {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
     const cultivation = this.saveStore.getCultivationBonus();
+    const elixir = this.saveStore.getElixirBonus();
     const swordHeart = getSwordHeartSummary(this.saveStore.getSwordHeart());
     const h = this.hero;
     const prevMaxHp = h.maxHp;
@@ -1443,6 +2140,7 @@ export class Game {
       loadout.maxHpBonus +
       this.blessings.maxHpBonus +
       cultivation.hpBonus +
+      elixir.hpBonus +
       swordHeart.hpBonus +
       this.saveStore.getWorldOrbHpBonus() +
       this.activeMealBuff.hpBonus +
@@ -1469,12 +2167,15 @@ export class Game {
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.worldAutoCombatActive = false;
+    this.worldAutoResumeTimer = 0;
     this.worldCustomNavTarget = null;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
     this.worldAutoNavPausedByCombat = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
+    this.worldHerbTimers.clear();
     this.activeWorldInteract = null;
     this.clearCombatEntities();
     this.setCampNpcsVisible(false);
@@ -1495,17 +2196,25 @@ export class Game {
     this.arena.setHealingShrineUsed(false);
     this.targetRingMesh.visible = false;
     this.pendingCutsceneAfterDialogue = false;
-    this.resetHero(new THREE.Vector3(0, 0, 2.2), Math.PI);
+    // Front-facing yaw = 0 faces +Z directly toward CameraRig.updateTitleOrbit so Hero's face shines unobstructed!
+    this.resetHero(new THREE.Vector3(0, 0, 2.2), 0);
     this.applyCurrentLoadoutVisuals();
     this.hero.rig.setWeaponDrawn(false);
     this.arena.setStageTheme(1);
     this.applyBiomeAtmosphere('bamboo_canyon');
     this.mode = 'title';
     this.stagePhase = 'combat';
+    if (this.titlePortraitLight) {
+      this.titlePortraitLight.visible = true;
+      this.titlePortraitLight.position.set(this.hero.pos.x + 1.5, 2.7, this.hero.pos.z + 4.4);
+      this.titlePortraitLight.target.position.set(this.hero.pos.x, 1.38, this.hero.pos.z);
+      this.titlePortraitLight.target.updateMatrixWorld();
+    }
     this.hud.syncCampaignProgress(this.saveStore, this.currentStageId);
     this.hud.setMode('title');
     this.audio.setMood('title');
-    this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed);
+    const isPortrait = window.innerHeight > window.innerWidth;
+    this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed, isPortrait);
   }
 
   private enterShowcaseMode(): void {
@@ -1541,9 +2250,12 @@ export class Game {
     this.audio.unlock();
     this.input.resetState();
     this.setShopPreview(false);
+    if (this.titlePortraitLight) this.titlePortraitLight.visible = false;
     this.setMountMode('none', true);
     this.worldGuideArrow.visible = false;
     this.worldAutoNav = false;
+    this.worldAutoCombatActive = false;
+    this.worldAutoResumeTimer = 0;
     this.worldCustomNavTarget = null;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
@@ -1658,8 +2370,12 @@ export class Game {
     this.audio.unlock();
     this.input.resetState();
     this.setShopPreview(false);
+    if (this.titlePortraitLight) this.titlePortraitLight.visible = false;
     this.setMountMode('none', true);
     this.worldAutoNav = false;
+    this.worldAutoCombatActive = false;
+    this.worldAutoResumeTimer = 0;
+    this.worldAutoAttackCd = 0;
     this.worldCustomNavTarget = null;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
@@ -1687,6 +2403,7 @@ export class Game {
     this.healingShrineCollected = false;
     this.worldMobTimers.clear();
     this.worldBossTimers.clear();
+    this.worldHerbTimers.clear();
     this.worldLastRegionId = 'center';
     this.activeWorldInteract = null;
     this.worldLavaBurnTimer = 0;
@@ -1708,6 +2425,9 @@ export class Game {
     }
     for (const orb of WORLD_SPIRIT_ORBS) {
       this.arena.setSpiritOrbCollected(orb.id, this.saveStore.isWorldOrbCollected(orb.id));
+    }
+    for (const herb of WORLD_HERB_NODES) {
+      this.arena.setHerbNodeAvailable(herb.id, true);
     }
 
     this.resetHero(new THREE.Vector3(WORLD_SPAWN_POS.x, 0, WORLD_SPAWN_POS.z), Math.PI);
@@ -1861,6 +2581,16 @@ export class Game {
       }
     }
 
+    for (const [herbId, remain] of Array.from(this.worldHerbTimers.entries())) {
+      const next = remain - dt;
+      if (next <= 0) {
+        this.worldHerbTimers.delete(herbId);
+        this.arena.setHerbNodeAvailable(herbId, true);
+      } else {
+        this.worldHerbTimers.set(herbId, next);
+      }
+    }
+
     if (this.arena.isInWorldLava(h.pos) && this.mountMode !== 'sword' && h.state !== 'dead') {
       this.worldLavaBurnTimer -= dt;
       if (this.worldLavaBurnTimer <= 0) {
@@ -1876,7 +2606,7 @@ export class Game {
       this.worldLavaBurnTimer = 0;
     }
 
-    let nextPrompt: { kind: 'waypoint' | 'chest'; id: string; label: string } | null = null;
+    let nextPrompt: { kind: 'waypoint' | 'chest' | 'herb'; id: string; label: string } | null = null;
     let bestDist = 4.4;
     const isMobUi = this.hud.isMobileUi();
 
@@ -1906,6 +2636,19 @@ export class Game {
       }
     }
 
+    for (const herb of WORLD_HERB_NODES) {
+      if (this.worldHerbTimers.has(herb.id)) continue;
+      const d = Math.hypot(h.pos.x - herb.x, h.pos.z - herb.z);
+      if (d <= 3.6 && d < bestDist) {
+        bestDist = d;
+        nextPrompt = {
+          kind: 'herb',
+          id: herb.id,
+          label: isMobUi ? `点击互动 · 采摘【${herb.name}】` : `采摘【${herb.name}】 (G)`,
+        };
+      }
+    }
+
     this.activeWorldInteract = nextPrompt;
     this.hud.setWorldInteractPrompt(nextPrompt?.label ?? null);
 
@@ -1916,13 +2659,39 @@ export class Game {
           this.worldCombatCooldown = 1.2;
         } else if (this.worldInCombat) {
           this.worldInCombat = false;
-          this.announceWorldNextStep('战斗结束');
+          if (!this.worldAutoCombatActive) {
+            this.announceWorldNextStep('战斗结束');
+          }
         }
       }
     }
 
     const prog = this.saveStore.getWorldProgress();
     this.hud.setWorldStatus(region.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
+
+    // Smart Auto-Nav Encounter System: Auto-Combat & Post-Battle Auto-Resume
+    if (this.worldAutoCombatActive) {
+      this.stepWorldAutoCombat(dt);
+    } else if (this.worldAutoResumeTimer > 0) {
+      const threatNear = this.findNearestWorldHostile(10.5);
+      if (threatNear && h.state !== 'dead') {
+        this.worldAutoResumeTimer = 0;
+        this.worldAutoCombatActive = true;
+      } else {
+        this.worldAutoResumeTimer -= dt;
+        if (this.worldAutoResumeTimer <= 0 && h.state !== 'dead') {
+          this.worldAutoResumeTimer = 0;
+          const nextG = this.resolveWorldGuideTarget();
+          if (nextG) {
+            this.worldAutoNav = true;
+            this.worldAutoNavPausedByCombat = false;
+            this.hud.showWorldToast(`✓ 破敌凯旋！自动续行前往【${nextG.label}】`, true, 3200);
+          } else {
+            this.worldAutoNavPausedByCombat = false;
+          }
+        }
+      }
+    }
 
     const guide = this.resolveWorldGuideTarget();
     const resumeLabel = !this.worldAutoNav && this.worldAutoNavPausedByCombat ? '继续寻路' : undefined;
@@ -1944,30 +2713,111 @@ export class Game {
 
       if (this.worldAutoNav) {
         this.worldAutoNavPausedByCombat = false;
-        if (dist <= 2.6 || h.state === 'dead') {
+        const nearestHostile = this.findNearestWorldHostile(12.5);
+        const nearestDist = nearestHostile
+          ? Math.hypot(nearestHostile.pos.x - h.pos.x, nearestHostile.pos.z - h.pos.z)
+          : Infinity;
+        const isCombatGoal = guide.kind === 'boss' || guide.kind === 'event';
+
+        if (
+          this.worldAutoNavPolicy === 'fight' &&
+          nearestHostile &&
+          h.state !== 'dead' &&
+          (nearestDist <= 9.5 || (isCombatGoal && nearestDist <= 7.5))
+        ) {
+          this.worldAutoNav = false;
+          this.worldAutoNavPausedByCombat = true;
+          this.worldAutoCombatActive = true;
+          this.worldAutoResumeTimer = 0;
+          this.rmbMoveTarget = null;
+          h.yaw = Math.atan2(nearestHostile.pos.x - h.pos.x, nearestHostile.pos.z - h.pos.z);
+          h.rig.root.rotation.y = h.yaw;
+          if (this.mountMode !== 'none') {
+            this.startHeroAttack(1);
+          }
+          this.hud.showWorldToast(
+            `⚔ 途中遭遇【${nearestHostile.name}】！自动迎战中，破敌后继续寻路`,
+            true,
+            3200,
+          );
+        } else if (dist <= 2.8 || h.state === 'dead') {
           this.worldAutoNav = false;
           this.rmbMoveTarget = null;
-          if (dist <= 2.6) {
+          if (dist <= 2.8 && h.state !== 'dead') {
+            const herbId = this.worldCustomNavTarget?.herbId;
             this.worldCustomNavTarget = null;
-            this.hud.showWorldToast(`已抵达【${guide.label}】附近！${guide.actionHint}`, true, 3600);
+            if (herbId && !this.worldHerbTimers.has(herbId)) {
+              this.harvestWorldHerb(herbId);
+            } else {
+              const nearReadyHerb = WORLD_HERB_NODES.find(
+                (n) => !this.worldHerbTimers.has(n.id) && Math.hypot(n.x - h.pos.x, n.z - h.pos.z) <= 3.4,
+              );
+              if (nearReadyHerb && guide.kind === 'herb') {
+                this.harvestWorldHerb(nearReadyHerb.id);
+              } else {
+                this.hud.showWorldToast(`已抵达【${guide.label}】附近！${guide.actionHint}`, true, 3600);
+              }
+            }
           }
         } else {
-          if (guide.kind === 'orb' && dist <= 9.5 && this.mountMode !== 'sword' && (h.state === 'idle' || h.state === 'run')) {
+          // Evade policy: summon flying sword and apply smooth lateral repulsion around hostiles!
+          let steerX = guide.x;
+          let steerZ = guide.z;
+          if (this.worldAutoNavPolicy === 'evade' && !isCombatGoal && nearestHostile && nearestDist <= 12.0) {
+            if (this.mountMode !== 'sword' && (h.state === 'idle' || h.state === 'run')) {
+              this.setMountMode('sword');
+            }
+            const gLen = Math.max(0.001, dist);
+            let dirX = dx / gLen;
+            let dirZ = dz / gLen;
+            let repX = 0;
+            let repZ = 0;
+            for (const e of this.enemies) {
+              if (e.aiState === 'dead' || e.isDummy) continue;
+              const ex = h.pos.x - e.pos.x;
+              const ez = h.pos.z - e.pos.z;
+              const ed = Math.hypot(ex, ez);
+              if (ed > 0.05 && ed <= 13.0) {
+                const w = (13.0 - ed) / 13.0;
+                // Blend radial away + smooth lateral tangent so Hero glides cleanly around camp
+                const rx = ex / ed;
+                const rz = ez / ed;
+                const tx = -dirZ;
+                const tz = dirX;
+                const sideSign = rx * tx + rz * tz >= 0 ? 1 : -1;
+                repX += (rx * 0.75 + tx * sideSign * 1.15) * w;
+                repZ += (rz * 0.75 + tz * sideSign * 1.15) * w;
+              }
+            }
+            dirX += repX * 1.45;
+            dirZ += repZ * 1.45;
+            const sLen = Math.max(0.001, Math.hypot(dirX, dirZ));
+            steerX = clamp(h.pos.x + (dirX / sLen) * 5.0, -(WORLD_BOUND - 2), WORLD_BOUND - 2);
+            steerZ = clamp(h.pos.z + (dirZ / sLen) * 5.0, -(WORLD_BOUND - 2), WORLD_BOUND - 2);
+          } else if (guide.kind === 'orb' && dist <= 9.5 && this.mountMode !== 'sword' && (h.state === 'idle' || h.state === 'run')) {
             this.setMountMode('sword');
           } else if (dist > 14 && this.mountMode === 'none' && (h.state === 'idle' || h.state === 'run')) {
             this.setMountMode('horse');
           }
-          if (!this.rmbMoveTarget) this.rmbMoveTarget = new THREE.Vector3(guide.x, 0, guide.z);
-          else this.rmbMoveTarget.set(guide.x, 0, guide.z);
+          if (!this.rmbMoveTarget) this.rmbMoveTarget = new THREE.Vector3(steerX, 0, steerZ);
+          else this.rmbMoveTarget.set(steerX, 0, steerZ);
         }
       }
+
+      const shortName = guide.label.replace(/^[^·]+·\s*/, '');
+      const miniGoalText = this.worldAutoCombatActive
+        ? '⚔ 自动迎战中'
+        : this.worldAutoResumeTimer > 0
+          ? '✓ 清敌续行中'
+          : `${shortName} · ${Math.round(dist)}m`;
 
       this.hud.setWorldGuide(
         guide.label,
         `${dirText} · 约 ${Math.round(dist)} 米 · ${guide.actionHint}`,
-        `玩法：点亮${WORLD_WAYPOINTS.length}锚点开传送 · 开${WORLD_CHESTS.length}宝箱/御剑采${WORLD_SPIRIT_ORBS.length}灵瞳加血 · 斩${WORLD_BOSS_SPAWNS.length}首领爆神兵`,
+        `玩法：点亮${WORLD_WAYPOINTS.length}锚点开传送 · 采${WORLD_HERB_NODES.length}灵草炼丹 · 斩${WORLD_BOSS_SPAWNS.length}首领爆神兵`,
         this.worldAutoNav,
         resumeLabel,
+        miniGoalText,
       );
     } else {
       this.worldGuideArrow.visible = false;
@@ -1976,9 +2826,126 @@ export class Game {
       this.hud.setWorldGuide(
         '九州探索圆满 · 挑战四方首领',
         '可点右上「重召首领」或进剑庐/闯关继续历练',
-        '玩法：四方野外首领约45秒自动刷新，掉落高阶神兵与海量灵石',
+        '玩法：四方野外首领约45秒自动刷新，掉落高阶神兵、真龙逆鳞与海量灵石',
         false,
+        undefined,
+        '九州探索圆满',
       );
+    }
+  }
+
+  private findNearestWorldHostile(maxRange: number): EnemyEntity | null {
+    const h = this.hero.pos;
+    let best: EnemyEntity | null = null;
+    let bestDist = maxRange;
+    for (const e of this.enemies) {
+      if (e.aiState === 'dead' || e.isDummy) continue;
+      const d = Math.hypot(e.pos.x - h.x, e.pos.z - h.z);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  private stepWorldAutoCombat(dt: number): void {
+    const h = this.hero;
+    if (h.state === 'dead') {
+      this.worldAutoCombatActive = false;
+      this.worldAutoNavPausedByCombat = false;
+      this.worldAutoResumeTimer = 0;
+      this.rmbMoveTarget = null;
+      return;
+    }
+
+    const hpRatio = h.hp / Math.max(1, h.maxHp);
+    if (hpRatio < 0.28 && h.gourds <= 0) {
+      this.worldAutoCombatActive = false;
+      this.worldAutoNavPausedByCombat = false;
+      this.worldAutoResumeTimer = 0;
+      this.rmbMoveTarget = null;
+      this.hud.showWorldToast('⚠ 气血危急（<28%）！自动迎战已停止，请手动规避或服丹回血', false, 3600);
+      return;
+    }
+
+    if (hpRatio < 0.45 && h.gourds > 0 && h.cdHeal <= 0 && (h.state === 'idle' || h.state === 'run')) {
+      this.rmbMoveTarget = null;
+      this.startDrinkGourd();
+      return;
+    }
+
+    const target = this.findNearestWorldHostile(14.0);
+    if (!target) {
+      this.worldAutoCombatActive = false;
+      this.rmbMoveTarget = null;
+      this.worldAutoResumeTimer = 1.15;
+      return;
+    }
+
+    // Auto-dodge incoming enemy windup within 4.5m
+    for (const e of this.enemies) {
+      if (e.aiState !== 'windup' || e.isDummy) continue;
+      const d = Math.hypot(e.pos.x - h.pos.x, e.pos.z - h.pos.z);
+      const wp = e.stateTime / Math.max(0.1, e.stateDuration);
+      if (
+        d <= 4.5 &&
+        wp >= 0.45 &&
+        h.stamina >= 24 &&
+        h.dodgeInvuln <= 0 &&
+        (h.state === 'idle' || h.state === 'run' || h.state === 'attack')
+      ) {
+        const angToEnemy = Math.atan2(e.pos.x - h.pos.x, e.pos.z - h.pos.z);
+        h.yaw = angToEnemy + Math.PI * 0.5;
+        this.rmbMoveTarget = null;
+        this.startHeroDodge();
+        return;
+      }
+    }
+
+    const dx = target.pos.x - h.pos.x;
+    const dz = target.pos.z - h.pos.z;
+    const dist = Math.hypot(dx, dz);
+    const faceYaw = Math.atan2(dx, dz);
+    this.worldAutoAttackCd = Math.max(0, this.worldAutoAttackCd - dt);
+
+    const isFree = h.state === 'idle' || h.state === 'run';
+    const isCancelable = h.state === 'attack' && h.stateTime / Math.max(0.1, h.stateDuration) >= 0.65;
+
+    if (dist > 2.75) {
+      if (isFree && dist <= 11.5 && h.spirit >= 20 && h.cdQ <= 0) {
+        h.yaw = faceYaw;
+        this.rmbMoveTarget = null;
+        this.startSkillQ();
+        return;
+      }
+      if (isFree && h.q2ReadyTimer > 0 && dist <= 15) {
+        h.yaw = faceYaw;
+        this.rmbMoveTarget = null;
+        this.startSkillQ2();
+        return;
+      }
+      if (!this.rmbMoveTarget) this.rmbMoveTarget = new THREE.Vector3(target.pos.x, 0, target.pos.z);
+      else this.rmbMoveTarget.set(target.pos.x, 0, target.pos.z);
+      return;
+    }
+
+    this.rmbMoveTarget = null;
+    if (isFree || isCancelable) {
+      h.yaw = faceYaw;
+      if (h.ult >= 100 && h.cdR <= 0) {
+        this.startSkillR();
+      } else if (h.spirit >= 45 && h.cdE <= 0) {
+        this.startSkillE();
+      } else if (h.q2ReadyTimer > 0) {
+        this.startSkillQ2();
+      } else if (h.spirit >= 20 && h.cdQ <= 0) {
+        this.startSkillQ();
+      } else if (this.worldAutoAttackCd <= 0) {
+        const nextStep = h.comboWindowTimer > 0 && h.comboStep < 4 ? h.comboStep + 1 : 1;
+        this.startHeroAttack(nextStep);
+        this.worldAutoAttackCd = 0.22;
+      }
     }
   }
 
@@ -1994,7 +2961,7 @@ export class Game {
     z: number;
     label: string;
     actionHint: string;
-    kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss';
+    kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss' | 'herb';
   } | null {
     const h = this.hero.pos;
     const isMobUi = this.hud.isMobileUi();
@@ -2004,8 +2971,8 @@ export class Game {
         x: this.worldCustomNavTarget.x,
         z: this.worldCustomNavTarget.z,
         label: this.worldCustomNavTarget.label,
-        actionHint: '舆图指定目标 · 自动寻路前往',
-        kind: 'waypoint',
+        actionHint: this.worldCustomNavTarget.herbId ? '靠近自动采摘灵草矿脉' : '舆图指定目标 · 自动寻路前往',
+        kind: this.worldCustomNavTarget.herbId ? 'herb' : 'waypoint',
       };
     }
 
@@ -2121,6 +3088,8 @@ export class Game {
   private toggleWorldAutoNav(): void {
     if (this.mode !== 'world') return;
     this.worldAutoNav = !this.worldAutoNav;
+    this.worldAutoCombatActive = false;
+    this.worldAutoResumeTimer = 0;
     this.worldAutoNavPausedByCombat = false;
     if (!this.worldAutoNav) {
       this.worldCustomNavTarget = null;
@@ -2135,6 +3104,29 @@ export class Game {
       }
       this.hud.showWorldToast(`正在自动寻路前往【${g.label}】`, true);
     }
+  }
+
+  private harvestWorldHerb(herbId: string): boolean {
+    const herb = WORLD_HERB_NODES.find((n) => n.id === herbId);
+    if (!herb || this.worldHerbTimers.has(herb.id)) return false;
+    const qty = herb.yieldMin + Math.floor(this.rng() * (herb.yieldMax - herb.yieldMin + 1));
+    const mat = CRAFT_MATERIAL_MAP[herb.materialId];
+    this.saveStore.addMaterial(herb.materialId, qty);
+    this.worldHerbTimers.set(herb.id, herb.respawnSec);
+    this.arena.setHerbNodeAvailable(herb.id, false);
+    const hPos = new THREE.Vector3(herb.x, 0.25, herb.z);
+    const col = new THREE.Color(herb.accentHex).multiplyScalar(1.85);
+    this.vfx.spawnShockRing(new THREE.Vector3(herb.x, 0.08, herb.z), col, 0.3, 2.8, 0.45);
+    this.vfx.spawnHitSparks(hPos, new THREE.Vector3(0, 1, 0), col, 16, this.rng);
+    this.audio.playDropChime('spirit');
+    triggerHaptic('light');
+    const matName = mat?.name ?? herb.name;
+    this.spawnWorldCallout(`+${qty} ${matName}`, hPos, 'heal');
+    this.activeWorldInteract = null;
+    this.hud.setWorldInteractPrompt(null);
+    this.hud.showWorldToast(`🌿 采摘【${herb.name}】获得 +${qty} ${matName}（可在「炼丹」合成丹药神兵）`, true, 3200);
+    if (this.craftOverlay.isOpen()) this.craftOverlay.refresh(this.saveStore);
+    return true;
   }
 
   private collectWorldOrb(orbId: string): boolean {
@@ -2197,10 +3189,14 @@ export class Game {
     return e.id;
   }
 
-  private triggerWorldInteract(forced?: { kind: 'waypoint' | 'chest'; id: string }): boolean {
+  private triggerWorldInteract(forced?: { kind: 'waypoint' | 'chest' | 'herb'; id: string }): boolean {
     if (this.mode !== 'world') return false;
     const target = forced ?? this.activeWorldInteract;
     if (!target) return false;
+
+    if (target.kind === 'herb') {
+      return this.harvestWorldHerb(target.id);
+    }
 
     if (target.kind === 'waypoint') {
       const wp = WORLD_WAYPOINTS.find((w) => w.id === target.id);
@@ -2312,7 +3308,10 @@ export class Game {
     this.audio.unlock();
     this.input.resetState();
     this.setShopPreview(false);
+    if (this.titlePortraitLight) this.titlePortraitLight.visible = false;
     this.worldAutoNav = false;
+    this.worldAutoCombatActive = false;
+    this.worldAutoResumeTimer = 0;
     this.worldInCombat = false;
     this.worldCombatCooldown = 0;
     this.worldAutoNavPausedByCombat = false;
@@ -2920,6 +3919,7 @@ export class Game {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
     const cultivation = this.saveStore.getCultivationBonus();
+    const elixir = this.saveStore.getElixirBonus();
     const h = this.hero;
     h.maxHp =
       180 +
@@ -2927,6 +3927,7 @@ export class Game {
       loadout.maxHpBonus +
       this.blessings.maxHpBonus +
       cultivation.hpBonus +
+      elixir.hpBonus +
       this.saveStore.getWorldOrbHpBonus() +
       this.activeMealBuff.hpBonus +
       this.episodeChoiceBuff.hpBonus;
@@ -3119,16 +4120,52 @@ export class Game {
 
     if (this.shopPreviewActive) {
       if (this.shopPreviewAutoSpin) {
-        this.shopPreviewYaw += animDt * 0.85;
+        this.shopPreviewYaw += animDt * 0.72;
+        this.shopPreviewYawVel = 0;
+      } else if (Math.abs(this.shopPreviewYawVel) > 0.002) {
+        this.shopPreviewYaw += this.shopPreviewYawVel * animDt;
+        this.shopPreviewYawVel *= Math.exp(-5.5 * animDt);
+        if (Math.abs(this.shopPreviewYawVel) < 0.002) this.shopPreviewYawVel = 0;
       }
-      const equippedWpn = this.saveStore.getEquipped().weapon;
-      this.hero.rig.applyPose(
-        this.shopPreviewWeaponId && this.shopPreviewWeaponId !== equippedWpn ? 'combatIdle' : 'idle',
-        0,
-        this.elapsed,
-        animDt,
-        0,
-      );
+      this.shopPreviewZoom = damp(this.shopPreviewZoom, this.shopPreviewZoomTarget, 9.5, Math.max(0.001, rawDt));
+
+      if (this.shopTryOnTimer > 0) {
+        this.shopTryOnTimer = Math.max(0, this.shopTryOnTimer - animDt);
+        const p = clamp(1 - this.shopTryOnTimer / this.shopTryOnDuration, 0, 1);
+        this.hero.rig.applyPose('showcaseFlourish', p, this.elapsed, animDt, 0);
+      } else {
+        const equippedWpn = this.saveStore.getEquipped().weapon;
+        this.hero.rig.applyPose(
+          this.shopPreviewWeaponId && this.shopPreviewWeaponId !== equippedWpn ? 'combatIdle' : 'idle',
+          0,
+          this.elapsed,
+          animDt,
+          0,
+        );
+      }
+
+      // Subtle ambient pedestal particles matching the previewed skin's theme color
+      this.shopAmbientSparkTimer -= animDt;
+      if (this.shopAmbientSparkTimer <= 0) {
+        this.shopAmbientSparkTimer = 0.44;
+        const meta = this.getSkinThemeMeta(this.shopPreviewSkinId ?? 'skin_xiaoyao');
+        const ang = this.rng() * Math.PI * 2;
+        const rad = 0.55 + this.rng() * 0.52;
+        const sparkPos = new THREE.Vector3(
+          this.hero.pos.x + Math.cos(ang) * rad,
+          this.hero.pos.y + 0.12 + this.rng() * 0.35,
+          this.hero.pos.z + Math.sin(ang) * rad,
+        );
+        this.vfx.spawnHitSparks(
+          sparkPos,
+          new THREE.Vector3(0, 1.0, 0),
+          new THREE.Color(meta.rgb[0] * 0.85, meta.rgb[1] * 0.85, meta.rgb[2] * 0.85),
+          2,
+          this.rng,
+        );
+      }
+
+      this.vfx.update(animDt, this.elapsed, this.hero.pos, undefined, undefined, this.camera.position);
       this.arena.update(animDt, this.elapsed, this.hero.pos);
       const isPortrait = window.innerHeight > window.innerWidth;
       const leftPanelRatio = window.innerWidth <= 960 || isPortrait ? 0.44 : undefined;
@@ -3138,7 +4175,10 @@ export class Game {
         this.shopPreviewYaw,
         isPortrait,
         leftPanelRatio,
+        this.shopPreviewPitch,
+        this.shopPreviewZoom,
       );
+      this.updateShopStudioStage(animDt);
       this.syncMoonKeyLightToHero();
       if (doRender) this.pipeline.render();
       this.input.endFrame();
@@ -3153,12 +4193,20 @@ export class Game {
     if (this.mode === 'title') {
       this.hero.rig.applyPose('idle', 0, this.elapsed, animDt, 0);
       this.arena.update(animDt, this.elapsed, this.hero.pos);
-      this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed);
+      const isPortrait = window.innerHeight > window.innerWidth;
+      this.cameraRig.updateTitleOrbit(this.hero.pos, this.elapsed, isPortrait);
+      if (this.titlePortraitLight) {
+        this.titlePortraitLight.visible = true;
+      }
       this.audio.updateMusic(rawDt);
       if (doRender) this.pipeline.render();
       this.input.endFrame();
       this.publishDiagnostics();
       return;
+    }
+
+    if (this.titlePortraitLight?.visible) {
+      this.titlePortraitLight.visible = false;
     }
 
     if (this.mode === 'showcase') {
@@ -3570,13 +4618,18 @@ export class Game {
     }
 
     const cultivation = this.saveStore.getCultivationBonus();
+    const elixir = this.saveStore.getElixirBonus();
     const campRegenMult = this.mode === 'camp' ? 3.5 : 1.0;
     const leylineSpiritBonus = this.heroInLeylineZone ? 18 : 0;
     h.spirit = Math.min(
       h.maxSpirit,
       h.spirit +
         dt *
-          (6.5 * realm.spiritRegenMult * loadout.spiritRegenMult * (1 + cultivation.spiritRegenPct) * campRegenMult +
+          (6.5 *
+            realm.spiritRegenMult *
+            loadout.spiritRegenMult *
+            (1 + cultivation.spiritRegenPct + elixir.spiritRegenPct) *
+            campRegenMult +
             leylineSpiritBonus),
     );
     if (h.state !== 'block' && h.state !== 'dodge') {
@@ -3633,8 +4686,12 @@ export class Game {
     if (Math.hypot(this.moveVec.x, this.moveVec.z) > 0.08) {
       this.rmbMoveTarget = null;
       this.worldAutoNav = false;
+      this.worldAutoCombatActive = false;
+      this.worldAutoResumeTimer = 0;
     } else if (this.input.lolMouseMode && (this.input.consumeRmbClick() || this.input.rmbHeld)) {
       this.worldAutoNav = false;
+      this.worldAutoCombatActive = false;
+      this.worldAutoResumeTimer = 0;
       this.raycaster.setFromCamera(
         new THREE.Vector2(this.input.mouseNdc.x, this.input.mouseNdc.y),
         this.camera,
@@ -3908,6 +4965,7 @@ export class Game {
     const realm = getSwordRealm(this.saveStore.getTotalStars());
     const loadout = this.getLoadoutStats();
     const cultivation = this.saveStore.getCultivationBonus();
+    const elixir = this.saveStore.getElixirBonus();
     const swordHeart = getSwordHeartSummary(this.saveStore.getSwordHeart());
     const affix = this.getActiveLeylineAffix();
     const leylineZoneMult = this.heroInLeylineZone ? 1.3 : 1.0;
@@ -3922,6 +4980,7 @@ export class Game {
       leylineZoneMult *
       (1 +
         cultivation.atkPct +
+        elixir.atkPct +
         swordHeart.dmgBonus +
         this.activeMealBuff.dmgBonus +
         this.episodeChoiceBuff.dmgBonus +
@@ -5027,9 +6086,10 @@ export class Game {
     const hasWindupArmor = e.aiState === 'windup' && windupProg >= 0.45 && isLightM1;
     const interrupted = e.aiState === 'windup' && windupProg >= 0.45 && !isLightM1;
 
-    const rolledCrit = isCrit || (fromLocalHero && this.rng() < loadout.critRate + this.blessings.critRateBonus);
+    const elixir = this.saveStore.getElixirBonus();
+    const rolledCrit = isCrit || (fromLocalHero && this.rng() < loadout.critRate + this.blessings.critRateBonus + elixir.critRate);
     const lotusCritBonus = this.blessings.pathCounts.lotus >= 3 ? 0.5 : 0;
-    const critScale = rolledCrit ? loadout.critMult + this.blessings.critDmgBonus + lotusCritBonus : 1.0;
+    const critScale = rolledCrit ? loadout.critMult + this.blessings.critDmgBonus + lotusCritBonus + elixir.critDmg : 1.0;
 
     const affix = this.getActiveLeylineAffix();
     const flyingSurgeMult = affix === 'flying_surge' && (skill === 'skillQ' || skill === 'skillE') ? 1.4 : 1.0;
@@ -5039,7 +6099,8 @@ export class Game {
         : 1.0;
 
     const dmg = Math.round(rawDmg * (interrupted ? 1.35 : 1.0) * critScale * flyingSurgeMult * staggerMult);
-    const scaledPoise = poiseGain * (interrupted ? 1.6 : 1.0) * (fromLocalHero ? loadout.poiseMult : 1.0);
+    const scaledPoise =
+      poiseGain * (interrupted ? 1.6 : 1.0) * (fromLocalHero ? loadout.poiseMult + elixir.poiseBonus / 100 : 1.0);
     if (fromLocalHero) {
       e.aggroHeroTimer = 5.5;
     }
@@ -5229,6 +6290,25 @@ export class Game {
     if (this.mp.mode === 'offline' || this.mp.role === 'host') {
       this.saveStore.incrementStat('totalKills', 1);
       if (this.mode === 'world') {
+        const reg = getWorldRegionAt(e.pos.x, e.pos.z);
+        const yaodanQty = e.kind === 'boss' ? 2 : e.kind === 'elite' ? 2 : 1;
+        this.saveStore.addMaterial('mat_yaodan', yaodanQty);
+        this.spawnWorldCallout(`+${yaodanQty} 妖兽内丹`, e.pos.clone().add(new THREE.Vector3(-0.4, 0.5, 0)), 'heal');
+        if (reg.id === 'lava' || reg.id === 'grave') {
+          this.saveStore.addMaterial('mat_xuantie', 1);
+          this.spawnWorldCallout('+1 赤炎玄铁', e.pos.clone().add(new THREE.Vector3(0.45, 0.72, 0)), 'info');
+        } else if (reg.id === 'crypt') {
+          this.saveStore.addMaterial('mat_yinhun', 1);
+          this.spawnWorldCallout('+1 幽冥玄晶', e.pos.clone().add(new THREE.Vector3(0.45, 0.72, 0)), 'info');
+        } else if (reg.id === 'peach' && e.kind === 'elite') {
+          this.saveStore.addMaterial('mat_lingzhi', 1);
+          this.spawnWorldCallout('+1 九叶灵芝', e.pos.clone().add(new THREE.Vector3(0.45, 0.72, 0)), 'heal');
+        } else if (reg.id === 'star' && e.kind === 'elite') {
+          this.saveStore.addMaterial('mat_xuelian', 1);
+          this.spawnWorldCallout('+1 天山雪莲', e.pos.clone().add(new THREE.Vector3(0.45, 0.72, 0)), 'info');
+        }
+        if (this.craftOverlay.isOpen()) this.craftOverlay.refresh(this.saveStore);
+
         const hasOtherHostile = this.enemies.some(
           (x) => x.id !== e.id && x.aiState !== 'dead' && !x.isDummy && Math.hypot(x.pos.x - this.hero.pos.x, x.pos.z - this.hero.pos.z) <= 13.5,
         );
@@ -5237,12 +6317,19 @@ export class Game {
           const campAlive = this.enemies.some((x) => x.id !== e.id && x.worldCampId === e.worldCampId && x.aiState !== 'dead');
           if (camp && !campAlive) {
             this.saveStore.addJade(camp.jadeReward);
+            this.saveStore.addMaterial('mat_yaodan', 2);
+            if (camp.id === 'camp_grave' || camp.id === 'camp_lava') this.saveStore.addMaterial('mat_xuantie', 1);
+            else if (camp.id === 'camp_crypt') this.saveStore.addMaterial('mat_yinhun', 1);
+            else if (camp.id === 'camp_peach') this.saveStore.addMaterial('mat_lingzhi', 1);
+            else if (camp.id === 'camp_star') this.saveStore.addMaterial('mat_xuelian', 1);
             this.worldMobTimers.set(camp.id, camp.respawnSec);
             if (!hasOtherHostile) {
               this.worldInCombat = false;
               this.worldCombatCooldown = 0;
             }
-            this.announceWorldNextStep(`清剿据点【${camp.name}】(+${camp.jadeReward}灵石)`);
+            if (!this.worldAutoCombatActive) {
+              this.announceWorldNextStep(`清剿据点【${camp.name}】(+${camp.jadeReward}灵石 · 获炼丹材料)`);
+            }
             return;
           }
         }
@@ -5250,6 +6337,8 @@ export class Game {
           this.worldEventEnemyId = null;
           this.worldEventTimer = 46;
           this.saveStore.addJade(180);
+          this.saveStore.addMaterial('mat_longlin', 1);
+          this.spawnWorldCallout('+1 真龙逆鳞', e.pos.clone().add(new THREE.Vector3(0, 0.95, 0)), 'parry');
           const item = rollEquipmentDrop({
             tier: 3,
             guaranteedMinRarity: 'epic',
@@ -5263,13 +6352,17 @@ export class Game {
             this.worldInCombat = false;
             this.worldCombatCooldown = 0;
           }
-          this.announceWorldNextStep(`斩杀【${e.name}】(+180灵石与极品神兵)`);
+          if (!this.worldAutoCombatActive) {
+            this.announceWorldNextStep(`斩杀【${e.name}】(+180灵石 · +1真龙逆鳞与极品神兵)`);
+          }
           return;
         } else if (e.worldBossId) {
           const wb = WORLD_BOSS_SPAWNS.find((b) => b.id === e.worldBossId);
           if (wb) {
             this.saveStore.recordWorldBossKill(wb.id);
             this.saveStore.addJade(wb.jadeReward);
+            this.saveStore.addMaterial('mat_longlin', 1);
+            this.spawnWorldCallout('+1 真龙逆鳞', e.pos.clone().add(new THREE.Vector3(0, 0.95, 0)), 'parry');
             this.worldBossTimers.set(wb.id, wb.respawnSec);
             const dropCount = wb.guaranteedMinRarity === 'legendary' ? 2 : 1;
             for (let k = 0; k < dropCount; k++) {
@@ -5284,22 +6377,35 @@ export class Game {
               if (k === 0) this.audio.playGearDropChime(item.rarity);
             }
             const prog = this.saveStore.getWorldProgress();
-            const reg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
-            this.hud.setWorldStatus(reg.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
+            const curReg = getWorldRegionAt(this.hero.pos.x, this.hero.pos.z);
+            this.hud.setWorldStatus(curReg.name, prog.waypoints, prog.chests, prog.bosses, prog.orbs);
             if (!hasOtherHostile) {
               this.worldInCombat = false;
               this.worldCombatCooldown = 0;
             }
-            this.announceWorldNextStep(`击破野外首领【${wb.name}】(+${wb.jadeReward}灵石)`);
+            if (!this.worldAutoCombatActive) {
+              this.announceWorldNextStep(`击破野外首领【${wb.name}】(+${wb.jadeReward}灵石 · +1真龙逆鳞)`);
+            }
             return;
           }
         }
         if (this.worldInCombat && !hasOtherHostile) {
           this.worldInCombat = false;
           this.worldCombatCooldown = 0;
-          this.announceWorldNextStep('战斗结束');
+          if (!this.worldAutoCombatActive) {
+            this.announceWorldNextStep('战斗结束');
+          }
         }
         return;
+      }
+      // Campaign / Dungeon / Tower / Roguelike material drops
+      if (e.kind === 'elite') {
+        this.saveStore.addMaterial('mat_yaodan', 1);
+        this.spawnWorldCallout('+1 妖兽内丹', e.pos.clone().add(new THREE.Vector3(-0.35, 0.55, 0)), 'heal');
+      } else if (e.kind === 'boss') {
+        this.saveStore.addMaterial('mat_yaodan', 2);
+        this.saveStore.addMaterial('mat_longlin', 1);
+        this.spawnWorldCallout('+1 真龙逆鳞', e.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 'parry');
       }
       const stageDef = this.getActiveStageDef();
       const tier: 1 | 2 | 3 = this.activeDungeon
@@ -6535,7 +7641,9 @@ export class Game {
     if (this.mountMode !== 'none') {
       this.setMountMode('none', true);
     }
-    const finalDmg = Math.max(1, Math.round(dmg * (1 - loadout.dmgReduce)));
+    const elixir = this.saveStore.getElixirBonus();
+    const totalDmgReduce = clamp(loadout.dmgReduce + elixir.dmgReduce, 0, 0.72);
+    const finalDmg = Math.max(1, Math.round(dmg * (1 - totalDmgReduce)));
     if (!this.godMode) {
       h.hp = Math.max(0, h.hp - finalDmg);
     }
@@ -7660,11 +8768,25 @@ export class Game {
         shopPreviewWeaponId: this.shopPreviewWeaponId,
         shopPreviewArmorId: this.shopPreviewArmorId,
         shopPreviewRelicId: this.shopPreviewRelicId,
+        shopPreviewYaw: Number(this.shopPreviewYaw.toFixed(4)),
+        shopPreviewPitch: Number(this.shopPreviewPitch.toFixed(4)),
+        shopPreviewZoom: Number(this.shopPreviewZoom.toFixed(4)),
+        shopPreviewAutoSpin: this.shopPreviewAutoSpin,
+        shopTryOnCount: this.shopTryOnCount,
+        shopLastTryOnEffect: this.shopLastTryOnEffect,
         mobileNotifyText: this.hud.getMobileNotifyText(),
         worldInCombat: this.worldInCombat,
         worldAutoNav: this.worldAutoNav,
+        worldAutoNavPolicy: this.worldAutoNavPolicy,
+        worldAutoCombatActive: this.worldAutoCombatActive,
         worldAutoNavPausedByCombat: this.worldAutoNavPausedByCombat,
         worldLastCombatNotice: this.worldLastCombatNotice,
+        settingsOpen: this.hud.isSettingsOpen(),
+        craftOpen: this.craftOverlay.isOpen(),
+        visualSettings: { ...this.visualSettings },
+        materials: this.saveStore.getMaterials(),
+        elixirBonus: this.saveStore.getElixirBonus(),
+        worldHerbCount: WORLD_HERB_NODES.length,
       }),
       getStats: () => {
         const stats = this.pipeline.getStats();
@@ -7795,13 +8917,149 @@ export class Game {
         }
         if (action.startsWith('previewSkin:')) {
           const skinId = action.slice('previewSkin:'.length);
-          this.setShopPreview(true, skinId, null);
+          this.setShopPreview(true, skinId, null, null, null, { category: 'skin', itemId: skinId });
           this.stepFrame(0.05, true);
           return true;
         }
         if (action === 'closeShopPreview') {
           this.setShopPreview(false);
           this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action === 'toggleShopZoom') {
+          this.shopPreviewZoomTarget = this.shopPreviewZoomTarget > 0.45 ? 0 : 1;
+          this.hud.setShopPreviewZoomState(this.shopPreviewZoomTarget > 0.45);
+          this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action.startsWith('rotateShopPreview:')) {
+          const parts = action.slice('rotateShopPreview:'.length).split(',');
+          const dYaw = Number(parts[0] ?? 0);
+          const dPitch = Number(parts[1] ?? 0);
+          if (!Number.isFinite(dYaw) || !Number.isFinite(dPitch)) return false;
+          this.shopPreviewAutoSpin = false;
+          this.hud.setShopPreviewSpinState(false);
+          this.shopPreviewYaw += dYaw;
+          this.shopPreviewPitch = clamp(this.shopPreviewPitch + dPitch, -0.28, 0.34);
+          this.shopPreviewYawVel = 0;
+          this.stepFrame(0.05, true);
+          return true;
+        }
+        if (action.startsWith('setAutoNavPolicy:')) {
+          const pol = action.slice('setAutoNavPolicy:'.length);
+          if (pol !== 'fight' && pol !== 'evade') return false;
+          this.applyVisualSettings({ autoNavPolicy: pol }, true);
+          return true;
+        }
+        if (action === 'openSettings') {
+          this.hud.openSettings();
+          return true;
+        }
+        if (action === 'closeSettings') {
+          this.hud.closeSettings();
+          return true;
+        }
+        if (action === 'openCraft' || action === 'openCraft:elixir' || action === 'openCraft:forge') {
+          const tab = action === 'openCraft:forge' ? 'forge' : 'elixir';
+          this.openCraftOverlay(tab);
+          return true;
+        }
+        if (action === 'closeCraft') {
+          this.craftOverlay.close();
+          return true;
+        }
+        if (action.startsWith('brewElixir:')) {
+          const elixirId = action.slice('brewElixir:'.length);
+          const res = this.brewAndConsumeElixir(elixirId);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return res.ok;
+        }
+        if (action.startsWith('craftGear:')) {
+          const recipeId = action.slice('craftGear:'.length);
+          const res = this.craftGearFromRecipe(recipeId);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return res.ok;
+        }
+        if (action.startsWith('grantMaterials:')) {
+          const parts = action.slice('grantMaterials:'.length).split(',');
+          const matId = parts[0]?.trim();
+          const qty = Math.max(1, Math.round(Number(parts[1] ?? 1)));
+          if (!matId || !Number.isFinite(qty)) return false;
+          this.saveStore.addMaterial(matId, qty);
+          if (this.craftOverlay.isOpen()) this.craftOverlay.refresh(this.saveStore);
+          return true;
+        }
+        if (action === 'harvestNearestHerb') {
+          if (this.mode !== 'world') {
+            this.enterOpenWorldMode();
+          }
+          const h = this.hero.pos;
+          let best: WorldHerbNodeDef | null = null;
+          let bestDist = Infinity;
+          for (const node of WORLD_HERB_NODES) {
+            if (this.worldHerbTimers.has(node.id)) continue;
+            const d = Math.hypot(node.x - h.x, node.z - h.z);
+            if (d < bestDist) {
+              bestDist = d;
+              best = node;
+            }
+          }
+          if (!best) return false;
+          this.hero.pos.set(best.x, 0, best.z + 1.2);
+          this.arena.constrainPosition(this.hero.pos, this.hero.radius);
+          this.hero.rig.root.position.set(this.hero.pos.x, 0, this.hero.pos.z);
+          const ok = this.harvestWorldHerb(best.id);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return ok;
+        }
+        if (action.startsWith('teleportNearCamp:')) {
+          const campId = action.slice('teleportNearCamp:'.length);
+          const camp = WORLD_MOB_CAMPS.find((c) => c.id === campId);
+          if (!camp) return false;
+          if (this.mode !== 'world') {
+            this.enterOpenWorldMode();
+          }
+          this.worldMobTimers.delete(camp.id);
+          this.spawnWorldMobCamp(camp);
+          this.setMountMode('none', true);
+          this.worldAutoNav = false;
+          this.worldAutoCombatActive = false;
+          this.worldAutoResumeTimer = 0;
+          this.worldCustomNavTarget = null;
+          this.rmbMoveTarget = null;
+          // Place hero 7.6m toward origin from camp center (within both fight <=9.5m & evade <=12m radii!)
+          const toCenterLen = Math.max(1, Math.hypot(camp.x, camp.z));
+          const sx = camp.x - (camp.x / toCenterLen) * 7.6;
+          const sz = camp.z - (camp.z / toCenterLen) * 7.6;
+          this.hero.pos.set(sx, 0, sz);
+          this.arena.constrainPosition(this.hero.pos, this.hero.radius);
+          this.hero.yaw = Math.atan2(camp.x - this.hero.pos.x, camp.z - this.hero.pos.z);
+          this.hero.rig.root.position.copy(this.hero.pos);
+          this.hero.rig.root.rotation.y = this.hero.yaw;
+          this.hero.hp = this.hero.maxHp;
+          this.hero.delayedHp = this.hero.maxHp;
+          this.hero.spirit = this.hero.maxSpirit;
+          this.cameraRig.snapTo(this.hero.pos);
+          this.pipeline.render();
+          this.publishDiagnostics();
+          return true;
+        }
+        if (action.startsWith('applyTheme:')) {
+          const theme = action.slice('applyTheme:'.length) as AtmosphereThemeId;
+          if (
+            theme !== 'moonlit' &&
+            theme !== 'ink_frost' &&
+            theme !== 'golden_dawn' &&
+            theme !== 'astral_violet'
+          ) {
+            return false;
+          }
+          this.applyVisualSettings({ atmosphereTheme: theme }, true);
+          this.pipeline.render();
+          this.publishDiagnostics();
           return true;
         }
         if (action.startsWith('switchBiome:')) {
@@ -8157,6 +9415,14 @@ export class Game {
             x: o.x,
             z: o.z,
             collected: this.saveStore.isWorldOrbCollected(o.id),
+          }))
+        : undefined,
+      worldHerbs: isWorld
+        ? WORLD_HERB_NODES.map((n) => ({
+            x: n.x,
+            z: n.z,
+            ready: !this.worldHerbTimers.has(n.id),
+            accentHex: n.accentHex,
           }))
         : undefined,
       worldEventPos: isWorld && this.worldEventEnemyId !== null

@@ -4,12 +4,14 @@ import {
   WORLD_BOSS_SPAWNS,
   WORLD_BOUND,
   WORLD_CHESTS,
+  WORLD_HERB_NODES,
   WORLD_MOB_CAMPS,
   WORLD_REGIONS,
   WORLD_SPAWN_POS,
   WORLD_SPIRIT_ORBS,
   WORLD_WAYPOINTS,
   getWorldRegionAt,
+  type WorldHerbNodeDef,
 } from '../game/OpenWorldData';
 
 export interface AncientMapHeroState {
@@ -54,6 +56,8 @@ export interface AncientMapSnapshot {
   bosses: AncientMapBossLive[];
   npcs: AncientMapNpcPin[];
   activeTarget?: { x: number; z: number; label: string } | null;
+  /** Seconds remaining until each WorldHerbNodeDef respawns (0 or absent = ready to harvest) */
+  herbCooldowns?: Record<string, number>;
 }
 
 export interface AncientMapCallbacks {
@@ -63,8 +67,8 @@ export interface AncientMapCallbacks {
   onClose?: () => void;
 }
 
-type MapFilterId = 'all' | 'waypoint' | 'boss' | 'chest' | 'orb' | 'npc';
-type PinKind = 'hero' | 'waypoint' | 'boss' | 'camp' | 'chest' | 'orb' | 'npc' | 'region' | 'custom';
+type MapFilterId = 'all' | 'waypoint' | 'boss' | 'herb' | 'chest' | 'orb' | 'npc';
+type PinKind = 'hero' | 'waypoint' | 'boss' | 'camp' | 'herb' | 'chest' | 'orb' | 'npc' | 'region' | 'custom';
 
 interface ResolvedMapPin {
   id: string;
@@ -88,6 +92,9 @@ interface ResolvedMapPin {
   charId?: string;
   teleportId?: string;
   canNavigate: boolean;
+  navLabel?: string;
+  navButtonText?: string;
+  accentHex?: string;
   extraClasses?: string[];
 }
 
@@ -104,10 +111,45 @@ const FILTER_TABS: Array<{ id: MapFilterId; label: string }> = [
   { id: 'all', label: '全部' },
   { id: 'waypoint', label: '锚点' },
   { id: 'boss', label: '首领' },
+  { id: 'herb', label: '采药' },
   { id: 'chest', label: '宝箱' },
   { id: 'orb', label: '灵瞳' },
   { id: 'npc', label: '人物' },
 ];
+
+const HERB_MATERIAL_META: Record<
+  WorldHerbNodeDef['materialId'],
+  { matName: string; glyph: string; useHint: string; bgGrad: string; textHex: string }
+> = {
+  mat_lingzhi: {
+    matName: '九叶灵芝',
+    glyph: '芝',
+    useHint: '炼制聚气丹、洗髓筑基丹与青岚灵木剑的核心仙草。',
+    bgGrad: 'radial-gradient(circle at 32% 30%, #7ef8bf 0%, #249e6b 76%, #146444 100%)',
+    textHex: '#f6fffb',
+  },
+  mat_xuelian: {
+    matName: '天山雪莲',
+    glyph: '莲',
+    useHint: '采自九霄凌霄天庭的千年冰莲，可炼制九转还魂丹与大罗金仙破境丹。',
+    bgGrad: 'radial-gradient(circle at 32% 30%, #baf6ff 0%, #2d9ec8 76%, #165e80 100%)',
+    textHex: '#f6fdff',
+  },
+  mat_xuantie: {
+    matName: '赤炎玄铁',
+    glyph: '铁',
+    useHint: '产于黑风山寨与赤焰熔谷的百炼玄矿，用于锻造神兵仙甲与金刚锻体丹。',
+    bgGrad: 'radial-gradient(circle at 32% 30%, #ffc288 0%, #c85826 76%, #7c2c0e 100%)',
+    textHex: '#fff7ed',
+  },
+  mat_yinhun: {
+    matName: '幽冥玄晶',
+    glyph: '晶',
+    useHint: '北溟幽冥地窟凝结的稀世阴灵晶石，用于高阶仙丹与九霄混沌神剑合成。',
+    bgGrad: 'radial-gradient(circle at 32% 30%, #dec4ff 0%, #7a46c8 76%, #452180 100%)',
+    textHex: '#faf5ff',
+  },
+};
 
 const RARITY_LABELS: Record<string, string> = {
   common: '凡品',
@@ -252,6 +294,33 @@ export class AncientMapOverlay {
     root.setAttribute('aria-hidden', 'true');
     root.setAttribute('aria-label', '中国古代九州水墨舆图');
     root.innerHTML = `
+      <style>
+        #ancient-map-overlay .amap-filter-pill,
+        #ancient-map-overlay .amap-filter-pill:hover,
+        #ancient-map-overlay .amap-filter-pill:focus {
+          color: #3a2614 !important;
+          background: rgba(246, 236, 212, 0.88) !important;
+          border-color: rgba(114, 82, 46, 0.44) !important;
+        }
+        #ancient-map-overlay .amap-filter-pill.active,
+        #ancient-map-overlay .amap-filter-pill.active:hover,
+        #ancient-map-overlay .amap-filter-pill.active:focus {
+          color: #fff7e6 !important;
+          background: linear-gradient(180deg, #b53226 0%, #8f2219 100%) !important;
+          border-color: #701911 !important;
+          text-shadow: 0 1px 2px rgba(56, 10, 6, 0.45);
+        }
+        #ancient-map-overlay .amap-pin--herb { z-index: 7; }
+        #ancient-map-overlay .amap-pin--herb .amap-pin-badge {
+          width: 21px; height: 21px; border-radius: 50%;
+          font-size: 10.5px; border: 1.5px solid #fff3c8;
+          box-shadow: 0 0 8px rgba(72, 230, 168, 0.55), 0 2px 5px rgba(24, 16, 8, 0.45);
+        }
+        #ancient-map-overlay .amap-pin--herb.is-respawning .amap-pin-badge {
+          opacity: 0.45; filter: grayscale(0.75); box-shadow: none;
+        }
+        #ancient-map-overlay .amap-drawer-kind.kind-herb { background: #1e7c58; }
+      </style>
       <div class="amap-scroll">
         <div class="amap-roller amap-roller-start" aria-hidden="true">
           <span class="amap-roller-center-gem"></span>
@@ -485,7 +554,7 @@ export class AncientMapOverlay {
       } else if (action === 'navigate') {
         const tx = pin.x;
         const tz = pin.z;
-        const label = pin.name;
+        const label = pin.navLabel ?? pin.name;
         this.close();
         this.callbacks.onNavigateTo(tx, tz, label);
       } else if (action === 'inspect-char' && pin.charId) {
@@ -527,13 +596,13 @@ export class AncientMapOverlay {
     } else {
       const litCount = snap.litWaypoints.size;
       const chestCount = snap.openedChests.size;
-      const orbCount = snap.collectedOrbs.size;
+      const readyHerbs = WORLD_HERB_NODES.filter((h) => (snap.herbCooldowns?.[h.id] ?? 0) <= 0).length;
       this.titleEl.textContent = '九州仙域古舆图';
       this.modeChipEl.textContent = mode === 'world' ? '九州探索' : '九州总览';
-      this.subtitleEl.textContent = `锚点 ${litCount}/${WORLD_WAYPOINTS.length} · 宝箱 ${chestCount}/${WORLD_CHESTS.length} · 灵瞳 ${orbCount}/${WORLD_SPIRIT_ORBS.length}`;
+      this.subtitleEl.textContent = `锚点 ${litCount}/${WORLD_WAYPOINTS.length} · 宝箱 ${chestCount}/${WORLD_CHESTS.length} · 灵草 ${readyHerbs}/${WORLD_HERB_NODES.length}`;
       this.regionLabelEl.textContent = hero.regionName || getWorldRegionAt(hero.x, hero.z).name;
       this.coordPillEl.textContent = `X:${Math.round(hero.x)} Z:${Math.round(hero.z)}`;
-      this.stageHintEl.textContent = '轻点标点查属性/传送 · 点空地设「踏青标点 · 自动寻路」';
+      this.stageHintEl.textContent = '轻点标点查属性/采药/传送 · 点空地设「踏青标点 · 自动寻路」';
     }
   }
 
@@ -770,6 +839,33 @@ export class AncientMapOverlay {
         rewardText: `采集奖励 +${orb.jade} 灵石 · 永久气血加持`,
         canNavigate: true,
         extraClasses: [collected ? 'is-collected' : 'is-active'],
+      });
+    }
+
+    // 7b. Fourteen Harvestable Herb & Ore Nodes (采药灵草/矿脉)
+    for (const herb of WORLD_HERB_NODES) {
+      const remain = Math.max(0, Math.ceil(snap.herbCooldowns?.[herb.id] ?? 0));
+      const ready = remain <= 0;
+      const meta = HERB_MATERIAL_META[herb.materialId];
+      pins.push({
+        id: `herb_${herb.id}`,
+        kind: 'herb',
+        filterKey: 'herb',
+        name: herb.name,
+        glyph: meta.glyph,
+        tagLabel: this.activeFilter === 'herb' ? (ready ? meta.matName : `${remain}s`) : undefined,
+        regionName: herb.regionName,
+        x: herb.x,
+        z: herb.z,
+        statusText: ready ? '灵气充盈 · 可采摘' : `灵脉再生中 ${remain}s`,
+        statusTone: ready ? 'lit' : 'neutral',
+        desc: `分布于【${herb.regionName}】的天然灵药矿脉。${meta.useHint}`,
+        rewardText: `采集得【${meta.matName}】×${herb.yieldMin}~${herb.yieldMax} · ${herb.respawnSec}秒再生`,
+        canNavigate: true,
+        navLabel: `采摘 · ${herb.name}`,
+        navButtonText: '自动寻路采药',
+        accentHex: herb.accentHex,
+        extraClasses: [ready ? 'is-ready' : 'is-respawning', `mat-${herb.materialId}`],
       });
     }
 
@@ -1117,6 +1213,13 @@ export class AncientMapOverlay {
             <span class="amap-pin-badge"><span>${pin.glyph}</span></span>
             ${pin.tagLabel ? `<span class="amap-pin-tag">${pin.tagLabel}</span>` : ''}
           `;
+        } else if (pin.kind === 'herb') {
+          const matKey = (pin.extraClasses?.find((c) => c.startsWith('mat-'))?.slice(4) ?? 'mat_lingzhi') as WorldHerbNodeDef['materialId'];
+          const meta = HERB_MATERIAL_META[matKey] ?? HERB_MATERIAL_META.mat_lingzhi;
+          btn.innerHTML = `
+            <span class="amap-pin-badge" style="background:${meta.bgGrad};color:${meta.textHex};border-color:${pin.accentHex ?? '#fff3c8'}">${pin.glyph}</span>
+            ${pin.tagLabel ? `<span class="amap-pin-tag">${pin.tagLabel}</span>` : ''}
+          `;
         } else {
           btn.innerHTML = `
             <span class="amap-pin-badge">${pin.glyph}</span>
@@ -1196,6 +1299,7 @@ export class AncientMapOverlay {
       waypoint: '锚点',
       boss: '首领',
       camp: '营地',
+      herb: '采药',
       chest: '宝箱',
       orb: '灵瞳',
       npc: '人物',
@@ -1225,7 +1329,8 @@ export class AncientMapOverlay {
       actions.push(`<button type="button" class="amap-act-btn amap-act-btn--jade" data-action="teleport">瞬移传送</button>`);
     }
     if (pin.canNavigate) {
-      actions.push(`<button type="button" class="amap-act-btn amap-act-btn--primary" data-action="navigate">自动寻路前往</button>`);
+      const navBtnLabel = this.escapeHtml(pin.navButtonText ?? '自动寻路前往');
+      actions.push(`<button type="button" class="amap-act-btn amap-act-btn--primary" data-action="navigate">${navBtnLabel}</button>`);
     }
     if (pin.charId) {
       actions.push(`<button type="button" class="amap-act-btn amap-act-btn--ink" data-action="inspect-char">查看角色属性</button>`);
@@ -1433,14 +1538,14 @@ export class AncientMapOverlay {
     this.strokeSmoothPath(ctx, northBrook);
     ctx.restore();
 
-    // 2. Regional Watercolor / Mineral Pigment Washes
+    // 2. Regional Watercolor / Mineral Pigment Washes (Distinct scenic hues per biome!)
     const washes: Array<{ wx: number; wz: number; r: number; c0: string; c1: string }> = [
-      { wx: 0, wz: 0, r: 22, c0: 'rgba(66, 148, 134, 0.24)', c1: 'rgba(66, 148, 134, 0)' },
-      { wx: 46, wz: -44, r: 27, c0: 'rgba(208, 114, 142, 0.26)', c1: 'rgba(208, 114, 142, 0)' },
-      { wx: -48, wz: -44, r: 27, c0: 'rgba(104, 82, 146, 0.24)', c1: 'rgba(104, 82, 146, 0)' },
-      { wx: -46, wz: 44, r: 25, c0: 'rgba(196, 76, 40, 0.28)', c1: 'rgba(196, 76, 40, 0)' },
-      { wx: 48, wz: 44, r: 26, c0: 'rgba(72, 132, 178, 0.25)', c1: 'rgba(72, 132, 178, 0)' },
-      { wx: 0, wz: -58, r: 24, c0: 'rgba(32, 74, 82, 0.34)', c1: 'rgba(32, 74, 82, 0)' },
+      { wx: 0, wz: 0, r: 20, c0: 'rgba(66, 148, 134, 0.22)', c1: 'rgba(66, 148, 134, 0)' },
+      { wx: 46, wz: -44, r: 28, c0: 'rgba(68, 154, 108, 0.26)', c1: 'rgba(68, 154, 108, 0)' }, // 翠竹山间
+      { wx: -48, wz: -44, r: 27, c0: 'rgba(138, 86, 52, 0.26)', c1: 'rgba(138, 86, 52, 0)' }, // 黑风山寨
+      { wx: -46, wz: 44, r: 25, c0: 'rgba(196, 76, 40, 0.28)', c1: 'rgba(196, 76, 40, 0)' }, // 赤焰熔谷
+      { wx: 48, wz: 44, r: 28, c0: 'rgba(222, 184, 88, 0.28)', c1: 'rgba(222, 184, 88, 0)' }, // 凌霄天庭
+      { wx: 0, wz: -58, r: 24, c0: 'rgba(32, 74, 82, 0.34)', c1: 'rgba(32, 74, 82, 0)' }, // 幽冥地窟
     ];
     for (const w of washes) {
       const c = toPx(w.wx, w.wz);
@@ -1454,16 +1559,19 @@ export class AncientMapOverlay {
       ctx.fill();
     }
 
-    // 3. Layered Ink-Wash Mountain Peaks (水墨山峦) framing edges & Northern Crypt Gorge
+    // 3. Layered Ink-Wash Mountain Peaks (水墨山峦) framing edges, Mountain Valley & Northern Crypt Gorge
     const peakRanges: Array<[number, number, number, number]> = [
       // Northern twin chasm mountains cradling 北溟·幽冥古地窟
       [-24, -67, 20, 14],
       [24, -67, 20, 14],
       [-14, -73, 15, 11],
       [14, -73, 15, 11],
-      // NW & NE horizon ranges
+      // Scenic mountain ridges cradling 东岳·翠竹山间桃谷
+      [62, -60, 22, 16],
+      [42, -66, 18, 13],
+      [68, -42, 16, 13],
+      // NW Mountain fortress backdrop
       [-64, -66, 22, 15],
-      [64, -66, 22, 15],
       [-70, -14, 16, 13],
       [70, -14, 16, 13],
       // SW & SE outer ridges
@@ -1481,74 +1589,196 @@ export class AncientMapOverlay {
       this.paintInkMountainCluster(ctx, pt.x, pt.y, pw, ph, i);
     }
 
-    // 4. Iconic Hand-Inked Regional Landmarks
-    // Center Bagua Shushan Cloud Terrace
+    // 4. Iconic Classical Chinese Shan-Shui Regional Architecture Iconography
+    // 4a. Center: Clean Shushan Cloud Terrace (蜀山云台)
     const hub = toPx(0, 0);
-    const hubR = (15 / (WORLD_BOUND * 2)) * mapSize;
+    const hubR = (13.5 / (WORLD_BOUND * 2)) * mapSize;
     ctx.save();
-    ctx.strokeStyle = 'rgba(46, 98, 92, 0.56)';
+    ctx.strokeStyle = 'rgba(46, 98, 92, 0.5)';
     ctx.lineWidth = 1.3;
     ctx.beginPath();
     ctx.arc(hub.x, hub.y, hubR, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(hub.x, hub.y, hubR * 0.58, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.restore();
 
-    // SW Lava Abyss Fissure Ring
+    // 4b. SW: 南冥 · 赤焰炼器熔谷 (Magma Crater, Iron Bridge & Bronze Forging Cauldron)
     const lavaC = toPx(-46, 44);
     const lavaR = (14.5 / (WORLD_BOUND * 2)) * mapSize;
     ctx.save();
-    ctx.strokeStyle = 'rgba(176, 52, 24, 0.52)';
+    ctx.strokeStyle = 'rgba(176, 52, 24, 0.56)';
     ctx.lineWidth = 1.4;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
     ctx.arc(lavaC.x, lavaC.y, lavaR, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
+    // Forging tripod cauldron ink icon
+    const caul = toPx(-42, 60);
+    ctx.strokeStyle = 'rgba(128, 46, 20, 0.78)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(caul.x, caul.y, 4.5, 0, Math.PI);
+    ctx.moveTo(caul.x - 5, caul.y);
+    ctx.lineTo(caul.x + 5, caul.y);
+    ctx.moveTo(caul.x - 3, caul.y + 4);
+    ctx.lineTo(caul.x - 4, caul.y + 7.5);
+    ctx.moveTo(caul.x + 3, caul.y + 4);
+    ctx.lineTo(caul.x + 4, caul.y + 7.5);
+    ctx.stroke();
     ctx.restore();
 
-    // SE Celestial Star Sanctuary Rings
-    const starC = toPx(48, 44);
-    const starR = (15 / (WORLD_BOUND * 2)) * mapSize;
+    // 4c. SE: 九霄 · 凌霄天庭 (祥云天宫楼阁 + 白玉南天门)
+    const palacePt = toPx(55, 36);
+    const ntGatePt = toPx(36, 23);
     ctx.save();
-    ctx.strokeStyle = 'rgba(42, 98, 138, 0.45)';
-    ctx.lineWidth = 1.1;
+    // Swirling auspicious heavenly clouds beneath the palace
+    this.paintCloudBand(ctx, palacePt.x, palacePt.y + 12, mapSize * 0.18);
+    this.paintCloudBand(ctx, ntGatePt.x, ntGatePt.y + 6, mapSize * 0.13);
+    // Double-tiered Imperial Heavenly Pagoda (凌霄宝殿) ink silhouette
+    ctx.strokeStyle = 'rgba(148, 92, 22, 0.86)';
+    ctx.fillStyle = 'rgba(214, 158, 52, 0.34)';
+    ctx.lineWidth = 1.5;
+    // Lower glazed upturned roof
     ctx.beginPath();
-    ctx.arc(starC.x, starC.y, starR, 0, Math.PI * 2);
+    ctx.moveTo(palacePt.x - 13, palacePt.y + 2);
+    ctx.quadraticCurveTo(palacePt.x, palacePt.y - 4, palacePt.x + 13, palacePt.y + 2);
+    ctx.lineTo(palacePt.x + 9, palacePt.y + 5);
+    ctx.lineTo(palacePt.x - 9, palacePt.y + 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Upper pavilion tier + spire
+    ctx.beginPath();
+    ctx.moveTo(palacePt.x - 8, palacePt.y - 3);
+    ctx.quadraticCurveTo(palacePt.x, palacePt.y - 9, palacePt.x + 8, palacePt.y - 3);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(starC.x, starC.y, starR * 0.62, 0, Math.PI * 2);
+    ctx.moveTo(palacePt.x, palacePt.y - 9);
+    ctx.lineTo(palacePt.x, palacePt.y - 13);
+    // Palace pillars
+    ctx.moveTo(palacePt.x - 6, palacePt.y + 5);
+    ctx.lineTo(palacePt.x - 6, palacePt.y + 10);
+    ctx.moveTo(palacePt.x + 6, palacePt.y + 5);
+    ctx.lineTo(palacePt.x + 6, palacePt.y + 10);
+    ctx.stroke();
+    // Nantianmen triple-arch gate silhouette
+    ctx.strokeStyle = 'rgba(138, 84, 24, 0.78)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(ntGatePt.x - 8, ntGatePt.y + 4);
+    ctx.lineTo(ntGatePt.x - 8, ntGatePt.y - 3);
+    ctx.lineTo(ntGatePt.x + 8, ntGatePt.y - 3);
+    ctx.lineTo(ntGatePt.x + 8, ntGatePt.y + 4);
+    ctx.moveTo(ntGatePt.x - 11, ntGatePt.y - 3);
+    ctx.quadraticCurveTo(ntGatePt.x, ntGatePt.y - 8, ntGatePt.x + 11, ntGatePt.y - 3);
     ctx.stroke();
     ctx.restore();
 
-    // NW Sword Graveyard tiny ink sword silhouettes
+    // 4d. NW: 西陲 · 黑风古山寨 (木栅寨墙 + 箭楼哨塔 + 聚义厅 + 赤旗)
+    const fortC = toPx(-48, -45);
+    const fortR = (15.5 / (WORLD_BOUND * 2)) * mapSize;
     ctx.save();
-    ctx.strokeStyle = 'rgba(72, 54, 98, 0.52)';
-    ctx.lineWidth = 1.3;
-    for (const [sx, sz, tilt] of [[-40, -38, 0.25], [-56, -40, -0.22], [-46, -54, 0.14]]) {
-      const sp = toPx(sx, sz);
-      ctx.save();
-      ctx.translate(sp.x, sp.y);
-      ctx.rotate(tilt);
+    // Wooden stockade palisade enclosure outline with open gate gaps
+    ctx.strokeStyle = 'rgba(92, 54, 28, 0.74)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([4, 2]);
+    ctx.strokeRect(fortC.x - fortR * 0.9, fortC.y - fortR * 0.85, fortR * 1.8, fortR * 1.65);
+    ctx.setLineDash([]);
+    // Twin Watchtower icons (箭楼哨塔)
+    for (const [tx, tz] of [[-33, -38], [-45, -31]]) {
+      const tp = toPx(tx, tz);
+      ctx.fillStyle = 'rgba(116, 68, 36, 0.32)';
+      ctx.strokeStyle = 'rgba(78, 44, 22, 0.84)';
+      ctx.lineWidth = 1.3;
       ctx.beginPath();
-      ctx.moveTo(0, -7);
-      ctx.lineTo(0, 4);
-      ctx.moveTo(-3, -3);
-      ctx.lineTo(3, -3);
+      ctx.moveTo(tp.x - 4, tp.y + 5);
+      ctx.lineTo(tp.x - 3, tp.y - 3);
+      ctx.lineTo(tp.x + 3, tp.y - 3);
+      ctx.lineTo(tp.x + 4, tp.y + 5);
+      ctx.moveTo(tp.x - 6, tp.y - 3);
+      ctx.lineTo(tp.x, tp.y - 8);
+      ctx.lineTo(tp.x + 6, tp.y - 3);
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
-      ctx.restore();
     }
+    // Chieftain hall roof & crimson fortress pennant flag (黑风寨旗)
+    const hallPt = toPx(-55, -58);
+    ctx.strokeStyle = 'rgba(84, 44, 22, 0.86)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(hallPt.x - 9, hallPt.y);
+    ctx.lineTo(hallPt.x, hallPt.y - 6);
+    ctx.lineTo(hallPt.x + 9, hallPt.y);
+    ctx.closePath();
+    ctx.stroke();
+    const flagPt = toPx(-39, -35);
+    ctx.strokeStyle = 'rgba(76, 40, 20, 0.85)';
+    ctx.beginPath();
+    ctx.moveTo(flagPt.x, flagPt.y + 5);
+    ctx.lineTo(flagPt.x, flagPt.y - 7);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(176, 36, 28, 0.82)';
+    ctx.beginPath();
+    ctx.moveTo(flagPt.x, flagPt.y - 7);
+    ctx.lineTo(flagPt.x + 7, flagPt.y - 4.5);
+    ctx.lineTo(flagPt.x, flagPt.y - 2);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
 
-    // NE Peach Blossom ink dabs
+    // 4e. NE: 东岳 · 翠竹山间桃谷 (山间清溪 + 木拱桥 + 清风凉亭 + 翠竹桃花)
     ctx.save();
-    ctx.fillStyle = 'rgba(196, 86, 118, 0.44)';
-    for (const [px, pz] of [[38, -38], [55, -39], [42, -52], [53, -53], [48, -34]]) {
+    // Valley jade creek stroke
+    const valleyCreek = [toPx(28, -50), toPx(40, -39), toPx(54, -32), toPx(66, -28)];
+    ctx.strokeStyle = 'rgba(32, 134, 118, 0.52)';
+    ctx.lineWidth = Math.max(3, mapSize * 0.015);
+    this.strokeSmoothPath(ctx, valleyCreek);
+    // Arched wooden bridge ink icon at (40, -39)
+    const brPt = toPx(40, -39);
+    ctx.strokeStyle = 'rgba(128, 56, 32, 0.86)';
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.moveTo(brPt.x - 7, brPt.y + 2);
+    ctx.quadraticCurveTo(brPt.x, brPt.y - 5, brPt.x + 7, brPt.y + 2);
+    ctx.stroke();
+    // Hexagonal riverside pavilion (清风凉亭) ink silhouette at (33.5, -45.5)
+    const pavPt = toPx(33.5, -45.5);
+    ctx.fillStyle = 'rgba(34, 102, 92, 0.34)';
+    ctx.strokeStyle = 'rgba(26, 78, 70, 0.86)';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(pavPt.x - 7, pavPt.y - 1);
+    ctx.lineTo(pavPt.x, pavPt.y - 8);
+    ctx.lineTo(pavPt.x + 7, pavPt.y - 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(pavPt.x - 4, pavPt.y - 1);
+    ctx.lineTo(pavPt.x - 4, pavPt.y + 5);
+    ctx.moveTo(pavPt.x + 4, pavPt.y - 1);
+    ctx.lineTo(pavPt.x + 4, pavPt.y + 5);
+    ctx.stroke();
+    // Ink bamboo tufts + pink peach blossom dabs
+    ctx.strokeStyle = 'rgba(38, 108, 66, 0.62)';
+    ctx.lineWidth = 1.2;
+    for (const [bx, bz] of [[29, -45], [58, -54], [48, -58], [60, -35]]) {
+      const bp = toPx(bx, bz);
+      ctx.beginPath();
+      ctx.moveTo(bp.x, bp.y + 4);
+      ctx.lineTo(bp.x - 1, bp.y - 5);
+      ctx.moveTo(bp.x + 3, bp.y + 4);
+      ctx.lineTo(bp.x + 4, bp.y - 4);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(196, 86, 118, 0.48)';
+    for (const [px, pz] of [[42, -31], [57, -38], [59, -51], [47, -56]]) {
       const pp = toPx(px, pz);
       ctx.beginPath();
-      ctx.arc(pp.x, pp.y, 3.2, 0, Math.PI * 2);
+      ctx.arc(pp.x, pp.y, 2.8, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();

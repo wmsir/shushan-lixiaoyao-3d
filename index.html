@@ -32,81 +32,113 @@
       <!-- Title Overlay over Live 3D Moonlit Shushan Courtyard -->
       <section id="title-overlay" class="overlay visible">
         <div class="title-card">
-          <div class="title-kicker">
-            <span>SHUSHAN DEMON-LOCK COURT · 25 STAGES</span>
-            <span id="app-version-badge" class="version-pill">v1.65</span>
-          </div>
-          <div class="title-heading-wrap">
-            <h1 class="game-title">仙剑 · 锁妖剑台</h1>
-            <span class="chop-seal" aria-hidden="true">逍遥</span>
-          </div>
-          <p id="title-tagline" class="title-tagline">写实 3D 仙侠五章二十五关闯关 · 装备神兵与侠客皮肤养成 · 道心抉择与剧情回廊 · 跨端双人联机。</p>
+          <!-- Top Floating Calligraphy Brand Header -->
+          <header class="title-top-header">
+            <div class="title-top-bar">
+              <div class="title-kicker">
+                <span class="title-kicker-en">SHUSHAN DEMON-LOCK COURT · 25 STAGES</span>
+                <span id="app-version-badge" class="version-pill">v1.66</span>
+              </div>
+              <div class="title-top-utils" aria-label="快捷入口">
+                <button id="btn-open-settings" class="title-util-pill settings-pill" type="button" title="美化与画质设置">⚙ 美化设置</button>
+                <button id="btn-open-mp-drawer" class="title-util-pill mp-pill" type="button" title="双人联机阁">⚔ 联机阁</button>
+                <button id="btn-open-roster" class="title-util-pill roster-pill" type="button" title="群英人物志">❖ 群英志</button>
+              </div>
+            </div>
+            <div class="title-heading-wrap">
+              <h1 class="game-title">仙剑 · 锁妖剑台</h1>
+              <span class="chop-seal" aria-hidden="true">逍遥</span>
+            </div>
+            <p id="title-tagline" class="title-tagline">写实 3D 仙侠五章二十五关闯关 · 装备神兵与侠客皮肤养成 · 采药炼丹与九州大世界 · 跨端双人联机。</p>
 
-          <!-- Campaign Progress & Selected Stage Strip -->
-          <div class="campaign-strip">
-            <div class="campaign-strip-row">
-              <span id="title-realm-badge" class="realm-badge">炼气初境</span>
-              <span id="title-stars-text" class="stars-badge">★ 0 / 75</span>
-              <span id="title-jade-pill" class="jade-badge">◆ 280 灵石</span>
-              <span id="title-clear-text" class="clear-badge">已破 0 / 25 关</span>
+            <!-- Campaign Progress & Selected Stage Strip -->
+            <div class="campaign-strip">
+              <div class="campaign-strip-row">
+                <span id="title-realm-badge" class="realm-badge">炼气初境</span>
+                <span id="title-stars-text" class="stars-badge">★ 0 / 75</span>
+                <span id="title-jade-pill" class="jade-badge">◆ 280 灵石</span>
+                <span id="title-clear-text" class="clear-badge">已破 0 / 25 关</span>
+              </div>
+              <div class="campaign-selected-row">
+                <span id="title-selected-stage" class="selected-stage-label">当前目标：第 1 关 · 剑启山门</span>
+                <span id="title-selected-meta" class="selected-stage-meta">第一章 蜀山山门</span>
+              </div>
             </div>
-            <div class="campaign-selected-row">
-              <span id="title-selected-stage" class="selected-stage-label">当前目标：第 1 关 · 剑启山门</span>
-              <span id="title-selected-meta" class="selected-stage-meta">第一章 蜀山山门</span>
-            </div>
-          </div>
+          </header>
 
-          <!-- Primary Campaign Entry Buttons -->
-          <div class="title-cta-row">
-            <button id="btn-start" class="xianxia-btn primary" type="button">仗剑出征 · 第 1 关</button>
-            <button id="btn-open-world" class="xianxia-btn world-btn" type="button">九州仙域 · 大世界</button>
-            <button id="btn-open-camp" class="xianxia-btn camp-btn" type="button">云来剑庐 · 休息养成</button>
-            <button id="btn-open-dungeon" class="xianxia-btn dungeon-btn" type="button">
-              试炼 · 塔/肉鸽
-              <span id="dungeon-bounty-dot" class="bounty-dot" aria-hidden="true"></span>
-            </button>
-            <button id="btn-open-campaign" class="xianxia-btn map-btn" type="button">二十五关 · 剑录</button>
-            <button id="btn-open-shop" class="xianxia-btn shop-btn" type="button">藏宝阁 · 装备皮肤</button>
-            <button id="btn-open-roster" class="xianxia-btn roster-btn" type="button">群英人物志</button>
-          </div>
+          <!-- Mobile Portrait Middle Open Transparent 3D Character Window -->
+          <div class="title-hero-window" aria-hidden="true"></div>
 
-          <!-- 2-Player Online Multiplayer Lobby -->
-          <div class="mp-lobby">
-            <div class="mp-lobby-head">
-              <span class="mp-badge">联机阁 · 25 关跨端互通</span>
-              <span class="mp-dot-wrap"><span id="mp-conn-dot" class="mp-dot"></span><span class="mp-dot-lbl">联机就绪</span></span>
+          <!-- Bottom Frosted Glass Dock -->
+          <div class="title-bottom-dock">
+            <!-- Primary Campaign Entry Buttons -->
+            <div class="title-cta-row">
+              <button id="btn-start" class="xianxia-btn primary" type="button">仗剑出征 · 第 1 关</button>
+              <button id="btn-open-world" class="xianxia-btn world-btn" type="button">九州仙域 · 大世界</button>
+              <button id="btn-open-shop" class="xianxia-btn shop-btn title-quick-pill" type="button">
+                <span class="pill-ico" aria-hidden="true">✦</span>
+                <span class="pill-txt">藏宝阁</span>
+              </button>
+              <button id="btn-open-craft-title" class="xianxia-btn craft-btn title-quick-pill" type="button">
+                <span class="pill-ico" aria-hidden="true">⚗</span>
+                <span class="pill-txt">炼丹合成</span>
+              </button>
+              <button id="btn-open-camp" class="xianxia-btn camp-btn title-quick-pill" type="button">
+                <span class="pill-ico" aria-hidden="true">⛺</span>
+                <span class="pill-txt">云来剑庐</span>
+              </button>
+              <button id="btn-open-dungeon" class="xianxia-btn dungeon-btn title-quick-pill" type="button">
+                <span class="pill-ico" aria-hidden="true">⚔</span>
+                <span class="pill-txt">试炼秘境</span>
+                <span id="dungeon-bounty-dot" class="bounty-dot" aria-hidden="true"></span>
+              </button>
+              <button id="btn-open-campaign" class="xianxia-btn map-btn title-quick-pill" type="button">
+                <span class="pill-ico" aria-hidden="true">📜</span>
+                <span class="pill-txt">二十五关</span>
+              </button>
             </div>
-            <div class="mp-btn-row">
-              <button id="btn-mp-coop" class="xianxia-btn mp-btn" type="button">双人组队刷怪</button>
-              <button id="btn-mp-solo" class="xianxia-btn mp-btn solo" type="button">双人单挑 Solo</button>
-            </div>
-            <div class="mp-join-row">
-              <input id="mp-code-input" class="mp-input" type="text" inputmode="numeric" maxlength="6" placeholder="输入4位房间码" autocomplete="off" />
-              <button id="btn-mp-join" class="mp-mini-btn" type="button">加入房间</button>
-              <button id="btn-mp-quick" class="mp-mini-btn gold" type="button">快速匹配</button>
-            </div>
-            <div id="mp-status-bar" class="mp-status-bar">
-              <span id="mp-status-text"></span>
-              <button id="btn-mp-leave" class="mp-leave-btn" type="button">退出</button>
-            </div>
-          </div>
 
-          <div class="title-controls-grid desktop-only">
-            <span><b>右键点地 / WASD</b> 联盟式移动</span>
-            <span><b>左键 / J</b> 朝鼠标出剑</span>
-            <span><b>K / 中键</b> 格挡弹反</span>
-            <span><b>Space</b> 踏云闪避</span>
-            <span><b>Q/E/R</b> 朝鼠标释放剑诀</span>
-            <span><b>F</b> 灵葫回春</span>
+            <!-- 2-Player Online Multiplayer Lobby (Inline on Desktop, Collapsible Drawer on Mobile) -->
+            <div id="mp-lobby-drawer" class="mp-lobby">
+              <div class="mp-lobby-head">
+                <span class="mp-badge">联机阁 · 25 关跨端互通</span>
+                <div class="mp-head-right">
+                  <span class="mp-dot-wrap"><span id="mp-conn-dot" class="mp-dot"></span><span class="mp-dot-lbl">联机就绪</span></span>
+                  <button id="btn-close-mp-drawer" class="mp-drawer-close" type="button" aria-label="收起联机阁">✕</button>
+                </div>
+              </div>
+              <div class="mp-btn-row">
+                <button id="btn-mp-coop" class="xianxia-btn mp-btn" type="button">双人组队刷怪</button>
+                <button id="btn-mp-solo" class="xianxia-btn mp-btn solo" type="button">双人单挑 Solo</button>
+              </div>
+              <div class="mp-join-row">
+                <input id="mp-code-input" class="mp-input" type="text" inputmode="numeric" maxlength="6" placeholder="输入4位房间码" autocomplete="off" />
+                <button id="btn-mp-join" class="mp-mini-btn" type="button">加入房间</button>
+                <button id="btn-mp-quick" class="mp-mini-btn gold" type="button">快速匹配</button>
+              </div>
+              <div id="mp-status-bar" class="mp-status-bar">
+                <span id="mp-status-text"></span>
+                <button id="btn-mp-leave" class="mp-leave-btn" type="button">退出</button>
+              </div>
+            </div>
+
+            <div class="title-controls-grid desktop-only">
+              <span><b>右键点地 / WASD</b> 联盟式移动</span>
+              <span><b>左键 / J</b> 朝鼠标出剑</span>
+              <span><b>K / 中键</b> 格挡弹反</span>
+              <span><b>Space</b> 踏云闪避</span>
+              <span><b>Q/E/R</b> 朝鼠标释放剑诀</span>
+              <span><b>F</b> 灵葫回春</span>
+            </div>
+            <div class="title-controls-grid mobile-only">
+              <span><b>左手摇杆</b> 自由走位</span>
+              <span><b>出剑大键</b> 四连斩·破势处决</span>
+              <span><b>弹反 / 闪避</b> 格挡反击·极限闪避</span>
+              <span><b>御剑·万剑·天剑</b> 弧形技能轮盘</span>
+              <span><b>灵葫</b> 回春续战</span>
+            </div>
+            <div id="title-combo-codex" class="title-controls-grid combo-codex title-combo-codex"></div>
           </div>
-          <div class="title-controls-grid mobile-only">
-            <span><b>左手摇杆</b> 自由走位</span>
-            <span><b>出剑大键</b> 四连斩·破势处决</span>
-            <span><b>弹反 / 闪避</b> 格挡反击·极限闪避</span>
-            <span><b>御剑·万剑·天剑</b> 弧形技能轮盘</span>
-            <span><b>灵葫</b> 回春续战</span>
-          </div>
-          <div id="title-combo-codex" class="title-controls-grid combo-codex title-combo-codex"></div>
         </div>
       </section>
 
@@ -196,17 +228,21 @@
           </div>
           <!-- Transparent Center 3D Live Character Window -->
           <div class="shop-preview-viewport" aria-hidden="true">
-            <span class="preview-drag-hint">⟲ 拖动 360° 观赏</span>
+            <span class="preview-drag-hint">⟲ 拖动 360° 观赏 · 近景看脸</span>
           </div>
           <!-- Compact Bottom Preview Controls & Stat Diff HUD -->
           <div id="shop-preview-hud" class="shop-preview-hud">
-            <div id="shop-preview-name" class="preview-name">3D 实时试穿 · 青衫游侠</div>
+            <div class="preview-title-row">
+              <div id="shop-preview-name" class="preview-name">3D 实时试穿 · 青衫游侠</div>
+              <div id="shop-tryon-tag" class="preview-tryon-tag">✦ 实时试穿 · 清风御剑</div>
+            </div>
             <div id="shop-preview-sub" class="preview-sub">拖动人物可 360° 观赏外观、神兵与玄甲灵宝光效</div>
             <div id="shop-preview-stats" class="preview-stats">气血+0 · 剑伤+0% · 暴击8%</div>
             <div class="preview-actions">
               <button id="btn-preview-rot-l" class="util-btn" type="button" title="向左旋转" aria-label="向左旋转">⟲</button>
-              <button id="btn-preview-spin" class="util-btn" type="button">自动旋转: 开</button>
+              <button id="btn-preview-spin" class="util-btn" type="button">自动旋转: 关</button>
               <button id="btn-preview-rot-r" class="util-btn" type="button" title="向右旋转" aria-label="向右旋转">↻</button>
+              <button id="btn-preview-zoom" class="util-btn preview-zoom-btn" type="button">近景看脸</button>
               <button id="btn-preview-reset" class="util-btn" type="button">恢复已穿</button>
               <button id="btn-preview-action" class="xianxia-btn primary preview-buy-btn" type="button">已穿戴</button>
             </div>
@@ -220,7 +256,10 @@
               <span id="shop-power-pill" class="realm-badge">剑道战力 460</span>
               <span id="shop-toast" class="shop-toast" role="status" aria-live="polite"></span>
             </div>
-            <button id="btn-close-shop" class="util-btn" type="button">返回</button>
+            <div class="shop-head-actions">
+              <button id="btn-shop-craft" class="util-btn craft-util-btn" type="button">炼丹合成</button>
+              <button id="btn-close-shop" class="util-btn" type="button">返回</button>
+            </div>
           </div>
           <div id="shop-tabs" class="shop-tabs" role="tablist" aria-label="藏宝阁分类"></div>
           <div id="shop-bag-bar" class="shop-bag-bar"></div>
@@ -467,6 +506,7 @@
           <div class="world-top-actions">
             <button id="btn-world-map" class="util-btn world-map-btn" type="button">九州舆图</button>
             <button id="btn-world-roster" class="util-btn world-roster-btn" type="button">群英属性</button>
+            <button id="btn-world-craft" class="util-btn craft-util-btn" type="button">炼丹</button>
             <button id="btn-world-tp" class="util-btn world-tp-toggle" type="button">传送</button>
             <button id="btn-world-respawn" class="util-btn" type="button">重召</button>
             <button id="btn-world-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
@@ -478,15 +518,18 @@
           <div class="world-tp-head">九州传送锚点 · 点击瞬移</div>
           <div id="world-tp-list" class="world-tp-list"></div>
         </aside>
-        <aside id="world-guide-card" class="world-guide-card">
+        <aside id="world-guide-card" class="world-guide-card collapsed">
           <div class="world-guide-head">
             <span class="world-guide-badge">九州游历指引</span>
-            <button id="btn-world-guide-toggle" class="camp-collapse-btn" type="button" aria-expanded="true" title="收起/展开指引">▾</button>
+            <span id="world-guide-mini-goal" class="world-guide-mini-goal">赤焰渡口 · 40m</span>
+            <button id="btn-world-auto-nav-mini" class="world-mini-nav-btn" type="button">寻路</button>
+            <button id="btn-world-nav-policy" class="world-policy-btn" type="button" title="切换自动寻路遇敌方式">迎战</button>
+            <button id="btn-world-guide-toggle" class="camp-collapse-btn" type="button" aria-expanded="false" title="收起/展开指引">▸</button>
           </div>
           <div id="world-guide-body" class="world-guide-body">
             <div id="world-guide-goal" class="world-guide-goal">点亮锚点 · 桃源仙驿锚点</div>
             <div id="world-guide-dir" class="world-guide-dir">↗ 东北方向 · 约 30 米</div>
-            <div id="world-guide-howto" class="world-guide-howto">点亮九州锚点开传送 · 开宝箱采灵瞳永久加血 · 斩首领爆神兵</div>
+            <div id="world-guide-howto" class="world-guide-howto">点亮九州锚点开传送 · 采灵草炼丹永久增幅 · 斩首领爆神兵</div>
             <div class="world-guide-actions">
               <button id="btn-world-next-goal" class="util-btn" type="button">换个目标</button>
               <button id="btn-world-auto-nav" class="util-btn world-autonav-btn" type="button">自动寻路</button>
@@ -512,6 +555,7 @@
           <div class="camp-top-actions">
             <button id="btn-camp-map" class="util-btn world-map-btn" type="button">舆图</button>
             <button id="btn-camp-roster" class="util-btn world-roster-btn" type="button">人物</button>
+            <button id="btn-camp-craft" class="util-btn craft-util-btn" type="button">炼丹</button>
             <button id="btn-camp-title" class="util-btn" type="button">大厅</button>
             <button id="btn-camp-world" class="util-btn camp-shop-btn" type="button">九州</button>
             <button id="btn-camp-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
@@ -601,7 +645,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.65</span>
+            <span id="pause-version-badge" class="version-pill">v1.66</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
@@ -610,9 +654,100 @@
             <button id="btn-pause-map-scroll" class="xianxia-btn map-btn" type="button">九州舆图</button>
             <button id="btn-pause-roster" class="xianxia-btn roster-btn" type="button">人物属性</button>
             <button id="btn-pause-shop" class="xianxia-btn shop-btn" type="button">藏宝阁</button>
+            <button id="btn-pause-settings" class="xianxia-btn settings-btn" type="button">画面设置</button>
             <button id="btn-restart-pause" class="xianxia-btn" type="button">重开本关</button>
             <button id="btn-pause-map" class="xianxia-btn" type="button">选关剑录</button>
             <button id="btn-pause-title" class="xianxia-btn" type="button">返回大厅</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Beautification & Gameplay Settings Modal (仙韵画质 · 美化设置) -->
+      <section id="settings-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <div class="settings-modal">
+          <div class="settings-head">
+            <div class="settings-head-left">
+              <h2 id="settings-modal-title" class="campaign-title">仙韵画质 · 美化与体验设置</h2>
+              <span class="settings-sub-pill">实时生效 · 自动保存</span>
+            </div>
+            <button id="btn-close-settings" class="util-btn settings-close-btn" type="button" aria-label="关闭美化设置">返回</button>
+          </div>
+
+          <div class="settings-scroll">
+            <div class="settings-group">
+              <div class="settings-group-label">
+                <span class="settings-group-title">渲染画质</span>
+                <span class="settings-group-hint">调节清晰度与帧率平衡</span>
+              </div>
+              <div class="settings-pill-grid cols-3" role="radiogroup" aria-label="渲染画质">
+                <button class="settings-pill-btn" type="button" data-setting-group="quality" data-setting-val="ultra">极清仙韵</button>
+                <button class="settings-pill-btn active" type="button" data-setting-group="quality" data-setting-val="balanced">均衡畅玩</button>
+                <button class="settings-pill-btn" type="button" data-setting-group="quality" data-setting-val="smooth">省电流畅</button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-label">
+                <span class="settings-group-title">天地光影氛围</span>
+                <span class="settings-group-hint">实时切换仙侠色温与意境</span>
+              </div>
+              <div class="settings-pill-grid cols-2" role="radiogroup" aria-label="天地光影氛围">
+                <button class="settings-pill-btn theme-pill active" type="button" data-setting-group="atmosphereTheme" data-setting-val="moonlit">
+                  <span class="theme-swatch swatch-moonlit" aria-hidden="true"></span>月夜青岚
+                </button>
+                <button class="settings-pill-btn theme-pill" type="button" data-setting-group="atmosphereTheme" data-setting-val="ink_frost">
+                  <span class="theme-swatch swatch-frost" aria-hidden="true"></span>霜雪水墨
+                </button>
+                <button class="settings-pill-btn theme-pill" type="button" data-setting-group="atmosphereTheme" data-setting-val="golden_dawn">
+                  <span class="theme-swatch swatch-dawn" aria-hidden="true"></span>赤金晨曦
+                </button>
+                <button class="settings-pill-btn theme-pill" type="button" data-setting-group="atmosphereTheme" data-setting-val="astral_violet">
+                  <span class="theme-swatch swatch-astral" aria-hidden="true"></span>紫微星穹
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-label">
+                <span class="settings-group-title">剑光流光辉耀</span>
+                <span class="settings-group-hint">调节泛光与神兵灵气强度</span>
+              </div>
+              <div class="settings-pill-grid cols-3" role="radiogroup" aria-label="剑光流光辉耀">
+                <button class="settings-pill-btn" type="button" data-setting-group="bloomMode" data-setting-val="vivid">璀璨流光</button>
+                <button class="settings-pill-btn active" type="button" data-setting-group="bloomMode" data-setting-val="soft">柔和仙韵</button>
+                <button class="settings-pill-btn" type="button" data-setting-group="bloomMode" data-setting-val="minimal">极简护眼</button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-label">
+                <span class="settings-group-title">自动寻路遇敌策略</span>
+                <span class="settings-group-hint">九州大世界赶路遇怪响应</span>
+              </div>
+              <div class="settings-pill-grid cols-2" role="radiogroup" aria-label="自动寻路遇敌策略">
+                <button class="settings-pill-btn active" type="button" data-setting-group="autoNavPolicy" data-setting-val="fight">自动迎战·清敌续行</button>
+                <button class="settings-pill-btn" type="button" data-setting-group="autoNavPolicy" data-setting-val="evade">智能绕行·御剑避战</button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-label">
+                <span class="settings-group-title">大世界游历指引</span>
+                <span class="settings-group-hint">控制指引条收纳形态</span>
+              </div>
+              <div class="settings-pill-grid cols-2" role="radiogroup" aria-label="大世界游历指引">
+                <button class="settings-pill-btn active" type="button" data-setting-group="guideCompact" data-setting-val="compact">极简贴边·不遮画面</button>
+                <button class="settings-pill-btn" type="button" data-setting-group="guideCompact" data-setting-val="expanded">完整展开</button>
+              </div>
+            </div>
+
+            <div class="settings-group settings-audio-row">
+              <div class="settings-group-label">
+                <span class="settings-group-title">仙剑古风音律</span>
+                <span class="settings-group-hint">战斗剑鸣与背景竹笛古筝</span>
+              </div>
+              <button id="btn-settings-mute" class="settings-pill-btn settings-audio-btn active" type="button">音律开启</button>
+            </div>
           </div>
         </div>
       </section>

@@ -76,17 +76,49 @@ export class CameraRig {
     return this.cutscene.active;
   }
 
-  /** Moonlit framing for title screen: places Li Xiaoyao & full uncropped Shushan Archway cleanly on left half. */
-  updateTitleOrbit(heroPos: THREE.Vector3, elapsed: number): void {
-    const a = Math.sin(elapsed * 0.22) * 0.16;
-    const dist = 10.8;
-    // Offset camera look slightly right so hero & grand archway sit cleanly left of the right-aligned title card
-    this.currentLook.set(heroPos.x + 2.3, 2.2, heroPos.z - 4.2);
-    this.currentPos.set(
-      heroPos.x + 1.8 + Math.sin(a) * dist,
-      4.4 + Math.sin(elapsed * 0.45) * 0.22,
-      heroPos.z + Math.cos(a) * dist,
-    );
+  /**
+   * Moonlit front-facing title lobby framing:
+   * - Portrait: frames front-facing Li Xiaoyao in the unobstructed upper-center window above the bottom dock.
+   * - Landscape / Desktop: frames Li Xiaoyao cleanly in the left 46% showcase pane beside the right lobby panel.
+   */
+  updateTitleOrbit(heroPos: THREE.Vector3, elapsed: number, isPortrait = false): void {
+    const aspect = Math.max(0.35, this.camera.aspect || (isPortrait ? 390 / 844 : 16 / 9));
+    const portraitView = isPortrait || aspect < 0.92;
+    const sway = Math.sin(elapsed * 0.28) * 0.14;
+
+    if (portraitView) {
+      const dist = 4.35;
+      const lookY = heroPos.y + 0.58;
+      const camY = heroPos.y + 1.65 + Math.sin(elapsed * 0.48) * 0.05;
+      this.currentLook.set(heroPos.x, lookY, heroPos.z);
+      this.currentPos.set(
+        heroPos.x + Math.sin(sway) * dist,
+        camY,
+        heroPos.z + Math.cos(sway) * dist,
+      );
+    } else {
+      const dist = 4.85;
+      const lookY = heroPos.y + 1.06;
+      const camY = heroPos.y + 1.50 + Math.sin(elapsed * 0.45) * 0.05;
+      const fovRad = THREE.MathUtils.degToRad(this.camera.fov || 40);
+      const actualDist = Math.hypot(dist, camY - lookY);
+      const halfH = actualDist * Math.tan(fovRad * 0.5);
+      const halfW = halfH * aspect;
+      const leftZoneRatio = aspect > 1.85 ? 0.46 : 0.50;
+      const targetNdcX = clamp(leftZoneRatio - 1, -0.64, -0.42);
+      const rightShift = Math.abs(targetNdcX) * halfW;
+
+      const rightX = Math.cos(sway);
+      const rightZ = -Math.sin(sway);
+      const lookX = heroPos.x + rightX * rightShift;
+      const lookZ = heroPos.z + rightZ * rightShift;
+      const camX = lookX + Math.sin(sway) * dist;
+      const camZ = lookZ + Math.cos(sway) * dist;
+
+      this.currentLook.set(lookX, lookY, lookZ);
+      this.currentPos.set(camX, camY, camZ);
+    }
+
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLook);
   }
@@ -101,9 +133,11 @@ export class CameraRig {
   }
 
   /**
-   * Live 3D Skin, Weapon, Armor & Relic Dressing-Room Preview Camera:
-   * Frames Li Xiaoyao squarely centered inside the LEFT viewport pane (44% on mobile
-   * portrait & landscape, ~47% on desktop) across all 360° orbit angles.
+   * Honor-of-Kings 360° Turntable + Face Close-Up Zoom Dressing-Room Camera:
+   * - At yawOffset = 0, camera sits directly in front of the Hero's face.
+   * - zoomFactor (0..1) smoothly transitions between Full-Body Showcase and Head/Face Portrait Close-Up.
+   * - pitchOffset (-0.28..0.34 rad) tilts camera elevation while keeping camY >= 0.45.
+   * - Shifts lookAt + camPos along camera +right so Hero stays dead-center in the LEFT 44% pane at all zooms & 360° angles.
    */
   updateShopPreview(
     heroPos: THREE.Vector3,
@@ -111,39 +145,48 @@ export class CameraRig {
     yawOffset: number,
     isPortrait: boolean,
     leftPanelRatio?: number,
+    pitchOffset = 0,
+    zoomFactor = 0,
   ): void {
     const aspect = Math.max(0.35, this.camera.aspect || (isPortrait ? 390 / 844 : 844 / 390));
     const portraitView = isPortrait || aspect < 1;
-    // Left pane occupies 44% width on mobile portrait & landscape, ~47% on desktop
     const panelRatio = leftPanelRatio ?? (portraitView ? 0.44 : aspect > 1.9 ? 0.44 : 0.47);
-    // Adaptive distance so full head-to-toe hero + held sword fits cleanly between top slots & bottom preview HUD
-    const dist = portraitView
-      ? clamp(2.22 / Math.max(0.38, aspect), 4.15, 5.1)
+    const zT = clamp(zoomFactor, 0, 1);
+
+    const fullDist = portraitView
+      ? clamp(1.83 / Math.max(0.43, aspect), 3.85, 4.15)
       : aspect > 1.9
-        ? 4.3
-        : 3.78;
+        ? 3.62
+        : 3.58;
+    const closeDist = portraitView ? 1.50 : 1.38;
+    const dist = fullDist + (closeDist - fullDist) * zT;
+
+    const lookY = heroPos.y + 0.94 + (1.48 - 0.94) * zT;
+    const clampedPitch = clamp(pitchOffset, -0.28, 0.34);
+    const basePitch = 0.085 * (1 - zT) + 0.02 * zT;
+    const pitch = clamp(basePitch + clampedPitch, -0.28, 0.44);
+
+    const horizDist = dist * Math.cos(pitch);
+    const camY = Math.max(0.45, heroPos.y + 0.45, lookY + dist * Math.sin(pitch));
+    const actualDist = Math.hypot(horizDist, camY - lookY);
 
     const fovRad = THREE.MathUtils.degToRad(this.camera.fov || 40);
-    const halfH = dist * Math.tan(fovRad * 0.5);
+    const halfH = actualDist * Math.tan(fovRad * 0.5);
     const halfW = halfH * aspect;
 
     // Desired NDC X for the center of the left pane: 2 * (panelRatio / 2) - 1 = panelRatio - 1 (e.g. -0.56 for 44%)
     const targetNdcX = clamp(panelRatio - 1, -0.72, -0.35);
     const rightShift = Math.abs(targetNdcX) * halfW;
 
-    // Slight vertical framing lift so hero stands centered in the clear window between top equipped badges & bottom HUD
-    const lookY = heroPos.y + (portraitView ? 0.87 : aspect > 1.9 ? 0.88 : 0.84);
-    const camY = lookY + (portraitView ? 0.34 : 0.34);
-
     const orbitYaw = heroYaw + yawOffset;
     const rightX = Math.cos(orbitYaw);
     const rightZ = -Math.sin(orbitYaw);
 
-    // Shift both camera and lookAt along +right so the hero projects cleanly onto targetNdcX with zero perspective skew
+    // Shift both camera and lookAt along +right so the hero projects cleanly onto targetNdcX at full-body & close-up
     const lookX = heroPos.x + rightX * rightShift;
     const lookZ = heroPos.z + rightZ * rightShift;
-    const camX = lookX + Math.sin(orbitYaw) * dist;
-    const camZ = lookZ + Math.cos(orbitYaw) * dist;
+    const camX = lookX + Math.sin(orbitYaw) * horizDist;
+    const camZ = lookZ + Math.cos(orbitYaw) * horizDist;
 
     this.currentPos.set(camX, camY, camZ);
     this.currentLook.set(lookX, lookY, lookZ);

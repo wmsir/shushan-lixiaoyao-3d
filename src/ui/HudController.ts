@@ -71,6 +71,12 @@ import {
 } from '../game/EquipmentData';
 import { clamp } from '../utils/math';
 import { isPureMobileDevice } from '../core/NativeBridge';
+import type {
+  AtmosphereThemeId,
+  BloomMode,
+  QualityPreset,
+  VisualSettingsState,
+} from '../core/RenderPipeline';
 import { APP_VERSION } from '../version';
 
 export type ScreenMode =
@@ -100,8 +106,14 @@ export interface HudTacticalState {
   worldWaypoints?: Array<{ x: number; z: number; lit: boolean }>;
   worldChests?: Array<{ x: number; z: number; opened: boolean }>;
   worldOrbs?: Array<{ x: number; z: number; collected: boolean }>;
+  worldHerbs?: Array<{ x: number; z: number; ready: boolean; accentHex: string }>;
   worldEventPos?: { x: number; z: number } | null;
-  worldGuideTarget?: { x: number; z: number; label: string; kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss' } | null;
+  worldGuideTarget?: {
+    x: number;
+    z: number;
+    label: string;
+    kind: 'event' | 'waypoint' | 'chest' | 'orb' | 'boss' | 'herb';
+  } | null;
   biome?: WorldBiome;
   heroX: number;
   heroZ: number;
@@ -142,6 +154,7 @@ export interface HudCallbacks {
   onWorldRespawnBosses?: () => void;
   onWorldCycleGuide?: () => void;
   onWorldToggleAutoNav?: () => void;
+  onWorldToggleNavPolicy?: () => 'fight' | 'evade';
   onCampInteract?: () => void;
   onLeaveCampToEpisode: (stageId: number) => void;
   onCampCultivate: () => { ok: boolean; level: number; reason: string };
@@ -180,11 +193,18 @@ export interface HudCallbacks {
     weaponId?: string | null,
     armorId?: string | null,
     relicId?: string | null,
+    tryOnTrigger?: { category: EquipCategory; itemId: string } | null,
   ) => void;
-  onShopPreviewRotate?: (deltaYaw: number) => void;
+  onShopPreviewRotate?: (deltaYaw: number, deltaPitch?: number, yawVelocity?: number) => void;
   onShopPreviewToggleSpin?: () => boolean;
+  onShopPreviewZoom?: (deltaOrVal: number, absolute?: boolean) => boolean;
+  onShopPreviewToggleZoom?: () => boolean;
   onOpenAncientMap?: () => void;
   onOpenRoster?: (focusCharId?: string) => void;
+  onOpenSettings?: () => void;
+  onCloseSettings?: () => void;
+  onUpdateVisualSetting?: (patch: Partial<VisualSettingsState>) => void;
+  onOpenCraft?: (tab?: 'elixir' | 'forge') => void;
 }
 
 export interface ResultDisplayOptions {
@@ -497,13 +517,26 @@ export class HudController {
   private readonly worldInteractBtn = this.q('#btn-world-interact');
   private readonly worldInteractLabel = this.q('#world-interact-label');
   private readonly worldGuideCard = this.q('#world-guide-card');
+  private readonly worldGuideMiniGoal = this.q('#world-guide-mini-goal');
   private readonly worldGuideGoal = this.q('#world-guide-goal');
   private readonly worldGuideDir = this.q('#world-guide-dir');
   private readonly worldGuideHowto = this.q('#world-guide-howto');
   private readonly worldGuideToggleBtn = this.q('#btn-world-guide-toggle');
   private readonly worldAutoNavBtn = this.q('#btn-world-auto-nav');
+  private readonly worldAutoNavMiniBtn = this.q('#btn-world-auto-nav-mini');
+  private readonly worldNavPolicyBtn = this.q('#btn-world-nav-policy');
   private worldToastTimer: number | null = null;
   private worldGuidePulseTimer: number | null = null;
+  private guideCompactPref = true;
+  private lastWorldAutoNavState = false;
+
+  // Beautification & Gameplay Settings Modal + Mobile MP Drawer
+  private readonly settingsOverlay = this.q('#settings-overlay');
+  private readonly settingsMuteBtn = this.q('#btn-settings-mute');
+  private readonly settingsPillBtns = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('#settings-overlay .settings-pill-btn[data-setting-group]'),
+  );
+  private readonly mpLobbyDrawer = this.q('#mp-lobby-drawer');
 
   private readonly shopPreviewStage = this.q('#shop-preview-stage');
   private readonly shopEquippedSlotsEl = this.q('#shop-equipped-slots');
@@ -514,19 +547,29 @@ export class HudController {
     skin: this.q('#eq-slot-skin'),
   };
   private readonly shopPreviewName = this.q('#shop-preview-name');
+  private readonly shopTryOnTag = this.q('#shop-tryon-tag');
   private readonly shopPreviewSub = this.q('#shop-preview-sub');
   private readonly shopPreviewStats = this.q('#shop-preview-stats');
   private readonly shopPreviewSpinBtn = this.q('#btn-preview-spin');
+  private readonly shopPreviewZoomBtn = this.q('#btn-preview-zoom');
   private readonly shopPreviewResetBtn = this.q('#btn-preview-reset');
   private readonly shopPreviewActionBtn = this.q('#btn-preview-action') as HTMLButtonElement;
-  private shopPreviewSpinOn = true;
+  private shopPreviewSpinOn = false;
+  private shopPreviewZoomed = false;
   private previewSkinId: string | null = null;
   private previewWeaponId: string | null = null;
   private previewArmorId: string | null = null;
   private previewRelicId: string | null = null;
   private previewBagUid: string | null = null;
+  private pendingTryOnTrigger: { category: EquipCategory; itemId: string } | null = null;
   private previewDragPointerId: number | null = null;
+  private previewPointers = new Map<number, { x: number; y: number }>();
   private previewDragLastX = 0;
+  private previewDragLastY = 0;
+  private previewDragLastTime = 0;
+  private previewDragged = false;
+  private previewPinchDist = 0;
+  private previewLastTapTime = 0;
 
   private readonly mapRealmPill = this.q('#map-realm-pill');
   private readonly mapRealmBuff = this.q('#map-realm-buff');
@@ -655,7 +698,78 @@ export class HudController {
       this.worldGuideToggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     });
     this.q('#btn-world-next-goal').addEventListener('click', () => this.callbacks.onWorldCycleGuide?.());
-    this.worldAutoNavBtn.addEventListener('click', () => this.callbacks.onWorldToggleAutoNav?.());
+    this.worldAutoNavBtn.addEventListener('click', () => {
+      this.callbacks.onWorldToggleAutoNav?.();
+    });
+    this.worldAutoNavMiniBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.callbacks.onWorldToggleAutoNav?.();
+    });
+    this.worldNavPolicyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = this.callbacks.onWorldToggleNavPolicy?.();
+      if (next) this.setWorldAutoNavPolicyUi(next);
+    });
+
+    // Alchemy Elixirs & Equipment Synthesis Modal triggers
+    const openCraftHandler = (e?: Event) => {
+      e?.stopPropagation();
+      this.callbacks.onOpenCraft?.();
+    };
+    this.q('#btn-open-craft-title').addEventListener('click', openCraftHandler);
+    this.q('#btn-world-craft').addEventListener('click', openCraftHandler);
+    this.q('#btn-camp-craft').addEventListener('click', openCraftHandler);
+    this.q('#btn-shop-craft').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeShop();
+      this.callbacks.onOpenCraft?.();
+    });
+
+    // Beautification & Gameplay Settings Modal + Collapsible Mobile MP Drawer
+    this.q('#btn-open-settings').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openSettings();
+    });
+    this.q('#btn-pause-settings').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openSettings();
+    });
+    this.q('#btn-close-settings').addEventListener('click', () => this.closeSettings());
+    this.settingsOverlay.addEventListener('click', (e) => {
+      if (e.target === this.settingsOverlay) this.closeSettings();
+    });
+    for (const pill of this.settingsPillBtns) {
+      pill.addEventListener('click', () => {
+        const group = pill.dataset.settingGroup;
+        const val = pill.dataset.settingVal;
+        if (!group || !val) return;
+        if (group === 'quality') {
+          this.callbacks.onUpdateVisualSetting?.({ quality: val as QualityPreset });
+        } else if (group === 'atmosphereTheme') {
+          this.callbacks.onUpdateVisualSetting?.({ atmosphereTheme: val as AtmosphereThemeId });
+        } else if (group === 'bloomMode') {
+          this.callbacks.onUpdateVisualSetting?.({ bloomMode: val as BloomMode });
+        } else if (group === 'autoNavPolicy') {
+          this.callbacks.onUpdateVisualSetting?.({ autoNavPolicy: val === 'evade' ? 'evade' : 'fight' });
+        } else if (group === 'guideCompact') {
+          this.callbacks.onUpdateVisualSetting?.({ guideCompact: val === 'compact' });
+        }
+      });
+    }
+    this.settingsMuteBtn.addEventListener('click', () => {
+      const muted = this.callbacks.onToggleMute();
+      this.syncMuteButtons(muted);
+    });
+    this.q('#btn-open-mp-drawer').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = this.mpLobbyDrawer.classList.toggle('mp-drawer-open');
+      this.titleOverlay.classList.toggle('mp-drawer-open', open);
+    });
+    this.q('#btn-close-mp-drawer').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.mpLobbyDrawer.classList.remove('mp-drawer-open');
+      this.titleOverlay.classList.remove('mp-drawer-open');
+    });
     this.q('#btn-open-dungeon').addEventListener('click', () => this.openTrialsHub());
     this.q('#btn-open-campaign').addEventListener('click', () => this.openCampaignMap());
     this.q('#btn-open-codex').addEventListener('click', () => {
@@ -741,15 +855,24 @@ export class HudController {
 
     this.q('#btn-preview-rot-l').addEventListener('click', (e) => {
       e.stopPropagation();
-      this.callbacks.onShopPreviewRotate?.(-0.55);
+      this.shopPreviewSpinOn = false;
+      this.syncShopPreviewButtonLabels();
+      this.callbacks.onShopPreviewRotate?.(-0.55, 0, -2.0);
     });
     this.q('#btn-preview-rot-r').addEventListener('click', (e) => {
       e.stopPropagation();
-      this.callbacks.onShopPreviewRotate?.(0.55);
+      this.shopPreviewSpinOn = false;
+      this.syncShopPreviewButtonLabels();
+      this.callbacks.onShopPreviewRotate?.(0.55, 0, 2.0);
     });
     this.shopPreviewSpinBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.shopPreviewSpinOn = this.callbacks.onShopPreviewToggleSpin?.() ?? false;
+      this.syncShopPreviewButtonLabels();
+    });
+    this.shopPreviewZoomBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.shopPreviewZoomed = this.callbacks.onShopPreviewToggleZoom?.() ?? !this.shopPreviewZoomed;
       this.syncShopPreviewButtonLabels();
     });
     this.shopPreviewResetBtn.addEventListener('click', (e) => {
@@ -759,6 +882,8 @@ export class HudController {
       this.previewArmorId = null;
       this.previewRelicId = null;
       this.previewBagUid = null;
+      this.shopPreviewZoomed = this.callbacks.onShopPreviewZoom?.(0, true) ?? false;
+      this.syncShopPreviewButtonLabels();
       this.renderShopModal();
     });
     this.shopPreviewActionBtn.addEventListener('click', (e) => {
@@ -772,7 +897,10 @@ export class HudController {
         if (!rolled) return;
         if (equipped[rolled.category] !== rolled.uid) {
           const ok = this.callbacks.onEquipRolled(rolled.uid);
-          if (ok) this.showShopToast(`已穿戴「${rolled.name}」`, true);
+          if (ok) {
+            this.pendingTryOnTrigger = { category: rolled.category, itemId: rolled.uid };
+            this.showShopToast(`已穿戴「${rolled.name}」`, true);
+          }
         }
         this.renderShopModal();
         return;
@@ -790,36 +918,116 @@ export class HudController {
       if (!item) return;
       if (!store.isOwned(item.id)) {
         const res = this.callbacks.onShopBuy(item.id);
+        if (res.ok) this.pendingTryOnTrigger = { category: item.category, itemId: item.id };
         this.showShopToast(res.ok ? `已购入并穿戴「${item.name}」` : res.reason, res.ok);
       } else if (equipped[item.category] !== item.id) {
         const ok = this.callbacks.onShopEquip(item.id);
-        if (ok) this.showShopToast(`已换装「${item.name}」`, true);
+        if (ok) {
+          this.pendingTryOnTrigger = { category: item.category, itemId: item.id };
+          this.showShopToast(`已换装「${item.name}」`, true);
+        }
       }
       this.renderShopModal();
     });
     this.shopPreviewStage.addEventListener('pointerdown', (e) => {
       if ((e.target as HTMLElement).closest('button')) return;
-      this.previewDragPointerId = e.pointerId;
-      this.previewDragLastX = e.clientX;
-      this.shopPreviewStage.setPointerCapture(e.pointerId);
+      this.previewPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.previewPointers.size === 1) {
+        this.previewDragPointerId = e.pointerId;
+        this.previewDragLastX = e.clientX;
+        this.previewDragLastY = e.clientY;
+        this.previewDragLastTime = performance.now();
+        this.previewDragged = false;
+      } else if (this.previewPointers.size === 2) {
+        this.previewDragPointerId = null;
+        this.previewDragged = true;
+        const pts = Array.from(this.previewPointers.values());
+        this.previewPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      }
+      try {
+        this.shopPreviewStage.setPointerCapture(e.pointerId);
+      } catch {
+        // Synthetic pointer events in tests may not support capture
+      }
     });
     this.shopPreviewStage.addEventListener('pointermove', (e) => {
+      if (this.previewPointers.has(e.pointerId)) {
+        this.previewPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+      if (this.previewPointers.size === 2) {
+        const pts = Array.from(this.previewPointers.values());
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const delta = (dist - this.previewPinchDist) * 0.005;
+        this.previewPinchDist = dist;
+        if (Math.abs(delta) > 0.003) {
+          this.shopPreviewZoomed = this.callbacks.onShopPreviewZoom?.(delta, false) ?? this.shopPreviewZoomed;
+          this.syncShopPreviewButtonLabels();
+        }
+        return;
+      }
       if (this.previewDragPointerId !== e.pointerId) return;
+      const now = performance.now();
       const dx = e.clientX - this.previewDragLastX;
+      const dy = e.clientY - this.previewDragLastY;
+      const dtSec = Math.max(0.006, (now - this.previewDragLastTime) / 1000);
       this.previewDragLastX = e.clientX;
-      if (Math.abs(dx) > 0.5) {
-        this.callbacks.onShopPreviewRotate?.(dx * 0.015);
+      this.previewDragLastY = e.clientY;
+      this.previewDragLastTime = now;
+      if (Math.hypot(dx, dy) > 1.5) {
+        this.previewDragged = true;
+      }
+      if (Math.abs(dx) > 0.25 || Math.abs(dy) > 0.25) {
+        const dYaw = dx * 0.015;
+        const dPitch = dy * 0.0075;
+        const vel = clamp(dYaw / dtSec, -9.5, 9.5);
+        this.shopPreviewSpinOn = false;
+        this.syncShopPreviewButtonLabels();
+        this.callbacks.onShopPreviewRotate?.(dYaw, dPitch, vel);
       }
     });
     const endPreviewDrag = (e: PointerEvent) => {
-      if (this.previewDragPointerId !== e.pointerId) return;
-      this.previewDragPointerId = null;
-      if (this.shopPreviewStage.hasPointerCapture(e.pointerId)) {
-        this.shopPreviewStage.releasePointerCapture(e.pointerId);
+      const wasPrimary = this.previewDragPointerId === e.pointerId;
+      this.previewPointers.delete(e.pointerId);
+      if (wasPrimary) {
+        this.previewDragPointerId = null;
+        if (!this.previewDragged && this.previewPointers.size === 0) {
+          const now = performance.now();
+          if (now - this.previewLastTapTime < 320) {
+            this.previewLastTapTime = 0;
+            this.shopPreviewZoomed = this.callbacks.onShopPreviewToggleZoom?.() ?? !this.shopPreviewZoomed;
+            this.syncShopPreviewButtonLabels();
+          } else {
+            this.previewLastTapTime = now;
+          }
+        }
+      }
+      if (this.previewPointers.size === 1) {
+        const [remId, remPt] = Array.from(this.previewPointers.entries())[0];
+        this.previewDragPointerId = remId;
+        this.previewDragLastX = remPt.x;
+        this.previewDragLastY = remPt.y;
+        this.previewDragLastTime = performance.now();
+      }
+      try {
+        if (this.shopPreviewStage.hasPointerCapture(e.pointerId)) {
+          this.shopPreviewStage.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // Ignore capture release errors
       }
     };
     this.shopPreviewStage.addEventListener('pointerup', endPreviewDrag);
     this.shopPreviewStage.addEventListener('pointercancel', endPreviewDrag);
+    this.shopPreviewStage.addEventListener(
+      'wheel',
+      (e: WheelEvent) => {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.24 : -0.24;
+        this.shopPreviewZoomed = this.callbacks.onShopPreviewZoom?.(delta, false) ?? this.shopPreviewZoomed;
+        this.syncShopPreviewButtonLabels();
+      },
+      { passive: false },
+    );
     this.shopBattleBtn.addEventListener('click', () => {
       this.closeShop();
       if (this.currentScreenMode === 'paused') {
@@ -904,8 +1112,7 @@ export class HudController {
 
     this.muteBtn.addEventListener('click', () => {
       const muted = this.callbacks.onToggleMute();
-      this.muteBtn.textContent = muted ? '静音' : '音律';
-      this.muteBtn.classList.toggle('active-mode', muted);
+      this.syncMuteButtons(muted);
     });
 
     for (const btn of Array.from(document.querySelectorAll<HTMLButtonElement>('.util-btn'))) {
@@ -914,38 +1121,40 @@ export class HudController {
 
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.isComposing || e.repeat) return;
+      if (e.code === 'Escape' && this.settingsOverlay.classList.contains('visible')) {
+        e.preventDefault();
+        this.closeSettings();
+        return;
+      }
+      const anyModalOpen =
+        this.campaignOverlay.classList.contains('visible') ||
+        this.shopOverlay.classList.contains('visible') ||
+        this.dungeonOverlay.classList.contains('visible') ||
+        this.settingsOverlay.classList.contains('visible');
       if (
         this.currentScreenMode === 'dialogue' &&
-        !this.campaignOverlay.classList.contains('visible') &&
-        !this.shopOverlay.classList.contains('visible') &&
-        !this.dungeonOverlay.classList.contains('visible') &&
+        !anyModalOpen &&
         (e.code === 'Enter' || e.code === 'Space')
       ) {
         e.preventDefault();
         this.callbacks.onConfirmDialogue(this.selectedDialogueChoiceId);
       } else if (
         this.currentScreenMode === 'camp' &&
-        !this.campaignOverlay.classList.contains('visible') &&
-        !this.shopOverlay.classList.contains('visible') &&
-        !this.dungeonOverlay.classList.contains('visible') &&
+        !anyModalOpen &&
         e.code === 'KeyG'
       ) {
         e.preventDefault();
         this.callbacks.onCampInteract?.();
       } else if (
         this.currentScreenMode === 'world' &&
-        !this.campaignOverlay.classList.contains('visible') &&
-        !this.shopOverlay.classList.contains('visible') &&
-        !this.dungeonOverlay.classList.contains('visible') &&
+        !anyModalOpen &&
         e.code === 'KeyG'
       ) {
         e.preventDefault();
         this.callbacks.onWorldInteract?.();
       } else if (
         (this.currentScreenMode === 'playing' || this.currentScreenMode === 'camp' || this.currentScreenMode === 'world') &&
-        !this.campaignOverlay.classList.contains('visible') &&
-        !this.shopOverlay.classList.contains('visible') &&
-        !this.dungeonOverlay.classList.contains('visible')
+        !anyModalOpen
       ) {
         if (e.code === 'KeyV') {
           e.preventDefault();
@@ -1067,7 +1276,16 @@ export class HudController {
     if (!store) return;
 
     const equipped = store.getEquipped();
-    const stats = computeHeroLoadoutStats(equipped, store.data.upgrades, store.getInventory());
+    const baseStats = computeHeroLoadoutStats(equipped, store.data.upgrades, store.getInventory());
+    const elixir = store.getElixirBonus();
+    const stats = {
+      ...baseStats,
+      maxHpBonus: baseStats.maxHpBonus + elixir.hpBonus,
+      dmgMult: baseStats.dmgMult * (1 + elixir.atkPct),
+      dmgReduce: clamp(baseStats.dmgReduce + elixir.dmgReduce, 0, 0.72),
+      critRate: baseStats.critRate + elixir.critRate,
+      critMult: baseStats.critMult + elixir.critDmg,
+    };
     const realm = getSwordRealm(store.getTotalStars());
     const power = computeCombatPower(realm.hpBonus, realm.dmgMult, stats);
     const pity = store.getPityCount();
@@ -1360,9 +1578,67 @@ export class HudController {
     }
   }
 
+  openSettings(): void {
+    this.settingsOverlay.classList.add('visible');
+    this.callbacks.onOpenSettings?.();
+  }
+
+  closeSettings(): void {
+    this.settingsOverlay.classList.remove('visible');
+    this.callbacks.onCloseSettings?.();
+  }
+
+  isSettingsOpen(): boolean {
+    return this.settingsOverlay.classList.contains('visible');
+  }
+
+  syncMuteButtons(muted: boolean): void {
+    this.muteBtn.textContent = muted ? '静音' : '音律';
+    this.muteBtn.classList.toggle('active-mode', muted);
+    this.settingsMuteBtn.textContent = muted ? '已静音' : '音律开启';
+    this.settingsMuteBtn.classList.toggle('active', !muted);
+  }
+
+  syncVisualSettings(settings: VisualSettingsState): void {
+    this.guideCompactPref = settings.guideCompact;
+    for (const pill of this.settingsPillBtns) {
+      const group = pill.dataset.settingGroup;
+      const val = pill.dataset.settingVal;
+      let isActive = false;
+      if (group === 'quality') isActive = val === settings.quality;
+      else if (group === 'atmosphereTheme') isActive = val === settings.atmosphereTheme;
+      else if (group === 'bloomMode') isActive = val === settings.bloomMode;
+      else if (group === 'autoNavPolicy') isActive = val === settings.autoNavPolicy;
+      else if (group === 'guideCompact') isActive = val === (settings.guideCompact ? 'compact' : 'expanded');
+      pill.classList.toggle('active', isActive);
+    }
+    this.syncMuteButtons(settings.muted);
+    this.setWorldAutoNavPolicyUi(settings.autoNavPolicy);
+    if (this.currentScreenMode === 'world') {
+      this.setWorldGuideCollapsed(settings.guideCompact);
+    }
+  }
+
+  setWorldGuideCollapsed(collapsed: boolean): void {
+    this.worldGuideCard.classList.toggle('collapsed', collapsed);
+    this.worldGuideToggleBtn.textContent = collapsed ? '▸' : '▾';
+    this.worldGuideToggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+
+  setWorldAutoNavPolicyUi(policy: 'fight' | 'evade'): void {
+    const evade = policy === 'evade';
+    this.worldNavPolicyBtn.textContent = evade ? '绕行' : '迎战';
+    this.worldNavPolicyBtn.classList.toggle('evade', evade);
+    this.worldNavPolicyBtn.title = evade
+      ? '当前策略：智能绕行·御剑避战（点击切换）'
+      : '当前策略：自动迎战·清敌续行（点击切换）';
+  }
+
   openShop(cat?: EquipCategory | 'bag'): void {
     if (cat) this.activeShopCategory = cat;
-    this.shopPreviewSpinOn = true;
+    this.shopPreviewSpinOn = false;
+    this.shopPreviewZoomed = false;
+    this.pendingTryOnTrigger = null;
     this.shopOverlay.classList.add('visible');
     this.appRoot.classList.add('shop-preview-open');
     this.syncShopPreviewButtonLabels();
@@ -1375,6 +1651,11 @@ export class HudController {
     this.previewArmorId = null;
     this.previewRelicId = null;
     this.previewBagUid = null;
+    this.pendingTryOnTrigger = null;
+    this.shopPreviewSpinOn = false;
+    this.shopPreviewZoomed = false;
+    this.previewPointers.clear();
+    this.previewDragPointerId = null;
     this.shopOverlay.classList.remove('visible');
     this.shopOverlay.classList.remove('preview-active');
     this.appRoot.classList.remove('shop-preview-open');
@@ -1382,6 +1663,30 @@ export class HudController {
     if (this.currentScreenMode === 'camp') {
       this.renderCampPanel();
     }
+  }
+
+  setShopTryOnEffectTag(text: string, accentHex?: string): void {
+    this.shopTryOnTag.textContent = text;
+    if (accentHex) {
+      this.shopTryOnTag.style.borderColor = accentHex;
+      this.shopTryOnTag.style.color = accentHex;
+    } else {
+      this.shopTryOnTag.style.borderColor = '';
+      this.shopTryOnTag.style.color = '';
+    }
+    this.shopTryOnTag.classList.remove('tryon-flash');
+    void this.shopTryOnTag.offsetWidth;
+    this.shopTryOnTag.classList.add('tryon-flash');
+  }
+
+  setShopPreviewZoomState(zoomed: boolean): void {
+    this.shopPreviewZoomed = zoomed;
+    this.syncShopPreviewButtonLabels();
+  }
+
+  setShopPreviewSpinState(spinning: boolean): void {
+    this.shopPreviewSpinOn = spinning;
+    this.syncShopPreviewButtonLabels();
   }
 
   private syncShopPreviewButtonLabels(): void {
@@ -1393,6 +1698,14 @@ export class HudController {
       : this.shopPreviewSpinOn
         ? '自动旋转: 开'
         : '自动旋转: 关';
+    this.shopPreviewZoomBtn.textContent = mob
+      ? this.shopPreviewZoomed
+        ? '全身'
+        : '看脸'
+      : this.shopPreviewZoomed
+        ? '全景全身'
+        : '近景看脸';
+    this.shopPreviewZoomBtn.classList.toggle('active', this.shopPreviewZoomed);
     this.shopPreviewResetBtn.textContent = mob ? '恢复' : '恢复已穿';
   }
 
@@ -1667,7 +1980,16 @@ export class HudController {
     const jade = store.getJade();
     const equipped = store.getEquipped();
     const inventory = store.getInventory();
-    const stats = computeHeroLoadoutStats(equipped, store.data.upgrades, inventory);
+    const baseStats = computeHeroLoadoutStats(equipped, store.data.upgrades, inventory);
+    const elixir = store.getElixirBonus();
+    const stats = {
+      ...baseStats,
+      maxHpBonus: baseStats.maxHpBonus + elixir.hpBonus,
+      dmgMult: baseStats.dmgMult * (1 + elixir.atkPct),
+      dmgReduce: clamp(baseStats.dmgReduce + elixir.dmgReduce, 0, 0.72),
+      critRate: baseStats.critRate + elixir.critRate,
+      critMult: baseStats.critMult + elixir.critDmg,
+    };
     const realm = getSwordRealm(store.getTotalStars());
     const power = computeCombatPower(realm.hpBonus, realm.dmgMult, stats);
 
@@ -1679,6 +2001,7 @@ export class HudController {
     const critPct = Math.round(stats.critRate * 100);
     const reducePct = Math.round(stats.dmgReduce * 100);
     const extras: string[] = [];
+    if (elixir.totalTaken > 0) extras.push(`丹药×${elixir.totalTaken}`);
     if (stats.lifesteal > 0) extras.push(`吸血${Math.round(stats.lifesteal * 100)}%`);
     if (stats.parryReflectBonus > 0) extras.push(`弹反反伤+${Math.round(stats.parryReflectBonus * 100)}%`);
     if (stats.killHealPct > 0) extras.push(`斩敌回血${Math.round(stats.killHealPct * 100)}%`);
@@ -1829,8 +2152,11 @@ export class HudController {
           }
         }
       }
-      this.callbacks.onShopPreview?.(true, eff.skinId, eff.weaponId, eff.armorId, eff.relicId);
+      const tryOnTrigger = this.pendingTryOnTrigger;
+      this.pendingTryOnTrigger = null;
+      this.callbacks.onShopPreview?.(true, eff.skinId, eff.weaponId, eff.armorId, eff.relicId, tryOnTrigger);
     } else {
+      this.pendingTryOnTrigger = null;
       this.callbacks.onShopPreview?.(false);
     }
 
@@ -1915,17 +2241,20 @@ export class HudController {
           card.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('button[data-bag-act]:not([data-bag-act="preview"])')) return;
             this.previewBagUid = item.uid;
+            this.pendingTryOnTrigger = { category: item.category, itemId: item.uid };
             this.renderShopModal();
           });
           card.querySelector('[data-bag-act="preview"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.previewBagUid = item.uid;
+            this.pendingTryOnTrigger = { category: item.category, itemId: item.uid };
             this.renderShopModal();
           });
           card.querySelector('[data-bag-act="equip"]')?.addEventListener('click', () => {
             const ok = this.callbacks.onEquipRolled(item.uid);
             if (ok) {
               this.previewBagUid = item.uid;
+              this.pendingTryOnTrigger = { category: item.category, itemId: item.uid };
               this.showShopToast(`已穿戴「${item.name}」`, true);
             }
             this.renderShopModal();
@@ -2025,6 +2354,7 @@ export class HudController {
         else if (item.category === 'weapon') this.previewWeaponId = id;
         else if (item.category === 'armor') this.previewArmorId = id;
         else if (item.category === 'relic') this.previewRelicId = id;
+        this.pendingTryOnTrigger = { category: item.category, itemId: id };
       };
 
       card.addEventListener('click', (e) => {
@@ -2297,12 +2627,20 @@ export class HudController {
     if (mode !== 'title') {
       this.campaignOverlay.classList.remove('visible');
       this.codexOverlay.classList.remove('visible');
+      this.mpLobbyDrawer.classList.remove('mp-drawer-open');
+      this.titleOverlay.classList.remove('mp-drawer-open');
     }
     if (mode === 'playing' || mode === 'cutscene' || mode === 'dialogue') {
       if (this.shopOverlay.classList.contains('visible')) {
         this.closeShop();
       }
+      if (this.settingsOverlay.classList.contains('visible')) {
+        this.closeSettings();
+      }
       this.dungeonOverlay.classList.remove('visible');
+    }
+    if (mode === 'world') {
+      this.setWorldGuideCollapsed(this.guideCompactPref);
     }
     const playableHud = mode === 'playing' || mode === 'camp' || mode === 'world';
     this.hudRoot.classList.toggle('visible', playableHud);
@@ -2904,19 +3242,33 @@ export class HudController {
     this.worldProgressPill.textContent = `锚点 ${waypoints}/${WORLD_WAYPOINTS.length} · 宝箱 ${chests}/${WORLD_CHESTS.length} · 灵瞳 ${orbs}/${WORLD_SPIRIT_ORBS.length} · 首领 ${bosses}/${WORLD_BOSS_SPAWNS.length}`;
   }
 
-  setWorldGuide(title: string, dirText: string, howto: string, autoNavActive: boolean, resumeLabel?: string): void {
+  setWorldGuide(
+    title: string,
+    dirText: string,
+    howto: string,
+    autoNavActive: boolean,
+    resumeLabel?: string,
+    miniGoalText?: string,
+  ): void {
     this.worldGuideGoal.textContent = title;
     this.worldGuideDir.textContent = dirText;
     this.worldGuideHowto.textContent = howto;
+    this.worldGuideMiniGoal.textContent = miniGoalText ?? title.replace(/^[^·]+·\s*/, '');
     this.worldAutoNavBtn.classList.toggle('active', autoNavActive);
     this.worldAutoNavBtn.classList.toggle('resume-pulse', !autoNavActive && Boolean(resumeLabel));
     this.worldAutoNavBtn.textContent = autoNavActive ? '停止寻路' : (resumeLabel ?? '自动寻路');
+    this.worldAutoNavMiniBtn.classList.toggle('active', autoNavActive);
+    this.worldAutoNavMiniBtn.textContent = autoNavActive ? '停止' : resumeLabel ? '续行' : '寻路';
+    if (autoNavActive && !this.lastWorldAutoNavState) {
+      this.setWorldGuideCollapsed(true);
+    }
+    this.lastWorldAutoNavState = autoNavActive;
   }
 
   flashWorldGuideNextStep(summaryText: string): void {
-    this.worldGuideCard.classList.remove('collapsed');
-    this.worldGuideToggleBtn.textContent = '▾';
-    this.worldGuideToggleBtn.setAttribute('aria-expanded', 'true');
+    if (!this.guideCompactPref && !this.isMobileUi()) {
+      this.setWorldGuideCollapsed(false);
+    }
     this.worldGuideHowto.textContent = summaryText;
     this.worldGuideCard.classList.add('next-pulse');
     if (this.worldGuidePulseTimer !== null) window.clearTimeout(this.worldGuidePulseTimer);
@@ -3046,6 +3398,17 @@ export class HudController {
       ctx.lineTo(ox2, oy2 + 3);
       ctx.lineTo(ox2 - 3, oy2);
       ctx.closePath();
+      ctx.fill();
+    }
+
+    // Harvestable Herbs / Ores
+    for (const herb of tactical.worldHerbs ?? []) {
+      if (!herb.ready) continue;
+      const hx2 = toX(herb.x);
+      const hy2 = toY(herb.z);
+      ctx.fillStyle = herb.accentHex;
+      ctx.beginPath();
+      ctx.arc(hx2, hy2, 2.2, 0, Math.PI * 2);
       ctx.fill();
     }
 

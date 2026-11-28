@@ -48,14 +48,25 @@ body,
   justify-content: center;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  visibility: hidden;
+  transition: opacity 0.35s ease, visibility 0.35s ease;
   z-index: 40;
   background: radial-gradient(circle at 50% 42%, rgba(9, 18, 30, 0.12) 0%, rgba(6, 11, 18, 0.68) 100%);
 }
 
 .overlay.visible {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
+}
+
+.overlay:not(.visible) {
+  visibility: hidden;
+}
+
+.overlay:not(.visible),
+.overlay:not(.visible) * {
+  pointer-events: none !important;
 }
 
 /* Title Overlay: framed on right side on desktop so Li Xiaoyao & archway shine on left */
@@ -5918,8 +5929,12 @@ body,
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
-  pointer-events: auto;
+  pointer-events: none;
   z-index: 2;
+}
+
+#shop-overlay.visible .shop-equipped-slots {
+  pointer-events: auto;
 }
 
 .eq-slot-badge {
@@ -6027,8 +6042,12 @@ body,
   flex-direction: column;
   gap: 4px;
   text-align: center;
-  pointer-events: auto;
+  pointer-events: none;
   z-index: 2;
+}
+
+#shop-overlay.visible .shop-preview-hud {
+  pointer-events: auto;
 }
 
 .preview-name {
@@ -7492,5 +7511,1226 @@ body,
   .camp-top-actions .util-btn {
     padding: 3px 7px;
     font-size: 10.5px;
+  }
+}
+
+
+/* ==================== v1.66 Beautified Lobby, Settings Modal, 360° Shop Zoom & Non-Obstructive World Guide ==================== */
+
+/* --- Base Title Lobby Enhancements (Desktop & Shared) --- */
+.title-top-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.title-top-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.title-top-bar .title-kicker {
+  margin-bottom: 0;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.title-top-utils {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.title-util-pill,
+#btn-open-settings.title-util-pill,
+#btn-open-mp-drawer.title-util-pill,
+#btn-open-roster.title-util-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 10px;
+  min-height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(223, 192, 117, 0.45);
+  background: linear-gradient(180deg, rgba(16, 28, 46, 0.84), rgba(8, 15, 26, 0.92));
+  color: #f6e7c4;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 240, 198, 0.18);
+  transition: transform 0.14s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.title-util-pill:hover,
+#btn-open-settings.title-util-pill:hover,
+#btn-open-mp-drawer.title-util-pill:hover,
+#btn-open-roster.title-util-pill:hover {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 14px rgba(223, 192, 117, 0.34);
+  transform: translateY(-1px);
+}
+
+.title-util-pill:active,
+#btn-open-settings.title-util-pill:active,
+#btn-open-mp-drawer.title-util-pill:active,
+#btn-open-roster.title-util-pill:active {
+  transform: scale(0.96);
+}
+
+#btn-open-mp-drawer.title-util-pill.mp-pill {
+  display: none;
+  border-color: rgba(76, 217, 208, 0.52);
+  color: #b4fff6;
+  background: linear-gradient(180deg, rgba(16, 54, 66, 0.84), rgba(8, 28, 38, 0.92));
+}
+
+#btn-open-roster.title-util-pill.roster-pill {
+  border-color: rgba(164, 148, 255, 0.54);
+  color: #ebe4ff;
+  background: linear-gradient(180deg, rgba(50, 38, 98, 0.84), rgba(22, 16, 48, 0.92));
+}
+
+.title-hero-window {
+  display: none;
+  pointer-events: none;
+}
+
+.title-bottom-dock {
+  width: 100%;
+}
+
+/* Desktop Title CTA Grid: Row 1 Primary + Open World, Row 2 5 Crisp Pills */
+.title-cta-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+#btn-start {
+  grid-column: 1 / 4;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+#btn-open-world {
+  grid-column: 4 / 6;
+  min-height: 44px;
+  padding: 10px 10px;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.title-quick-pill,
+#btn-open-shop.title-quick-pill,
+#btn-open-craft-title.title-quick-pill,
+#btn-open-camp.title-quick-pill,
+#btn-open-dungeon.title-quick-pill,
+#btn-open-campaign.title-quick-pill {
+  grid-column: span 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 6px 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.title-quick-pill .pill-ico {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.95;
+}
+
+.title-quick-pill .pill-txt {
+  font-size: 11.5px;
+  line-height: 1.15;
+  font-weight: 700;
+}
+
+/* Alchemy / Crafting Button Accent */
+.xianxia-btn.craft-btn {
+  border-color: rgba(88, 224, 178, 0.62);
+  color: #dcfff2;
+  background: linear-gradient(180deg, rgba(22, 86, 72, 0.84), rgba(10, 42, 38, 0.94));
+  box-shadow: 0 4px 16px rgba(64, 212, 166, 0.24), inset 0 1px 0 rgba(188, 255, 232, 0.28);
+}
+
+.xianxia-btn.craft-btn:hover {
+  border-color: #84ffda;
+  box-shadow: 0 0 18px rgba(88, 224, 178, 0.36);
+}
+
+.xianxia-btn.settings-btn {
+  border-color: rgba(132, 198, 245, 0.56);
+  color: #e4f4ff;
+  background: linear-gradient(180deg, rgba(26, 56, 84, 0.84), rgba(12, 26, 44, 0.94));
+}
+
+.craft-util-btn {
+  border-color: rgba(88, 224, 178, 0.58) !important;
+  color: #c8ffea !important;
+  background: linear-gradient(180deg, rgba(20, 76, 66, 0.86), rgba(10, 36, 34, 0.94)) !important;
+}
+
+.mp-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mp-drawer-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(223, 192, 117, 0.45);
+  background: rgba(16, 28, 44, 0.88);
+  color: #f7e4b6;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* --- Beautification & Gameplay Settings Modal (#settings-overlay) --- */
+#settings-overlay {
+  z-index: 76;
+  background: rgba(4, 9, 18, 0.78);
+  backdrop-filter: blur(10px);
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+}
+
+.settings-modal {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  padding: 16px 18px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(11, 21, 36, 0.96) 0%, rgba(6, 12, 22, 0.98) 100%);
+  border: 1px solid rgba(223, 192, 117, 0.52);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.84), inset 0 1px 0 rgba(255, 242, 204, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.settings-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(223, 192, 117, 0.22);
+}
+
+.settings-head-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-sub-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #9bf7ee;
+  background: rgba(20, 74, 80, 0.48);
+  border: 1px solid rgba(76, 217, 208, 0.42);
+  white-space: nowrap;
+}
+
+#btn-close-settings.settings-close-btn {
+  min-width: 52px;
+  min-height: 44px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding-right: 2px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(14, 25, 42, 0.76);
+  border: 1px solid rgba(223, 192, 117, 0.22);
+}
+
+.settings-group-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-group-title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 700;
+  color: #fae8be;
+  letter-spacing: 0.06em;
+}
+
+.settings-group-hint {
+  font-size: 11px;
+  color: #96b0c6;
+}
+
+.settings-pill-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-pill-grid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-pill-grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(190, 214, 236, 0.2);
+  background: rgba(10, 19, 32, 0.85);
+  color: #c4d7e8;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-pill-btn:hover {
+  border-color: rgba(223, 192, 117, 0.56);
+  color: #fff6db;
+}
+
+.settings-pill-btn.active {
+  border-color: var(--gold-bright);
+  background: linear-gradient(180deg, rgba(84, 62, 24, 0.88), rgba(40, 28, 12, 0.96));
+  color: #fff5d4;
+  box-shadow: 0 0 14px rgba(223, 192, 117, 0.3), inset 0 1px 0 rgba(255, 244, 208, 0.28);
+}
+
+.theme-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.swatch-moonlit { background: linear-gradient(135deg, #4cd9d0, #234972); }
+.swatch-frost { background: linear-gradient(135deg, #d6f1ff, #5486ad); }
+.swatch-dawn { background: linear-gradient(135deg, #ffca72, #b85b28); }
+.swatch-astral { background: linear-gradient(135deg, #c696ff, #4c2d86); }
+
+.settings-audio-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-audio-row .settings-group-label {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.settings-audio-btn {
+  min-width: 108px;
+  flex-shrink: 0;
+}
+
+/* --- Shop 360° Controls Enhancement (#shop-tryon-tag, #btn-preview-zoom, #btn-shop-craft) --- */
+.shop-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.preview-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+
+.preview-tryon-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #bffdf8;
+  background: linear-gradient(90deg, rgba(20, 78, 92, 0.72), rgba(44, 52, 108, 0.72));
+  border: 1px solid rgba(112, 232, 240, 0.56);
+  box-shadow: 0 0 12px rgba(76, 217, 208, 0.28);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-zoom-btn {
+  border-color: rgba(132, 218, 255, 0.56) !important;
+  color: #ccf2ff !important;
+  background: linear-gradient(180deg, rgba(22, 62, 92, 0.86), rgba(10, 30, 50, 0.94)) !important;
+}
+
+.preview-zoom-btn.active {
+  border-color: var(--gold-bright) !important;
+  color: #fff6d2 !important;
+  background: linear-gradient(180deg, rgba(112, 78, 24, 0.92), rgba(56, 36, 10, 0.96)) !important;
+  box-shadow: 0 0 12px rgba(242, 204, 106, 0.42);
+}
+
+/* --- Non-Obstructive #world-guide-card Inline Controls --- */
+.world-guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+}
+
+.world-guide-mini-goal {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffe8a6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.world-guide-mini-goal::before {
+  content: '✦ ';
+  color: var(--jade);
+}
+
+.world-guide-card.collapsed .world-guide-badge {
+  display: none;
+}
+
+.world-guide-card.collapsed .world-guide-mini-goal {
+  display: inline-block;
+}
+
+.world-mini-nav-btn,
+.world-policy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.world-mini-nav-btn {
+  display: none;
+  border: 1px solid rgba(76, 217, 208, 0.56);
+  background: rgba(18, 72, 82, 0.86);
+  color: #c8fff8;
+}
+
+.world-mini-nav-btn.active {
+  border-color: #ffe278;
+  background: rgba(132, 84, 22, 0.92);
+  color: #fff6cf;
+}
+
+.world-guide-card.collapsed .world-mini-nav-btn {
+  display: inline-flex;
+}
+
+.world-policy-btn {
+  border: 1px solid rgba(235, 178, 92, 0.56);
+  background: rgba(88, 48, 18, 0.82);
+  color: #ffe2b0;
+}
+
+.world-policy-btn.evade {
+  border-color: rgba(128, 208, 255, 0.62);
+  background: rgba(20, 56, 88, 0.86);
+  color: #c8ecff;
+}
+
+.world-guide-card.collapsed {
+  width: auto;
+  max-width: 268px;
+  padding: 4px 7px;
+  border-radius: 999px;
+}
+
+.world-guide-card.collapsed #btn-world-guide-toggle {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* --- Mobile Common Overrides (Portrait & Landscape <= 960px or <= 520px height) --- */
+@media (hover: none), (max-width: 960px), (max-height: 520px) {
+  .title-kicker-en,
+  #title-tagline,
+  .title-tagline,
+  #title-overlay .title-controls-grid,
+  #app.mobile-mode #title-overlay .title-controls-grid.mobile-only,
+  #title-overlay .title-combo-codex,
+  #title-combo-codex {
+    display: none !important;
+  }
+
+  .title-util-pill.mp-pill,
+  #btn-open-mp-drawer.title-util-pill.mp-pill {
+    display: inline-flex;
+  }
+
+  .mp-drawer-close {
+    display: inline-flex;
+  }
+
+  #title-overlay .mp-lobby {
+    display: none;
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    max-width: 440px;
+    margin: 0 auto;
+    z-index: 68;
+    background: linear-gradient(180deg, rgba(10, 20, 34, 0.96), rgba(6, 12, 22, 0.98));
+    border: 1px solid rgba(76, 217, 208, 0.56);
+    border-radius: 14px;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.88);
+    backdrop-filter: blur(14px);
+    pointer-events: none;
+  }
+
+  #title-overlay.visible .mp-lobby.mp-drawer-open,
+  #title-overlay.visible.mp-drawer-open .mp-lobby {
+    display: block;
+    pointer-events: auto;
+  }
+}
+
+/* --- Mobile Portrait (390x844 and narrow vertical screens) --- */
+@media (max-width: 820px) and (orientation: portrait), (max-width: 560px) {
+  /* Airy 3-Zone Mobile Title Lobby: Top Calligraphy Header + Open Middle Window + Bottom Glass Dock */
+  #title-overlay,
+  #app.mobile-mode #title-overlay {
+    justify-content: stretch;
+    align-items: stretch;
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    background: linear-gradient(
+      180deg,
+      rgba(5, 10, 18, 0.72) 0%,
+      rgba(5, 10, 18, 0.24) 17%,
+      rgba(5, 10, 18, 0.0) 28%,
+      rgba(5, 10, 18, 0.0) 60%,
+      rgba(5, 10, 18, 0.62) 76%,
+      rgba(5, 10, 18, 0.92) 100%
+    );
+  }
+
+  #title-overlay .title-card,
+  #app.mobile-mode #title-overlay .title-card {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+
+  #title-overlay .title-top-header {
+    gap: 5px;
+  }
+
+  #title-overlay.visible .title-top-header {
+    pointer-events: auto;
+  }
+
+  #title-overlay .title-top-bar {
+    margin-bottom: 2px;
+  }
+
+  #title-overlay .title-util-pill,
+  #title-overlay #btn-open-settings.title-util-pill,
+  #title-overlay #btn-open-mp-drawer.title-util-pill,
+  #title-overlay #btn-open-roster.title-util-pill {
+    padding: 4px 8px;
+    min-height: 29px;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+
+  #title-overlay .title-heading-wrap {
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  #title-overlay .game-title {
+    font-size: 27px;
+    letter-spacing: 0.09em;
+    filter: drop-shadow(0 3px 14px rgba(0, 0, 0, 0.86));
+  }
+
+  #title-overlay .chop-seal {
+    width: 24px;
+    height: 36px;
+    font-size: 12px;
+    border-width: 1.5px;
+  }
+
+  #title-overlay .campaign-strip {
+    width: 100%;
+    margin-bottom: 0;
+    padding: 6px 10px;
+    gap: 3px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(10, 20, 34, 0.72), rgba(6, 13, 24, 0.78));
+    border-color: rgba(223, 192, 117, 0.34);
+    backdrop-filter: blur(8px);
+  }
+
+  #title-overlay .campaign-strip-row {
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+
+  #title-overlay .realm-badge,
+  #title-overlay .jade-badge {
+    font-size: 10.5px;
+    padding: 1px 7px;
+    white-space: nowrap;
+  }
+
+  #title-overlay .stars-badge,
+  #title-overlay .clear-badge {
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  #title-overlay .campaign-selected-row {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  #title-overlay .selected-stage-label {
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #title-overlay .selected-stage-meta {
+    font-size: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Completely Open Transparent Middle Window (~45%+) showing Li Xiaoyao */
+  #title-overlay .title-hero-window {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 40dvh;
+    pointer-events: none;
+  }
+
+  /* Bottom Frosted Glass Lobby Dock */
+  #title-overlay .title-bottom-dock {
+    padding: 11px 10px 10px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(10, 19, 34, 0.76) 0%, rgba(6, 12, 22, 0.92) 100%);
+    border: 1px solid rgba(223, 192, 117, 0.46);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 242, 204, 0.22);
+    backdrop-filter: blur(14px);
+  }
+
+  #title-overlay.visible .title-bottom-dock {
+    pointer-events: auto;
+  }
+
+  #title-overlay .title-cta-row {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #title-overlay #btn-start {
+    grid-column: 1 / -1;
+    min-height: 44px;
+    padding: 9px 12px;
+    font-size: 15px;
+    letter-spacing: 0.12em;
+  }
+
+  #title-overlay #btn-open-world {
+    grid-column: 1 / -1;
+    min-height: 38px;
+    padding: 7px 10px;
+    font-size: 13.5px;
+    letter-spacing: 0.08em;
+  }
+
+  #title-overlay .title-quick-pill,
+  #title-overlay #btn-open-shop.title-quick-pill,
+  #title-overlay #btn-open-craft-title.title-quick-pill,
+  #title-overlay #btn-open-camp.title-quick-pill,
+  #title-overlay #btn-open-dungeon.title-quick-pill,
+  #title-overlay #btn-open-campaign.title-quick-pill {
+    grid-column: span 1;
+    min-height: 48px;
+    padding: 5px 2px;
+    gap: 2px;
+    letter-spacing: 0;
+  }
+
+  #title-overlay .title-quick-pill .pill-ico {
+    font-size: 13px;
+  }
+
+  #title-overlay .title-quick-pill .pill-txt {
+    font-size: 10.5px;
+  }
+
+  /* Shop Portrait 360° Controls: 6-col clean grid with #btn-preview-zoom & #shop-tryon-tag (Zero Overflow!) */
+  #shop-overlay.preview-active .preview-title-row {
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  #shop-overlay.preview-active .preview-tryon-tag {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  #shop-overlay.preview-active .preview-actions {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 3px;
+    width: 100%;
+  }
+
+  #shop-overlay.preview-active #btn-preview-rot-l {
+    grid-column: span 1;
+  }
+
+  #shop-overlay.preview-active #btn-preview-spin {
+    grid-column: span 4;
+  }
+
+  #shop-overlay.preview-active #btn-preview-rot-r {
+    grid-column: span 1;
+  }
+
+  #shop-overlay.preview-active #btn-preview-zoom,
+  #shop-overlay.preview-active #btn-preview-reset {
+    grid-column: span 3;
+  }
+
+  #shop-overlay.preview-active .preview-actions .preview-buy-btn {
+    grid-column: 1 / -1;
+  }
+
+  #shop-overlay.preview-active .shop-head-actions {
+    gap: 4px;
+  }
+
+  #shop-overlay.preview-active #btn-shop-craft {
+    min-height: 36px;
+    padding: 4px 6px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  #shop-overlay.preview-active #btn-close-shop {
+    min-width: 38px;
+    min-height: 36px;
+    padding: 4px 6px;
+  }
+
+  /* Pause Modal 8-Button Symmetrical Mobile Portrait Grid */
+  .pause-modal-card #btn-pause-title {
+    grid-column: 1 / -1;
+  }
+
+  /* Settings Modal Portrait */
+  .settings-modal {
+    padding: 13px 12px 13px;
+    gap: 9px;
+  }
+
+  .settings-group {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .settings-pill-btn {
+    min-height: 36px;
+    padding: 6px 6px;
+    font-size: 11.5px;
+  }
+
+  /* Open-World Top Bar & Slim Edge-Docked #world-guide-card on Portrait (390x844) */
+  .world-top-bar {
+    top: max(6px, env(safe-area-inset-top));
+    left: 6px;
+    right: 6px;
+    padding: 4px 6px;
+    gap: 3px;
+  }
+
+  .world-top-actions .util-btn {
+    padding: 3px 4px;
+    font-size: 9.5px;
+    min-height: 25px;
+  }
+
+  #app.world-mode .top-left-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 58px);
+  }
+
+  /* Dock #world-guide-card flush below .world-top-bar at top-right (height <= 30px when collapsed, clear of #hero-cluster & center arena!) */
+  .world-guide-card,
+  #app.world-mode .world-guide-card {
+    top: calc(max(6px, env(safe-area-inset-top)) + 58px);
+    right: 6px;
+    left: auto;
+    width: 196px;
+    max-width: 206px;
+    padding: 6px 8px;
+    z-index: 28;
+  }
+
+  .world-guide-card.collapsed,
+  #app.world-mode .world-guide-card.collapsed {
+    width: auto;
+    max-width: 206px;
+    padding: 3px 6px;
+    border-radius: 999px;
+  }
+
+  .world-guide-mini-goal {
+    max-width: 82px;
+    font-size: 10px;
+  }
+
+  .world-mini-nav-btn,
+  .world-policy-btn {
+    height: 22px;
+    padding: 0 5px;
+    font-size: 9.5px;
+  }
+
+  /* Shift #app.world-mode .top-right-stack (#btn-mute) cleanly below the collapsed guide pill */
+  #app.world-mode .top-right-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 94px);
+    right: 6px;
+    gap: 4px;
+  }
+
+  /* Keep #mobile-notify-pill anchored cleanly near top safe-area (never blocking center hero forward path!) */
+  #mobile-notify-pill,
+  #app.mobile-mode #mobile-notify-pill {
+    top: calc(max(8px, env(safe-area-inset-top)) + 132px);
+    left: 50%;
+    max-width: calc(100vw - 24px);
+    font-size: 11px;
+    padding: 4px 11px;
+  }
+
+  #app.world-mode #mobile-notify-pill {
+    top: calc(max(6px, env(safe-area-inset-top)) + 132px);
+    left: calc(50% + 44px);
+    max-width: calc(100vw - 110px);
+  }
+}
+
+/* --- Mobile Landscape (844x390 and short horizontal phone screens) --- */
+@media (max-height: 520px) and (orientation: landscape) {
+  /* Title Lobby Landscape: Left 46% Open Showcase, Right 54% Sleek Translucent Lobby Card */
+  #title-overlay,
+  #app.mobile-mode #title-overlay {
+    justify-content: flex-end;
+    align-items: stretch;
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    background: linear-gradient(
+      90deg,
+      rgba(5, 10, 18, 0.0) 0%,
+      rgba(5, 10, 18, 0.08) 42%,
+      rgba(5, 10, 18, 0.66) 52%,
+      rgba(5, 10, 18, 0.88) 100%
+    );
+  }
+
+  #title-overlay .title-card,
+  #app.mobile-mode #title-overlay .title-card {
+    width: min(54%, 468px);
+    max-width: 54%;
+    height: 100%;
+    max-height: 100%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(10, 19, 34, 0.82) 0%, rgba(6, 12, 22, 0.94) 100%);
+    border: 1px solid rgba(223, 192, 117, 0.44);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 240, 196, 0.18);
+    backdrop-filter: blur(12px);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow-y: auto;
+  }
+
+  #title-overlay.visible .title-card,
+  #app.mobile-mode #title-overlay.visible .title-card {
+    pointer-events: auto;
+  }
+
+  #title-overlay .title-hero-window {
+    display: none;
+  }
+
+  #title-overlay .title-top-header {
+    gap: 4px;
+  }
+
+  #title-overlay .title-top-bar {
+    margin-bottom: 0;
+  }
+
+  #title-overlay .title-util-pill,
+  #title-overlay #btn-open-settings.title-util-pill,
+  #title-overlay #btn-open-mp-drawer.title-util-pill,
+  #title-overlay #btn-open-roster.title-util-pill {
+    padding: 3px 8px;
+    min-height: 26px;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+  }
+
+  #title-overlay .title-heading-wrap {
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  #title-overlay .game-title {
+    font-size: 24px;
+    letter-spacing: 0.08em;
+  }
+
+  #title-overlay .chop-seal {
+    width: 22px;
+    height: 32px;
+    font-size: 11px;
+  }
+
+  #title-overlay .campaign-strip {
+    width: 100%;
+    margin-bottom: 0;
+    padding: 5px 9px;
+    gap: 3px;
+  }
+
+  #title-overlay .realm-badge,
+  #title-overlay .jade-badge,
+  #title-overlay .stars-badge,
+  #title-overlay .clear-badge {
+    font-size: 10.5px;
+  }
+
+  #title-overlay .selected-stage-label {
+    font-size: 11.5px;
+  }
+
+  #title-overlay .title-bottom-dock {
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  #title-overlay .title-cta-row {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  #title-overlay #btn-start {
+    grid-column: 1 / 4;
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+  }
+
+  #title-overlay #btn-open-world {
+    grid-column: 4 / 6;
+    min-height: 36px;
+    padding: 6px 6px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+
+  #title-overlay .title-quick-pill,
+  #title-overlay #btn-open-shop.title-quick-pill,
+  #title-overlay #btn-open-craft-title.title-quick-pill,
+  #title-overlay #btn-open-camp.title-quick-pill,
+  #title-overlay #btn-open-dungeon.title-quick-pill,
+  #title-overlay #btn-open-campaign.title-quick-pill {
+    grid-column: span 1;
+    min-height: 44px;
+    padding: 4px 2px;
+    gap: 2px;
+    letter-spacing: 0;
+  }
+
+  #title-overlay .title-quick-pill .pill-ico {
+    font-size: 12px;
+  }
+
+  #title-overlay .title-quick-pill .pill-txt {
+    font-size: 10.5px;
+  }
+
+  #title-overlay .mp-lobby {
+    left: auto;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: min(52%, 440px);
+    margin: 0;
+  }
+
+  /* Shop Landscape 360° Controls: 5 camera controls on Row 1 + CTA on Row 2 (Zero Overflow!) */
+  #shop-overlay.preview-active .preview-title-row {
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+
+  #shop-overlay.preview-active .preview-tryon-tag {
+    font-size: 9px;
+    padding: 1px 6px;
+    flex-shrink: 1;
+  }
+
+  #shop-overlay.preview-active .preview-actions {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1.35fr) 26px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 3px;
+    width: 100%;
+  }
+
+  #shop-overlay.preview-active .preview-actions .util-btn {
+    padding: 2px 4px;
+    font-size: 9.5px;
+    min-height: 25px;
+  }
+
+  #shop-overlay.preview-active .preview-actions .preview-buy-btn {
+    grid-column: 1 / -1;
+    min-height: 26px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+  }
+
+  #shop-overlay.preview-active #btn-shop-craft {
+    min-height: 28px;
+    padding: 3px 8px;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  /* Pause Modal 8-Button Symmetrical 4x2 Grid on Landscape */
+  .pause-modal-card .modal-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .pause-modal-card #btn-resume {
+    grid-column: span 1;
+    min-height: 38px;
+  }
+
+  /* Settings Modal Landscape: Compact 2-Column Scrollable Grid */
+  .settings-modal {
+    width: min(740px, 100%);
+    padding: 10px 14px 10px;
+    gap: 8px;
+  }
+
+  .settings-head {
+    padding-bottom: 6px;
+  }
+
+  .settings-scroll {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-content: start;
+  }
+
+  .settings-group {
+    padding: 7px 9px;
+    gap: 5px;
+  }
+
+  .settings-group-title {
+    font-size: 12.5px;
+  }
+
+  .settings-group-hint {
+    font-size: 10px;
+  }
+
+  .settings-pill-btn {
+    min-height: 32px;
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+
+  /* Open-World Top Bar Landscape (fits 8 crisp buttons in 1 row) */
+  .world-top-actions {
+    gap: 3px;
+  }
+
+  .world-top-actions .util-btn {
+    padding: 3px 6px;
+    font-size: 10px;
+    min-height: 25px;
+  }
+
+  /* CRITICAL: Move #world-guide-card OUT of center-left to TOP-RIGHT EDGE below .world-top-bar! */
+  .world-guide-card,
+  #app.world-mode .world-guide-card {
+    top: calc(max(6px, env(safe-area-inset-top)) + 38px);
+    right: max(8px, env(safe-area-inset-right));
+    left: auto;
+    width: 236px;
+    max-width: 240px;
+    padding: 5px 8px;
+    z-index: 28;
+  }
+
+  .world-guide-card.collapsed,
+  #app.world-mode .world-guide-card.collapsed {
+    width: auto;
+    max-width: 240px;
+    padding: 3px 6px;
+    border-radius: 999px;
+  }
+
+  .world-guide-mini-goal {
+    max-width: 108px;
+    font-size: 10px;
+  }
+
+  .world-mini-nav-btn,
+  .world-policy-btn {
+    height: 21px;
+    padding: 0 6px;
+    font-size: 9.5px;
+  }
+
+  #app.world-mode .top-left-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 38px);
+  }
+
+  /* Shift #app.world-mode .top-right-stack (#btn-mute) cleanly below the collapsed guide pill */
+  #app.world-mode .top-right-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 74px);
+    right: max(8px, env(safe-area-inset-right));
+  }
+
+  /* Keep #mobile-notify-pill cleanly in the top safe band (above y=20% center playfield!) */
+  #app.world-mode #mobile-notify-pill {
+    top: calc(max(6px, env(safe-area-inset-top)) + 38px);
+    left: 50%;
+    transform: translate(-50%, -10px);
+    max-width: min(260px, 34vw);
+  }
+
+  #app.world-mode #mobile-notify-pill.visible {
+    transform: translate(-50%, 0);
   }
 }

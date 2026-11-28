@@ -30,6 +30,17 @@ import {
   type StageMode,
   TOWER_STAR_CHESTS,
 } from './EndgameData';
+import {
+  ALCHEMY_ELIXIR_MAP,
+  CRAFT_GEAR_RECIPE_MAP,
+  CRAFT_MATERIALS,
+  CRAFT_MATERIAL_MAP,
+  DEFAULT_STARTER_MATERIALS,
+  computeElixirBonuses,
+  hasEnoughMaterials,
+  type AlchemyElixirDef,
+  type ElixirBonusSummary,
+} from './AlchemyCraftData';
 
 export const BIOME_LABELS: Record<WorldBiome, string> = {
   bamboo_canyon: '翠竹云溪',
@@ -181,6 +192,8 @@ export interface CampaignSaveData {
   storyChoices?: Record<number, string>;
   swordHeart?: { sword: number; heart: number };
   seenEpilogues?: number[];
+  materials?: Record<string, number>;
+  elixirCounts?: Record<string, number>;
 }
 
 export interface CultivationRealmStep {
@@ -2419,6 +2432,30 @@ export class CampaignSaveStore {
           const seenEpilogues = Array.isArray(parsed.seenEpilogues)
             ? parsed.seenEpilogues.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
             : [];
+          const materials: Record<string, number> = {};
+          if (parsed.materials && typeof parsed.materials === 'object') {
+            for (const mat of CRAFT_MATERIALS) {
+              const rawQty = (parsed.materials as Record<string, unknown>)[mat.id];
+              materials[mat.id] = Math.max(0, Math.floor(Number(rawQty) || 0));
+            }
+            for (const [k, v] of Object.entries(parsed.materials)) {
+              if (!(k in materials)) {
+                const n = Math.max(0, Math.floor(Number(v) || 0));
+                if (n > 0) materials[k] = n;
+              }
+            }
+          } else {
+            Object.assign(materials, DEFAULT_STARTER_MATERIALS);
+          }
+          const elixirCounts: Record<string, number> = {};
+          if (parsed.elixirCounts && typeof parsed.elixirCounts === 'object') {
+            for (const [k, v] of Object.entries(parsed.elixirCounts)) {
+              const def = ALCHEMY_ELIXIR_MAP[k];
+              if (!def) continue;
+              const n = Math.max(0, Math.min(def.maxStack, Math.floor(Number(v) || 0)));
+              if (n > 0) elixirCounts[k] = n;
+            }
+          }
           return {
             version: 7,
             cleared: parsed.cleared,
@@ -2462,6 +2499,8 @@ export class CampaignSaveStore {
             storyChoices,
             swordHeart,
             seenEpilogues,
+            materials,
+            elixirCounts,
           };
         }
       }
@@ -2506,6 +2545,8 @@ export class CampaignSaveStore {
       storyChoices: {},
       swordHeart: { sword: 0, heart: 0 },
       seenEpilogues: [],
+      materials: { ...DEFAULT_STARTER_MATERIALS },
+      elixirCounts: {},
     };
   }
 
@@ -3099,5 +3140,171 @@ export class CampaignSaveStore {
       return true;
     }
     return false;
+  }
+
+  getMaterials(): Record<string, number> {
+    if (!this.data.materials) {
+      this.data.materials = { ...DEFAULT_STARTER_MATERIALS };
+    }
+    const out: Record<string, number> = {};
+    for (const mat of CRAFT_MATERIALS) {
+      out[mat.id] = Math.max(0, Math.floor(Number(this.data.materials[mat.id] ?? 0) || 0));
+    }
+    for (const [k, v] of Object.entries(this.data.materials)) {
+      if (!(k in out)) {
+        out[k] = Math.max(0, Math.floor(Number(v) || 0));
+      }
+    }
+    return out;
+  }
+
+  getMaterialCount(id: string): number {
+    if (!this.data.materials) {
+      this.data.materials = { ...DEFAULT_STARTER_MATERIALS };
+    }
+    return Math.max(0, Math.floor(Number(this.data.materials[id] ?? 0) || 0));
+  }
+
+  addMaterial(id: string, qty: number): number {
+    if (!this.data.materials) {
+      this.data.materials = { ...DEFAULT_STARTER_MATERIALS };
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return this.getMaterialCount(id);
+    }
+    const next = this.getMaterialCount(id) + Math.floor(qty);
+    this.data.materials[id] = next;
+    this.persist();
+    return next;
+  }
+
+  getElixirCounts(): Record<string, number> {
+    if (!this.data.elixirCounts) {
+      this.data.elixirCounts = {};
+    }
+    return { ...this.data.elixirCounts };
+  }
+
+  getElixirBonus(): ElixirBonusSummary {
+    return computeElixirBonuses(this.data.elixirCounts);
+  }
+
+  brewAndConsumeElixir(elixirId: string): {
+    ok: boolean;
+    reason: string;
+    elixir?: AlchemyElixirDef;
+    newCount?: number;
+    instantRestore?: boolean;
+  } {
+    const elixir = ALCHEMY_ELIXIR_MAP[elixirId];
+    if (!elixir) return { ok: false, reason: '丹方不存在' };
+    if (!this.data.elixirCounts) this.data.elixirCounts = {};
+    if (!this.data.materials) this.data.materials = { ...DEFAULT_STARTER_MATERIALS };
+
+    const cur = Math.max(0, Math.floor(Number(this.data.elixirCounts[elixirId] ?? 0) || 0));
+    if (cur >= elixir.maxStack) {
+      return {
+        ok: false,
+        reason: `「${elixir.name}」已达上限（${elixir.maxStack}/${elixir.maxStack}）`,
+        elixir,
+        newCount: cur,
+      };
+    }
+
+    const check = hasEnoughMaterials(this.data.materials, elixir.costs);
+    if (!check.ok) {
+      const first = check.missing[0];
+      const matName = CRAFT_MATERIAL_MAP[first.materialId]?.name ?? first.materialId;
+      return {
+        ok: false,
+        reason: `灵材不足：缺少「${matName}」（${first.have}/${first.need}）`,
+        elixir,
+        newCount: cur,
+      };
+    }
+
+    for (const cost of elixir.costs) {
+      this.data.materials[cost.materialId] = Math.max(
+        0,
+        this.getMaterialCount(cost.materialId) - cost.qty,
+      );
+    }
+    const nextCount = cur + 1;
+    this.data.elixirCounts[elixirId] = nextCount;
+    this.persist();
+
+    return {
+      ok: true,
+      reason: `炼成并服下「${elixir.name}」（${nextCount}/${elixir.maxStack}）· ${elixir.effectSummary}`,
+      elixir,
+      newCount: nextCount,
+      instantRestore: Boolean(elixir.instantRestore),
+    };
+  }
+
+  craftEquipmentRecipe(
+    recipeId: string,
+    rng?: () => number,
+  ): {
+    ok: boolean;
+    reason: string;
+    item?: RolledGearItem;
+    overflowSalvagedJade?: number;
+  } {
+    const recipe = CRAFT_GEAR_RECIPE_MAP[recipeId];
+    if (!recipe) return { ok: false, reason: '锻造图谱不存在' };
+    if (!SHOP_ITEM_MAP[recipe.templateId]) return { ok: false, reason: '装备模板异常' };
+    if (!this.data.materials) this.data.materials = { ...DEFAULT_STARTER_MATERIALS };
+
+    const check = hasEnoughMaterials(this.data.materials, recipe.costs);
+    if (!check.ok) {
+      const first = check.missing[0];
+      const matName = CRAFT_MATERIAL_MAP[first.materialId]?.name ?? first.materialId;
+      return {
+        ok: false,
+        reason: `灵材不足：缺少「${matName}」（${first.have}/${first.need}）`,
+      };
+    }
+
+    for (const cost of recipe.costs) {
+      this.data.materials[cost.materialId] = Math.max(
+        0,
+        this.getMaterialCount(cost.materialId) - cost.qty,
+      );
+    }
+
+    const rolled = rollEquipmentDrop({
+      tier: recipe.tier,
+      guaranteedMinRarity: recipe.rarity,
+      source: `神兵锻造·${recipe.name}`,
+      rng,
+    });
+
+    const finalRarity =
+      GEAR_RARITY_RANK[rolled.rarity] >= GEAR_RARITY_RANK[recipe.rarity]
+        ? rolled.rarity
+        : recipe.rarity;
+    const minQuality = finalRarity === 'legendary' ? 105 : finalRarity === 'epic' ? 98 : 92;
+
+    const forgedItem: RolledGearItem = {
+      ...rolled,
+      templateId: recipe.templateId,
+      category: recipe.category,
+      rarity: finalRarity,
+      qualityPct: Math.min(125, Math.max(rolled.qualityPct, minQuality)),
+      name: `${recipe.forgedPrefix}·${recipe.name}`,
+      source: `神兵锻造·${recipe.name}`,
+    };
+    forgedItem.powerScore = computeRolledGearScore(forgedItem);
+
+    this.data.stats.totalForges += 1;
+    const addRes = this.addRolledItem(forgedItem);
+
+    return {
+      ok: true,
+      reason: `锻造合成【${forgedItem.name}】（战力 ${forgedItem.powerScore}）`,
+      item: forgedItem,
+      overflowSalvagedJade: addRes.overflowSalvagedJade,
+    };
   }
 }
