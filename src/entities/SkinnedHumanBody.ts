@@ -18,74 +18,94 @@ export interface ContinuousTorsoRig {
   chestBone: THREE.Bone;
 }
 
+function getTorsoProfile(style: BodyBuildStyle): Array<[number, number, number]> {
+  if (style === 'hero' || style === 'robe') {
+    // Sleek athletic Donghua protagonist V-taper:
+    // - Starts at y = -0.028 (tucked INSIDE the waist sash so ZERO white pelvis triangles poke out below the belt!)
+    // - Closes solidly around the neck root up to y = 0.592 (eliminating ANY neck-to-collar hollow gap!)
+    return [
+      [-0.028, 0.146, 0.108], // lower waist base cleanly tucked inside waist sash
+      [0.05, 0.138, 0.104],   // tailored waist cinch
+      [0.14, 0.138, 0.105],   // slender athletic waist
+      [0.26, 0.168, 0.118],   // lower ribcage
+      [0.39, 0.198, 0.134],   // poised heroic chest / lats
+      [0.485, 0.205, 0.128],  // smooth clavicle / shoulder shelf
+      [0.542, 0.128, 0.095],  // trapezius slope
+      [0.578, 0.070, 0.068],  // neck collar base (flush with inner collar!)
+      [0.596, 0.050, 0.050],  // sealed upper neck socket rim (zero air slit!)
+    ];
+  }
+  return [
+    [-0.14, 0.158, 0.118],
+    [-0.04, 0.172, 0.128],
+    [0.05, 0.156, 0.114],
+    [0.12, 0.149, 0.109],
+    [0.24, 0.176, 0.122],
+    [0.38, 0.212, 0.144],
+    [0.48, 0.222, 0.140],
+    [0.545, 0.145, 0.104],
+    [0.60, 0.068, 0.065],
+  ];
+}
+
+function sampleProfileArray(profile: Array<[number, number, number]>, y: number): [number, number] {
+  if (y <= profile[0][0]) return [profile[0][1], profile[0][2]];
+  for (let i = 0; i < profile.length - 1; i++) {
+    const a = profile[i];
+    const b = profile[i + 1];
+    if (y >= a[0] && y <= b[0]) {
+      const u = (y - a[0]) / Math.max(1e-4, b[0] - a[0]);
+      const s = u * u * (3 - 2 * u);
+      return [THREE.MathUtils.lerp(a[1], b[1], s), THREE.MathUtils.lerp(a[2], b[2], s)];
+    }
+  }
+  const last = profile[profile.length - 1];
+  return [last[1], last[2]];
+}
+
 /**
- * Evaluates the sculpted surface depth Z of the torso at local (x, y) on the front (+Z)
- * or back (-Z) side so curved lapels, straps, and armor fittings hug the human chest seamlessly.
+ * Evaluates the exact sculpted surface depth Z of the torso at local (x, y) on front (+Z)
+ * or back (-Z) so flush Hanfu V-collars, shoulder drapes, and straps hug the chest with zero gap.
  */
-export function sampleTorsoSurfaceZ(x: number, y: number, broadness: number, front = true): number {
-  const t = clamp((y + 0.14) / 0.75, 0, 1);
-  // Matches profile radii in createSeamlessTorsoSkinnedMesh
-  const baseRx =
-    (t < 0.28
-      ? THREE.MathUtils.lerp(0.168, 0.148, t / 0.28)
-      : t < 0.72
-        ? THREE.MathUtils.lerp(0.148, 0.214, (t - 0.28) / 0.44)
-        : t < 0.88
-          ? THREE.MathUtils.lerp(0.214, 0.145, (t - 0.72) / 0.16)
-          : THREE.MathUtils.lerp(0.145, 0.066, (t - 0.88) / 0.12)) *
-    1.12 *
-    broadness;
-  const baseRz = baseRx * 0.67;
-  const nx = clamp(x / Math.max(0.04, baseRx), -0.96, 0.96);
-  let z = Math.sqrt(Math.max(0.02, 1 - nx * nx)) * baseRz;
-  if (front && y > 0.24 && y < 0.5) {
-    const pec = Math.exp(-Math.pow((y - 0.39) / 0.085, 2)) * (0.55 + 0.45 * Math.cos((Math.abs(x) - 0.085) * 14));
-    z += pec * 0.016;
+export function sampleTorsoSurfaceZ(
+  x: number,
+  y: number,
+  broadness: number,
+  front = true,
+  style: BodyBuildStyle = 'hero',
+): number {
+  const profile = getTorsoProfile(style);
+  const [rxRaw, rzRaw] = sampleProfileArray(profile, y);
+  const scaleX = (style === 'hero' || style === 'robe' ? 1.06 : 1.12) * broadness;
+  const scaleZ = style === 'boss' ? 1.12 : 1.02;
+  const rx = rxRaw * scaleX;
+  const rz = rzRaw * scaleZ;
+  const nx = clamp(x / Math.max(0.035, rx), -0.97, 0.97);
+  let z = Math.sqrt(Math.max(0.015, 1 - nx * nx)) * rz;
+  if (front && y > 0.24 && y < 0.50) {
+    const pec =
+      Math.exp(-Math.pow((y - 0.39) / 0.085, 2)) *
+      Math.exp(-Math.pow((Math.abs(nx) - 0.42) / 0.34, 2));
+    z += pec * (style === 'hero' || style === 'robe' ? 0.010 : 0.016);
   }
   return front ? z : -z;
 }
 
 /**
- * Builds ONE continuous, unbroken, smoothly vertex-weighted THREE.SkinnedMesh spanning
- * lower pelvis -> waist -> ribcage -> pectorals/lats -> deltoid-clavicle shelf -> trapezius -> neck collar.
- * Eliminates the disconnected toy seam between pelvis and upper torso.
+ * Builds ONE continuous, unbroken, outward-normal THREE.SkinnedMesh spanning
+ * waist -> ribcage -> chest -> shoulders -> trapezius -> sealed neck collar.
  */
 export function createSeamlessTorsoSkinnedMesh(
   style: BodyBuildStyle,
   material: THREE.Material,
 ): ContinuousTorsoRig {
-  const broadness = style === 'boss' ? 1.15 : style === 'armored' ? 1.07 : 1.0;
+  const broadness = style === 'boss' ? 1.14 : style === 'armored' ? 1.06 : 0.98;
   const radialSegs = 40;
   const heightSegs = 34;
-  const yMin = -0.14;
-  const yMax = 0.61;
-
-  // Profile [y, rx, rz] in local pelvis space
-  const profile: Array<[number, number, number]> = [
-    [-0.14, 0.158, 0.118], // lower hip base
-    [-0.04, 0.172, 0.128], // greater trochanter / hip fullness
-    [0.05, 0.156, 0.114],  // belt / waist cinch
-    [0.12, 0.149, 0.109],  // athletic narrow waist
-    [0.24, 0.176, 0.122],  // lower ribcage / obliques
-    [0.38, 0.212, 0.144],  // broad chest / pectorals / lats
-    [0.48, 0.222, 0.140],  // clavicle / anterior deltoid shelf
-    [0.545, 0.145, 0.104], // trapezius slope
-    [0.61, 0.066, 0.064],  // neck collar root
-  ];
-
-  const sampleProfile = (y: number): [number, number] => {
-    for (let i = 0; i < profile.length - 1; i++) {
-      const a = profile[i];
-      const b = profile[i + 1];
-      if (y >= a[0] && y <= b[0]) {
-        const u = (y - a[0]) / (b[0] - a[0]);
-        const s = u * u * (3 - 2 * u);
-        return [THREE.MathUtils.lerp(a[1], b[1], s), THREE.MathUtils.lerp(a[2], b[2], s)];
-      }
-    }
-    const last = profile[profile.length - 1];
-    return [last[1], last[2]];
-  };
+  const profile = getTorsoProfile(style);
+  const yMin = profile[0][0];
+  const yMax = profile[profile.length - 1][0];
+  const isCloth = style === 'hero' || style === 'robe';
 
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -96,11 +116,10 @@ export function createSeamlessTorsoSkinnedMesh(
   for (let iy = 0; iy <= heightSegs; iy++) {
     const v = iy / heightSegs;
     const y = THREE.MathUtils.lerp(yMin, yMax, v);
-    const [rxBase, rzBase] = sampleProfile(y);
-    const rx = rxBase * 1.12 * broadness;
-    const rz = rzBase * (style === 'boss' ? 1.12 : 1.04);
+    const [rxBase, rzBase] = sampleProfileArray(profile, y);
+    const rx = rxBase * (isCloth ? 1.06 : 1.12) * broadness;
+    const rz = rzBase * (style === 'boss' ? 1.12 : 1.02);
 
-    // Smooth cosine skinning weight across waist (y = 0.00 -> 0.24)
     const chestT = clamp((y - 0.01) / 0.22, 0, 1);
     const wChest = 0.5 - 0.5 * Math.cos(chestT * Math.PI);
     const wPelvis = 1 - wChest;
@@ -114,47 +133,35 @@ export function createSeamlessTorsoSkinnedMesh(
       let x = sinT * rx;
       let z = cosT * rz;
 
-      // Anatomical pectorals & sternum furrow (+Z)
-      if (cosT > 0 && y > 0.22 && y < 0.52) {
+      if (cosT > 0 && y > 0.22 && y < 0.51) {
         const pecVert = Math.exp(-Math.pow((y - 0.39) / 0.085, 2));
-        const pecSide = Math.exp(-Math.pow((Math.abs(sinT) - 0.42) / 0.32, 2));
+        const pecSide = Math.exp(-Math.pow((Math.abs(sinT) - 0.42) / 0.34, 2));
         const sternum = Math.exp(-Math.pow(sinT / 0.14, 2));
-        z += (pecVert * pecSide * 0.018 - pecVert * sternum * 0.006) * cosT;
+        const pecAmp = isCloth ? 0.010 : 0.017;
+        z += (pecVert * pecSide * pecAmp - pecVert * sternum * (isCloth ? 0.0025 : 0.006)) * cosT;
       }
 
-      // Clavicle & trapezius ridge
-      if (y > 0.45 && y < 0.55) {
-        const clav = Math.exp(-Math.pow((y - 0.495) / 0.028, 2)) * Math.max(0, cosT) * Math.abs(sinT);
-        z += clav * 0.009;
+      if (cosT < 0 && y > 0.08 && y < 0.50) {
+        const spine = Math.exp(-Math.pow(sinT / 0.18, 2));
+        const scap =
+          Math.exp(-Math.pow((Math.abs(sinT) - 0.46) / 0.26, 2)) *
+          Math.exp(-Math.pow((y - 0.41) / 0.095, 2));
+        z += spine * (isCloth ? 0.005 : 0.011) - scap * (isCloth ? 0.007 : 0.013);
       }
 
-      // Spine S-curve indentation & scapula fullness (-Z)
-      if (cosT < 0 && y > 0.06 && y < 0.50) {
-        const spine = Math.exp(-Math.pow(sinT / 0.16, 2));
-        const scap = Math.exp(-Math.pow((Math.abs(sinT) - 0.48) / 0.24, 2)) * Math.exp(-Math.pow((y - 0.41) / 0.09, 2));
-        z += spine * 0.012 - scap * 0.014;
-      }
-
-      // Subtle natural waist-cinch drapery creases or lamellar plate overlap tiers
-      if (style === 'hero' || style === 'robe') {
-        const fold = Math.sin(theta * 11 + y * 9.0) * 0.0032 * Math.exp(-Math.pow((y - 0.14) / 0.14, 2));
-        // Diagonal Hanfu cross-collar fold ridge across chest
-        if (cosT > 0.25 && y > 0.12 && y < 0.52) {
-          const diagDist = Math.abs(x - (y - 0.34) * 0.55);
-          const lapelStep = Math.exp(-Math.pow(diagDist / 0.025, 2)) * 0.0065;
-          z += lapelStep;
-        }
-        x += sinT * fold;
-        z += cosT * fold;
-      } else {
-        // Horizontal sculpted lamellar cuirass tiers + broad pectoral armor bevel
-        const tier = Math.sin(y * 74) * 0.0038 * clamp((y - 0.08) / 0.32, 0, 1) * clamp((0.48 - y) / 0.12, 0, 1);
+      if (!isCloth) {
+        const tier =
+          Math.sin(y * 74) *
+          0.0036 *
+          clamp((y - 0.08) / 0.32, 0, 1) *
+          clamp((0.48 - y) / 0.12, 0, 1);
         x += sinT * tier;
         z += cosT * tier;
       }
 
       positions.push(x, y, z);
-      uvs.push(u * 2.0, v * 1.6);
+      // Map v from top=0 -> bottom=1 so Donghua silk gradient illuminates upper chest & shades gracefully toward waist!
+      uvs.push(u * 1.5, 1.0 - v);
       skinIndices.push(0, 1, 0, 0);
       skinWeights.push(wPelvis, wChest, 0, 0);
     }
@@ -167,7 +174,7 @@ export function createSeamlessTorsoSkinnedMesh(
       const b = a + 1;
       const c = a + stride;
       const d = c + 1;
-      indices.push(a, c, b, b, c, d);
+      indices.push(a, b, c, b, d, c);
     }
   }
 
@@ -201,19 +208,15 @@ export interface LimbMeshSpec {
   upperLen: number;
   lowerLen: number;
   topCapRadius: number;
-  upperRadii: Array<[number, number]>; // [radius, t in 0..1 from root->mid]
-  lowerRadii: Array<[number, number]>; // [radius, t in 0..1 from mid->end]
-  splitT?: number; // t in 0..1 along total length where lowerMat starts (e.g., bracer or greave)
+  upperRadii: Array<[number, number]>;
+  lowerRadii: Array<[number, number]>;
+  splitT?: number;
   clothFolds?: boolean;
   cuffRidge?: number;
 }
 
 /**
- * Creates ONE continuous unbroken 3-bone THREE.SkinnedMesh for an entire arm or leg.
- * - Top dome seamlessly seats into shoulder/hip (zero floating ball-joint spheres!).
- * - Smooth cosine bone weights across elbow/knee (zero crack or seam when bending 120 deg!).
- * - Supports 2 materials (e.g. silk sleeve -> leather bracer, or trousers -> forged shin greave)
- *   with a realistic sculpted overlapping cuff rim right at the transition.
+ * Continuous unbroken 3-bone THREE.SkinnedMesh for an entire arm or leg with outward normals.
  */
 export function createSeamlessLimbSkinnedMesh(
   spec: LimbMeshSpec,
@@ -225,7 +228,6 @@ export function createSeamlessLimbSkinnedMesh(
   const jointFrac = spec.upperLen / totalLen;
   const splitFrac = spec.splitT ?? jointFrac + 0.04;
 
-  // Rings from +topCap dome down through upper, elbow/knee transition, lower, to end cap
   const ySamples: Array<{ y: number; rx: number; rz: number; isCap?: boolean }> = [];
   const sampleTable = (table: Array<[number, number]>, t: number): number => {
     const ct = clamp(t, 0, 1);
@@ -241,16 +243,16 @@ export function createSeamlessLimbSkinnedMesh(
     return table[table.length - 1][0];
   };
 
-  // Rounded deltoid/hip top hemisphere (4 rings above y=0 so shoulder/hip socket stays 100% sealed!)
+  // Compact low-profile deltoid/hip top cap dome (flows inline BELOW the sloping trapezius shoulder line!)
+  const capHeightScale = spec.kind === 'arm' ? 0.56 : 0.80;
   for (let k = 0; k < 4; k++) {
     const ang = (k / 4) * (Math.PI * 0.5);
-    const y = Math.cos(ang) * spec.topCapRadius * 0.82;
+    const y = Math.cos(ang) * spec.topCapRadius * capHeightScale;
     const r = Math.max(0.004, Math.sin(ang) * spec.topCapRadius);
-    ySamples.push({ y, rx: r * 1.04, rz: r * 0.98, isCap: true });
+    ySamples.push({ y, rx: r * 1.02, rz: r * 0.98, isCap: true });
   }
 
-  // Main limb rings (28 longitudinal rings)
-  const mainRings = 28;
+  const mainRings = 30;
   for (let i = 0; i <= mainRings; i++) {
     const f = i / mainRings;
     const y = -f * totalLen;
@@ -261,35 +263,34 @@ export function createSeamlessLimbSkinnedMesh(
       const tu = f / jointFrac;
       r = sampleTable(spec.upperRadii, tu);
       if (spec.kind === 'leg') {
-        // Subtle anatomical quadriceps front/back depth
-        rzScale = 1.08;
+        rzScale = 1.06;
         rxScale = 0.96;
       } else {
-        // Slight deltoid/tricep depth
-        rzScale = 1.05;
+        rzScale = 1.03;
       }
     } else {
       const tl = (f - jointFrac) / (1 - jointFrac);
       r = sampleTable(spec.lowerRadii, tl);
       if (spec.kind === 'leg') {
-        // Sculpted gastrocnemius calf fullness
-        const calf = Math.exp(-Math.pow((tl - 0.34) / 0.22, 2)) * 0.011;
-        rzScale = 1.06 + calf / Math.max(0.03, r);
+        const calf = Math.exp(-Math.pow((tl - 0.34) / 0.22, 2)) * 0.010;
+        rzScale = 1.05 + calf / Math.max(0.03, r);
       }
     }
 
-    // Sculpted overlapping bracer / shin-greave cuff lip at material transition
-    if (spec.cuffRidge && Math.abs(f - splitFrac) < 0.045) {
-      const lip = Math.exp(-Math.pow((f - splitFrac) / 0.024, 2)) * spec.cuffRidge;
+    if (spec.cuffRidge && Math.abs(f - splitFrac) < 0.048) {
+      const lip = Math.exp(-Math.pow((f - splitFrac) / 0.022, 2)) * spec.cuffRidge;
       r += lip;
+    }
+    if (spec.cuffRidge && f > 0.88 && f < 0.96) {
+      const endLip = Math.exp(-Math.pow((f - 0.92) / 0.022, 2)) * (spec.cuffRidge * 0.48);
+      r += endLip;
     }
 
     ySamples.push({ y, rx: r * rxScale, rz: r * rzScale });
   }
 
-  // Close bottom wrist/ankle slightly
   const lastSample = ySamples[ySamples.length - 1];
-  ySamples.push({ y: -totalLen - 0.012, rx: lastSample.rx * 0.55, rz: lastSample.rz * 0.55, isCap: true });
+  ySamples.push({ y: -totalLen - 0.014, rx: lastSample.rx * 0.65, rz: lastSample.rz * 0.65, isCap: true });
 
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -305,7 +306,6 @@ export function createSeamlessLimbSkinnedMesh(
     if (s.y >= splitY) splitRing = iy;
     const f = clamp(-s.y / totalLen, 0, 1);
 
-    // Smooth bone weighting across elbow/knee joint (half-width ~ 11% of limb length)
     const blendHalf = 0.105;
     let w0 = 0;
     let w1 = 0;
@@ -333,21 +333,19 @@ export function createSeamlessLimbSkinnedMesh(
       let rx = s.rx;
       let rz = s.rz;
 
-      // Subtle natural cloth sleeve/trouser drapery folds & elbow crease ripples
-      if (!s.isCap && spec.clothFolds && f > 0.06 && f < splitFrac) {
-        const crease = Math.sin(theta * 7 + f * 12) * 0.0038 + Math.cos(theta * 3 - f * 8) * 0.0025;
+      if (!s.isCap && spec.clothFolds && f > 0.14 && f < splitFrac - 0.02) {
+        const crease = Math.sin(theta * 4 + f * 7) * 0.0012;
         rx += crease;
         rz += crease;
       }
 
-      // Subtle anatomical knee cap bump (+Z) on legs
       if (!s.isCap && spec.kind === 'leg' && cosT > 0.3 && Math.abs(f - jointFrac) < 0.07) {
-        const patella = Math.exp(-Math.pow((f - jointFrac) / 0.04, 2)) * Math.pow(cosT, 2) * 0.011;
+        const patella = Math.exp(-Math.pow((f - jointFrac) / 0.038, 2)) * Math.pow(cosT, 2) * 0.012;
         rz += patella;
       }
 
       positions.push(sinT * rx, s.y, cosT * rz);
-      uvs.push(u * 1.5, f * 2.2);
+      uvs.push(u * 1.4, f * 1.6);
       skinIndices.push(0, 1, 2, 0);
       skinWeights.push(w0, w1, w2, 0);
     }
@@ -363,7 +361,7 @@ export function createSeamlessLimbSkinnedMesh(
       const b = a + 1;
       const c = a + stride;
       const d = c + 1;
-      target.push(a, b, c, b, d, c);
+      target.push(a, c, b, b, c, d);
     }
   }
 
@@ -399,7 +397,6 @@ export function createSeamlessLimbSkinnedMesh(
   return { mesh, rootBone, midBone, endBone, upperLen: spec.upperLen, lowerLen: spec.lowerLen };
 }
 
-// Reusable scratch objects for zero-GC 60fps bone solving
 const _y0 = new THREE.Vector3();
 const _z0 = new THREE.Vector3();
 const _x0 = new THREE.Vector3();
@@ -413,11 +410,6 @@ const _q0 = new THREE.Quaternion();
 const _q1 = new THREE.Quaternion();
 const _q0Inv = new THREE.Quaternion();
 
-/**
- * Twist-free orthonormal 3-bone limb solver.
- * Maps IK joint points (start -> mid -> end) cleanly onto the continuous SkinnedMesh bone chain
- * with pure anatomical hinge bending at elbows & knees and zero candy-wrapper twist.
- */
 export function solveContinuousLimbBones(
   limb: ContinuousLimbRig,
   startPos: THREE.Vector3,
@@ -429,18 +421,15 @@ export function solveContinuousLimbBones(
 ): void {
   limb.rootBone.position.copy(startPos);
 
-  // Upper segment basis: bind pose extends along -Y, so local +Y points from mid -> start
   _y0.subVectors(startPos, midPos);
   if (_y0.lengthSq() < 1e-6) _y0.set(0, 1, 0);
   else _y0.normalize();
 
   _pole.subVectors(polePos, startPos);
-  // Project pole perpendicular to _y0
   _pole.addScaledVector(_y0, -_pole.dot(_y0));
   if (_pole.lengthSq() < 1e-6) _pole.set(0, 0, polePointsForward ? 1 : -1);
   else _pole.normalize();
 
-  // For legs, knee pole points +Z forward; for arms, elbow pole points -Z backward
   _z0.copy(_pole);
   if (!polePointsForward) _z0.negate();
   _x0.crossVectors(_y0, _z0).normalize();
@@ -450,7 +439,6 @@ export function solveContinuousLimbBones(
   _q0.setFromRotationMatrix(_mat0);
   limb.rootBone.quaternion.copy(_q0);
 
-  // Lower segment basis keeps continuous hinge axis _x0 so elbow/knee never twists!
   _y1.subVectors(midPos, endPos);
   if (_y1.lengthSq() < 1e-6) _y1.copy(_y0);
   else _y1.normalize();
@@ -470,33 +458,40 @@ export function solveContinuousLimbBones(
 }
 
 /**
- * Curved form-fitting Hanfu cross-collar lapel (交领右衽) hugging the sculpted chest contour.
- * Replaces flat floating BoxGeometry strips.
+ * Flush, ultra-smooth tailored Hanfu cross-collar lapel (交领右衽) lying strictly against
+ * sampleTorsoSurfaceZ(x, y) from neck sides cleanly down across sternum into the waist sash.
+ * ZERO protruding 2cm top corners, ZERO floating horizontal bar across the throat!
  */
-export function createCurvedHanfuCollarGeo(broadness = 1.0, side: -1 | 1): THREE.BufferGeometry {
-  const segsU = 4;
-  const segsV = 18;
-  const width = 0.042;
-  const thick = 0.011;
+export function createCurvedHanfuCollarGeo(broadness = 0.98, side: -1 | 1): THREE.BufferGeometry {
+  const segsU = 6;
+  const segsV = 22;
+  const width = 0.044;
+  const thick = 0.0052;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
 
   for (let iv = 0; iv <= segsV; iv++) {
-    const v = iv / segsV;
-    // Sweeps from neck collar side down across sternum to opposite waist sash
-    const y = THREE.MathUtils.lerp(0.555, 0.145, v);
-    const cx = side === 1 ? THREE.MathUtils.lerp(0.072, -0.055, v) : THREE.MathUtils.lerp(-0.072, 0.025, v);
-    const cz = sampleTorsoSurfaceZ(cx, y, broadness, true) + (side === 1 ? 0.012 : 0.006);
+    const v = iv / segsV; // 0 = top neck-side anchor (y=0.562), 1 = waist sash tuck (y=0.075)
+    const y = THREE.MathUtils.lerp(0.562, 0.075, v);
+    // Smooth curve from neck side (x = ±0.064) diagonally down across chest (交领右衽: left overlaps right!)
+    const startX = side * 0.064 * broadness;
+    const endX = side === 1 ? -0.056 * broadness : 0.036 * broadness;
+    const cx = THREE.MathUtils.lerp(startX, endX, Math.pow(v, 0.95));
+    // Taper gently at top neck entry so there is ZERO sticking-out corner!
+    const widthEase = v < 0.14 ? THREE.MathUtils.lerp(0.55, 1.0, v / 0.14) : 1.0;
+    const localW = width * widthEase;
+    const layerOffset = side === 1 ? 0.0055 : 0.0028;
 
     for (let iu = 0; iu <= segsU; iu++) {
       const u = iu / segsU;
-      const offset = (u - 0.5) * width;
+      const offset = (u - 0.5) * localW;
       const x = cx + offset;
+      // Soft pillowed silk edge contour, flush onto exact torso surface at every vertex!
       const arch = Math.sin(u * Math.PI) * thick;
-      const z = sampleTorsoSurfaceZ(x, y, broadness, true) + (side === 1 ? 0.008 : 0.003) + arch;
-      positions.push(x, y, Math.max(z, cz - 0.008));
-      uvs.push(u, v * 2.5);
+      const z = sampleTorsoSurfaceZ(x, y, broadness, true, 'hero') + layerOffset + arch;
+      positions.push(x, y, z);
+      uvs.push(u, v * 2.2);
     }
   }
 
@@ -520,51 +515,186 @@ export function createCurvedHanfuCollarGeo(broadness = 1.0, side: -1 | 1): THREE
 }
 
 /**
- * Curved leather sword-sling hugging the human chest & shoulder contour (replaces rigid BoxGeometry!).
+ * Flush tailored stand-up inner Hanfu neck collar (中衣领) wrapping cleanly around the smooth neck
+ * and sitting seamlessly on the upper clavicle — ZERO air gap and ZERO floating horizontal bar!
  */
-export function createCurvedCrossStrapGeo(broadness = 1.0, dirSign: -1 | 1): THREE.BufferGeometry {
-  const pts: THREE.Vector3[] = [];
-  const steps = 16;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const y = THREE.MathUtils.lerp(0.51, 0.05, t);
-    const x = dirSign * THREE.MathUtils.lerp(-0.155 * broadness, 0.16 * broadness, t);
-    const z = sampleTorsoSurfaceZ(x, y, broadness, true) + 0.014;
-    pts.push(new THREE.Vector3(x, y, z));
+export function createInnerHanfuCollarGeo(broadness = 0.98): THREE.BufferGeometry {
+  const segsU = 32;
+  const segsV = 8;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let iv = 0; iv <= segsV; iv++) {
+    const v = iv / segsV; // 0 = base embedded smoothly into upper torso, 1 = crisp collar rim
+    for (let iu = 0; iu <= segsU; iu++) {
+      const u = iu / segsU;
+      const phi = u * Math.PI * 2; // 0 = front (+Z), PI = back (-Z)
+      const cosP = Math.cos(phi);
+      const sinP = Math.sin(phi);
+      // Graceful front V-dip revealing warm smooth neck, crisp high stand-collar at sides & back of neck!
+      const frontV = Math.pow(clamp(cosP, 0, 1), 1.6);
+      const yTop = 0.602 - frontV * 0.088;
+      const yBot = 0.515 - frontV * 0.095;
+      const y = THREE.MathUtils.lerp(yBot, yTop, v);
+      const rBot = 0.088 * broadness;
+      const rTop = 0.066 * broadness;
+      const r = THREE.MathUtils.lerp(rBot, rTop, v);
+      const x = sinP * r;
+      const zBase = cosP * r * 0.96 + 0.005;
+      const zSurf =
+        cosP > 0.15 && y < 0.56
+          ? Math.max(zBase, sampleTorsoSurfaceZ(x, y, broadness, true, 'hero') + 0.0025)
+          : zBase;
+      positions.push(x, y, zSurf);
+      uvs.push(u * 2, v);
+    }
   }
-  const curve = new THREE.CatmullRomCurve3(pts);
-  const geo = new THREE.TubeGeometry(curve, 22, 0.015, 8, false);
-  geo.scale(1, 1, 0.65);
+
+  const stride = segsU + 1;
+  for (let iv = 0; iv < segsV; iv++) {
+    for (let iu = 0; iu < segsU; iu++) {
+      const a = iv * stride + iu;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
   geo.computeVertexNormals();
   return geo;
 }
 
 /**
- * Sculpted curved multi-lame shoulder pauldron or layered Hanfu shoulder yoke
- * conforming naturally over the human deltoid curve.
+ * Open-front sculpted Xianxia cloud-shoulder mantle (对襟云肩) flowing smoothly from the neck/trapezius
+ * outward over both sloping deltoid shoulders and down into a pointed back capelet:
+ * - OPEN across the front V-collar (ZERO horizontal bar cutting across the chest V-neck!)
+ * - Smoothly covers the upper-arm sockets with a natural sloping human shoulder silhouette (ZERO marshmallow caps!)
+ */
+export function createFlushShoulderMantleGeo(broadness = 0.98): THREE.BufferGeometry {
+  const segsU = 38;
+  const segsV = 12;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  // Open front V-gap from -0.44..+0.44 rad so the crisp Hanfu cross-collar stays 100% unobstructed!
+  const phiStart = 0.44;
+  const phiEnd = Math.PI * 2 - 0.44;
+
+  for (let iv = 0; iv <= segsV; iv++) {
+    const v = iv / segsV; // 0 = lower draped shoulder-sleeve / back hem, 1 = snug neck/trapezius seam
+    for (let iu = 0; iu <= segsU; iu++) {
+      const u = iu / segsU;
+      const phi = THREE.MathUtils.lerp(phiStart, phiEnd, u);
+      const cosP = Math.cos(phi); // +1 front, -1 back
+      const sinP = Math.sin(phi); // ±1 left/right shoulder
+      const sideFactor = Math.pow(Math.abs(sinP), 1.35);
+      const backFactor = Math.pow(clamp(-cosP, 0, 1), 1.4);
+      // Soft taper right at the front open V-collar edges so mantle merges flush into lapels
+      const edgeT = Math.min(u, 1 - u);
+      const frontEdgeEase = clamp(edgeT / 0.14, 0, 1);
+
+      // Natural sloping trapezius-to-deltoid contour mathematically clearing the lowered arm dome (pelvis.y=0.488..0.522):
+      const slopeEase = Math.pow(1 - v, 0.50);
+      const yTop = 0.562 - (1 - frontEdgeEase) * 0.025;
+      const yBot = 0.448 - sideFactor * 0.026 - backFactor * 0.088 + (1 - frontEdgeEase) * 0.028;
+      const shoulderArch = Math.sin(v * Math.PI) * sideFactor * 0.040;
+      const y = THREE.MathUtils.lerp(yBot, yTop, v) + shoulderArch;
+
+      const [rxRaw, rzRaw] = sampleProfileArray(getTorsoProfile('hero'), clamp(y, 0.36, 0.57));
+      // Smoothly covers deltoid dome & upper bicep wall (rx≈0.268 over side deltoid, flush on front/back!)
+      const deltoidCover = sideFactor * (0.016 + 0.062 * slopeEase);
+      const frontTuck = frontEdgeEase * 0.008 + (1 - frontEdgeEase) * 0.002;
+      const rx = rxRaw * 1.06 * broadness + frontTuck + deltoidCover;
+      const rz = rzRaw * 1.02 + frontTuck + sideFactor * 0.018 * slopeEase + backFactor * 0.008 * (1 - v);
+
+      positions.push(sinP * rx, y, cosP * rz);
+      uvs.push(u * 2.0, 1.0 - v);
+    }
+  }
+
+  const stride = segsU + 1;
+  for (let iv = 0; iv < segsV; iv++) {
+    for (let iu = 0; iu < segsU; iu++) {
+      const a = iv * stride + iu;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Curved leather sword-sling hugging the human chest & shoulder contour.
+ */
+export function createCurvedCrossStrapGeo(broadness = 0.98, dirSign: -1 | 1): THREE.BufferGeometry {
+  const pts: THREE.Vector3[] = [];
+  const steps = 16;
+  const style: BodyBuildStyle = broadness > 1.02 ? 'armored' : 'hero';
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const y = THREE.MathUtils.lerp(0.50, 0.07, t);
+    const x = dirSign * THREE.MathUtils.lerp(-0.142 * broadness, 0.148 * broadness, t);
+    const z = sampleTorsoSurfaceZ(x, y, broadness, true, style) + 0.011;
+    pts.push(new THREE.Vector3(x, y, z));
+  }
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const geo = new THREE.TubeGeometry(curve, 22, 0.012, 8, false);
+  geo.scale(1, 1, 0.55);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Sculpted tiered lamellar pauldron (armored=true) or sleek tailored sleeve cap (armored=false).
  */
 export function createSculptedPauldronGeo(armored: boolean): THREE.BufferGeometry {
+  if (!armored) {
+    // Sleek low-profile flat-curved sleeve shoulder cap (ZERO bulbous hemisphere dome!)
+    const segU = 18;
+    const segV = 10;
+    const geo = new THREE.SphereGeometry(0.088, segU, segV, -Math.PI * 0.55, Math.PI * 1.1, 0.14, Math.PI * 0.46);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      x *= 1.05;
+      z *= 0.94;
+      y *= 0.62;
+      pos.setXYZ(i, x, y, z);
+    }
+    geo.computeVertexNormals();
+    return geo;
+  }
+
   const segU = 18;
   const segV = 12;
-  const geo = new THREE.SphereGeometry(0.118, segU, segV, -Math.PI * 0.55, Math.PI * 1.1, 0.12, Math.PI * 0.52);
+  const geo = new THREE.SphereGeometry(0.116, segU, segV, -Math.PI * 0.55, Math.PI * 1.1, 0.12, Math.PI * 0.52);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     let x = pos.getX(i);
     let y = pos.getY(i);
     let z = pos.getZ(i);
     const drop = clamp((0.1 - y) / 0.16, 0, 1);
-    if (armored) {
-      // Sculpted tiered Ming/Tang lamellar ridges + slight upward outer wing flare
-      const lame = Math.sin(drop * Math.PI * 5.0) * 0.0065;
-      x *= 1.16 + drop * 0.14;
-      z *= 1.08 + drop * 0.08;
-      y = y * 0.82 + lame;
-    } else {
-      // Draped tailored Hanfu shoulder mantle
-      x *= 1.04 + drop * 0.06;
-      z *= 0.96;
-      y *= 0.68;
-    }
+    const lame = Math.sin(drop * Math.PI * 5.0) * 0.006;
+    x *= 1.15 + drop * 0.13;
+    z *= 1.06 + drop * 0.08;
+    y = y * 0.82 + lame;
     pos.setXYZ(i, x, y, z);
   }
   geo.computeVertexNormals();
@@ -572,9 +702,200 @@ export function createSculptedPauldronGeo(armored: boolean): THREE.BufferGeometr
 }
 
 /**
- * Sculpted curved, tapered, ribbed ancient bronze/obsidian war-horn for Demon King Boss.
- * Replaces flat ConeGeometry party-hat horns!
+ * Sculpted form-fitting Donghua layered waist sash / brocade corset (锦缎腰封)
+ * with curved heroic V-dip lower hem and smooth top/bottom trim bevels.
  */
+export function createSculptedWaistSashGeo(broadness = 0.98): THREE.BufferGeometry {
+  const segU = 36;
+  const segV = 10;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let iv = 0; iv <= segV; iv++) {
+    const v = iv / segV;
+    for (let iu = 0; iu <= segU; iu++) {
+      const u = iu / segU;
+      const phi = u * Math.PI * 2;
+      const sinP = Math.sin(phi);
+      const cosP = Math.cos(phi);
+      const frontFocus = Math.pow(clamp(cosP, 0, 1), 2.2);
+
+      const yTop = 0.122 + frontFocus * 0.012;
+      const yBot = -0.036 - frontFocus * 0.024;
+      const y = THREE.MathUtils.lerp(yBot, yTop, v);
+
+      const [rxRaw, rzRaw] = sampleProfileArray(getTorsoProfile('hero'), clamp(y, -0.028, 0.14));
+      const edgeLip = v < 0.14 || v > 0.86 ? 0.0045 : 0.002;
+      const swell = Math.sin(v * Math.PI) * 0.005 + edgeLip;
+      const rx = rxRaw * 1.06 * broadness + 0.012 + swell;
+      const rz = rzRaw * 1.02 + 0.012 + swell;
+
+      positions.push(sinP * rx, y, cosP * rz);
+      uvs.push(u * 2.0, v);
+    }
+  }
+
+  const stride = segU + 1;
+  for (let iv = 0; iv < segV; iv++) {
+    for (let iu = 0; iu < segU; iu++) {
+      const a = iv * stride + iu;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Gracefully curved, multi-layered Donghua Hanfu coat-tail panels with sculpted Xianxia hem silhouettes.
+ */
+export function createFlowingCoatTailGeo(
+  arcAngle: number,
+  topR: number,
+  botR: number,
+  height: number,
+  hemStyle: 'frontV' | 'sideSplit' | 'backSwallowtail' = 'frontV',
+): THREE.BufferGeometry {
+  const segU = 22;
+  const segV = 12;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let iv = 0; iv <= segV; iv++) {
+    const v = iv / segV;
+    for (let iu = 0; iu <= segU; iu++) {
+      const u = iu / segU;
+      const s = (u - 0.5) * 2.0;
+      const ang = s * (arcAngle * 0.5);
+
+      let hemLenScale = 1.0;
+      if (hemStyle === 'frontV') {
+        hemLenScale = 0.78 + 0.25 * (1 - Math.abs(s + 0.06) * 0.85);
+      } else if (hemStyle === 'sideSplit') {
+        hemLenScale = 0.82 + 0.18 * Math.cos(s * Math.PI * 0.5);
+      } else {
+        const swallow = 0.90 + 0.16 * Math.sin(Math.abs(s) * Math.PI * 0.85);
+        const centerCut = Math.exp(-Math.pow(s / 0.20, 2)) * 0.14;
+        hemLenScale = swallow - centerCut;
+      }
+
+      const y = -v * height * hemLenScale;
+      const flareEase = Math.pow(v, 1.18);
+      const baseR = THREE.MathUtils.lerp(topR, botR, flareEase);
+      const pleat =
+        Math.sin(s * Math.PI * 2.5) * 0.013 * v +
+        Math.cos(s * Math.PI * 4.0 + v * 1.4) * 0.0045 * v;
+      const r = baseR + pleat;
+      const x = Math.sin(ang) * r * (1.0 + 0.03 * flareEase);
+      const z = Math.cos(ang) * r * THREE.MathUtils.lerp(0.80, 0.95, v);
+
+      positions.push(x, y, z);
+      uvs.push(u, v);
+    }
+  }
+
+  const stride = segU + 1;
+  for (let iv = 0; iv < segV; iv++) {
+    for (let iu = 0; iu < segU; iu++) {
+      const a = iv * stride + iu;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Detailed sculpted Xianxia martial boot group with readable form, beveled sole,
+ * upturned gold toe guard, fitted ankle cuff, instep strap, and bronze clasp.
+ */
+export function createDetailedMartialBootGroup(
+  bootMat: THREE.Material,
+  trimMat: THREE.Material,
+  bronzeMat: THREE.Material,
+): THREE.Group {
+  const g = new THREE.Group();
+
+  const upperShape = new THREE.Shape();
+  upperShape.moveTo(-0.041, -0.088);
+  upperShape.lineTo(0.041, -0.088);
+  upperShape.quadraticCurveTo(0.050, 0.015, 0.036, 0.118);
+  upperShape.quadraticCurveTo(0.0, 0.156, -0.036, 0.118);
+  upperShape.quadraticCurveTo(-0.050, 0.015, -0.041, -0.088);
+  const upperGeo = new THREE.ExtrudeGeometry(upperShape, {
+    depth: 0.050,
+    bevelEnabled: true,
+    bevelThickness: 0.016,
+    bevelSize: 0.011,
+    bevelSegments: 3,
+  });
+  upperGeo.rotateX(Math.PI / 2);
+  upperGeo.translate(0, 0.044, 0.022);
+  upperGeo.computeVertexNormals();
+  const upper = new THREE.Mesh(upperGeo, bootMat);
+  upper.castShadow = true;
+  upper.receiveShadow = true;
+
+  const soleMat = new THREE.MeshStandardMaterial({
+    color: '#1f2634',
+    roughness: 0.78,
+    metalness: 0.12,
+  });
+  const soleGeo = new THREE.ExtrudeGeometry(upperShape, {
+    depth: 0.018,
+    bevelEnabled: true,
+    bevelThickness: 0.005,
+    bevelSize: 0.006,
+    bevelSegments: 2,
+  });
+  soleGeo.rotateX(Math.PI / 2);
+  soleGeo.translate(0, -0.004, 0.022);
+  soleGeo.scale(1.06, 1.0, 1.03);
+  soleGeo.computeVertexNormals();
+  const sole = new THREE.Mesh(soleGeo, soleMat);
+  sole.castShadow = true;
+
+  const toeCap = new THREE.Mesh(new THREE.SphereGeometry(0.038, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), bronzeMat);
+  toeCap.scale.set(0.96, 0.54, 1.05);
+  toeCap.position.set(0, 0.012, 0.132);
+  toeCap.rotation.x = 0.24;
+
+  const ankleCuff = new THREE.Mesh(new THREE.CylinderGeometry(0.049, 0.052, 0.052, 16), trimMat);
+  ankleCuff.position.set(0, 0.058, -0.008);
+  const ankleGoldRim = new THREE.Mesh(new THREE.TorusGeometry(0.050, 0.0058, 8, 20), bronzeMat);
+  ankleGoldRim.rotation.x = Math.PI / 2;
+  ankleGoldRim.position.set(0, 0.082, -0.008);
+
+  const instepStrap = new THREE.Mesh(new THREE.TorusGeometry(0.046, 0.0065, 8, 18, Math.PI * 1.15), trimMat);
+  instepStrap.position.set(0, 0.034, 0.046);
+  instepStrap.rotation.set(0.55, 0, -Math.PI * 0.075);
+
+  const clasp = new THREE.Mesh(new THREE.OctahedronGeometry(0.011, 0), bronzeMat);
+  clasp.scale.set(1.1, 0.85, 0.5);
+  clasp.position.set(0, 0.058, 0.044);
+
+  g.add(upper, sole, toeCap, ankleCuff, ankleGoldRim, instepStrap, clasp);
+  return g;
+}
+
 export function createCurvedWarHornGeo(side: -1 | 1): THREE.BufferGeometry {
   const pts = [
     new THREE.Vector3(0, 0, 0),
@@ -598,7 +919,6 @@ export function createCurvedWarHornGeo(side: -1 | 1): THREE.BufferGeometry {
   for (let i = 0; i <= tubularSegs; i++) {
     const t = i / tubularSegs;
     const center = curve.getPointAt(t);
-    // Natural organic horn taper from thick skull root to sharp curved point + keratin/bronze growth ribs
     const rib = Math.sin(t * Math.PI * 14) * (1 - t);
     const taper = Math.pow(1 - t, 0.78) * (1 + rib * 0.085);
     if (t < 0.45) tmpC.lerpColors(cRoot, cMid, t / 0.45);
@@ -620,9 +940,6 @@ export function createCurvedWarHornGeo(side: -1 | 1): THREE.BufferGeometry {
   return geo;
 }
 
-/**
- * Sweeping curved horsehair helmet war-plume (replaces ConeGeometry!).
- */
 export function createCurvedWarPlumeGeo(length = 0.28): THREE.BufferGeometry {
   const pts = [
     new THREE.Vector3(0, 0, 0),
@@ -653,77 +970,98 @@ export function createCurvedWarPlumeGeo(length = 0.28): THREE.BufferGeometry {
   return geo;
 }
 
-/**
- * Sculpted anatomical human/gauntlet hand with rounded palm, thenar pad, and tapered two-segment fingers.
- * Replaces sharp-cornered BoxGeometry Lego palms!
- */
 export function createRealisticHandGroup(
   mat: THREE.Material,
   style: 'grip' | 'swordFinger',
+  wristTrimMat?: THREE.Material,
+  bracerCuffMat?: THREE.Material,
 ): THREE.Group {
   const g = new THREE.Group();
 
-  // Organic rounded palm & knuckle ridge
-  const palmGeo = new THREE.SphereGeometry(0.036, 12, 10);
-  palmGeo.scale(0.92, 1.18, 0.44);
+  if (wristTrimMat && bracerCuffMat) {
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.041, 0.037, 0.034, 16), bracerCuffMat);
+    cuff.position.set(0, 0.012, 0);
+    const goldRim = new THREE.Mesh(new THREE.TorusGeometry(0.038, 0.0052, 8, 18), wristTrimMat);
+    goldRim.rotation.x = Math.PI / 2;
+    goldRim.position.set(0, -0.002, 0);
+    g.add(cuff, goldRim);
+  }
+
+  const wrist = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.031, 0.032, 12), mat);
+  wrist.scale.set(1.05, 1.0, 0.72);
+  wrist.position.set(0, -0.010, 0);
+  g.add(wrist);
+
+  const palmGeo = new THREE.SphereGeometry(0.044, 14, 12);
+  palmGeo.scale(0.95, 1.24, 0.44);
   const palm = new THREE.Mesh(palmGeo, mat);
-  palm.position.set(0, -0.034, 0.002);
+  palm.position.set(0, -0.050, 0.003);
+  palm.castShadow = true;
   g.add(palm);
 
-  // Thenar thumb muscle pad
-  const padGeo = new THREE.SphereGeometry(0.02, 10, 8);
-  padGeo.scale(0.85, 1.25, 0.72);
+  const knuckle = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.056, 6, 10), mat);
+  knuckle.rotation.z = Math.PI / 2;
+  knuckle.scale.set(1.0, 1.0, 0.85);
+  knuckle.position.set(0.002, -0.092, 0.004);
+  g.add(knuckle);
+
+  const padGeo = new THREE.SphereGeometry(0.025, 10, 8);
+  padGeo.scale(0.86, 1.28, 0.72);
   const pad = new THREE.Mesh(padGeo, mat);
-  pad.position.set(-0.022, -0.03, 0.011);
+  pad.position.set(-0.028, -0.044, 0.014);
   g.add(pad);
 
-  const proxGeo = new THREE.CapsuleGeometry(0.0072, 0.024, 4, 8);
-  const distGeo = new THREE.CapsuleGeometry(0.006, 0.02, 4, 8);
-  const thumbGeo = new THREE.CapsuleGeometry(0.008, 0.026, 4, 8);
+  const proxGeo = new THREE.CapsuleGeometry(0.0086, 0.032, 5, 8);
+  const distGeo = new THREE.CapsuleGeometry(0.0072, 0.028, 5, 8);
+  const thumbProxGeo = new THREE.CapsuleGeometry(0.0098, 0.028, 5, 8);
+  const thumbDistGeo = new THREE.CapsuleGeometry(0.0082, 0.022, 5, 8);
 
-  const addFinger = (fx: number, lenScale: number, curlProx: number, curlDist: number) => {
+  const addFinger = (fx: number, lenScale: number, curlProx: number, curlDist: number, spreadZ = 0) => {
     const root = new THREE.Group();
-    root.position.set(fx, -0.068, 0.004);
-    root.rotation.x = curlProx;
+    root.position.set(fx, -0.094, 0.005);
+    root.rotation.set(curlProx, 0, spreadZ);
     const p = new THREE.Mesh(proxGeo, mat);
     p.scale.y = lenScale;
-    p.position.y = -0.016 * lenScale;
+    p.position.y = -0.021 * lenScale;
     root.add(p);
 
     const tipGroup = new THREE.Group();
-    tipGroup.position.set(0, -0.033 * lenScale, 0);
+    tipGroup.position.set(0, -0.044 * lenScale, 0);
     tipGroup.rotation.x = curlDist;
     const d = new THREE.Mesh(distGeo, mat);
     d.scale.y = lenScale * 0.92;
-    d.position.y = -0.012 * lenScale;
+    d.position.y = -0.017 * lenScale;
     tipGroup.add(d);
     root.add(tipGroup);
     g.add(root);
   };
 
   if (style === 'swordFinger') {
-    addFinger(-0.016, 1.02, 0.08, 0.06);
-    addFinger(-0.001, 1.08, 0.06, 0.05);
-    addFinger(0.014, 0.96, 1.15, 1.05);
-    addFinger(0.026, 0.82, 1.22, 1.05);
+    addFinger(-0.022, 1.06, 0.06, 0.05, 0.02);
+    addFinger(-0.003, 1.14, 0.05, 0.04, -0.01);
+    addFinger(0.016, 0.98, 1.22, 1.12, -0.04);
+    addFinger(0.032, 0.84, 1.32, 1.15, -0.08);
   } else {
-    addFinger(-0.02, 0.98, 1.02, 0.95);
-    addFinger(-0.006, 1.05, 1.08, 0.98);
-    addFinger(0.008, 0.98, 1.12, 1.0);
-    addFinger(0.021, 0.84, 1.18, 1.02);
+    addFinger(-0.025, 1.02, 1.08, 1.02, 0.02);
+    addFinger(-0.008, 1.10, 1.14, 1.04, 0);
+    addFinger(0.010, 1.02, 1.18, 1.06, -0.02);
+    addFinger(0.026, 0.86, 1.24, 1.08, -0.05);
   }
 
-  const thumb = new THREE.Mesh(thumbGeo, mat);
-  thumb.position.set(-0.031, -0.048, 0.022);
-  thumb.rotation.set(0.68, 0.15, -0.52);
-  g.add(thumb);
+  const thumbRoot = new THREE.Group();
+  thumbRoot.position.set(-0.036, -0.056, 0.022);
+  thumbRoot.rotation.set(style === 'swordFinger' ? 0.85 : 0.72, 0.18, style === 'swordFinger' ? -0.78 : -0.52);
+  const tp = new THREE.Mesh(thumbProxGeo, mat);
+  tp.position.y = -0.016;
+  const td = new THREE.Mesh(thumbDistGeo, mat);
+  td.position.set(0, -0.040, 0.006);
+  td.rotation.x = 0.42;
+  thumbRoot.add(tp, td);
+  g.add(thumbRoot);
 
   return g;
 }
 
-/**
- * Tapered oval-section realistic sword scabbard with molded bronze throat & chape (replaces BoxGeometry!).
- */
 export function createSculptedScabbardGroup(leatherMat: THREE.Material, bronzeMat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.028, 1.04, 14), leatherMat);

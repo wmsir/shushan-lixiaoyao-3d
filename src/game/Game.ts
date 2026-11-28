@@ -960,8 +960,8 @@ export class Game {
     warmFill.position.set(11, 10, 15);
     this.scene.add(warmFill);
 
-    // Gentle front portrait fill light active only in Title Lobby so Li Xiaoyao's face shines unobstructed
-    const titleFill = new THREE.DirectionalLight('#fff2e2', 1.25);
+    // Gentle front portrait fill light active only in Title Lobby so stylized 3D anime porcelain skin & eyes shine cleanly without highlight clipping
+    const titleFill = new THREE.DirectionalLight('#fff4e8', 1.08);
     titleFill.position.set(1.6, 2.7, 6.2);
     titleFill.visible = false;
     this.scene.add(titleFill);
@@ -1092,19 +1092,20 @@ export class Game {
     this.shopBackdropMesh = backdropMesh;
 
     // 3. 3-Point Portrait Studio Lights dynamically oriented to camera orbit basis at all 360°
-    const keyLight = new THREE.DirectionalLight('#fff5e6', 2.6);
+    // Moderated for stylized 3D Donghua/Anime porcelain skin (#f6dac7) & ivory silk collar so shading stays silky without highlight blowout
+    const keyLight = new THREE.DirectionalLight('#fff4e8', 2.08);
     keyLight.visible = false;
     this.scene.add(keyLight);
     this.scene.add(keyLight.target);
     this.shopKeyLight = keyLight;
 
-    const fillLight = new THREE.DirectionalLight('#b8dcff', 1.25);
+    const fillLight = new THREE.DirectionalLight('#c4e0ff', 1.0);
     fillLight.visible = false;
     this.scene.add(fillLight);
     this.scene.add(fillLight.target);
     this.shopFillLight = fillLight;
 
-    const rimLight = new THREE.DirectionalLight('#54f0e0', 2.2);
+    const rimLight = new THREE.DirectionalLight('#54f0e0', 1.95);
     rimLight.visible = false;
     this.scene.add(rimLight);
     this.scene.add(rimLight.target);
@@ -1630,6 +1631,7 @@ export class Game {
   }
 
   private openCraftOverlay(tab?: 'elixir' | 'forge'): void {
+    this.hud.closeAllHudDrawers();
     if (this.ancientMap.isOpen()) this.ancientMap.close();
     if (this.rosterOverlay.isOpen()) this.rosterOverlay.close();
     if (this.hud.isSettingsOpen()) this.hud.closeSettings();
@@ -1728,12 +1730,14 @@ export class Game {
   }
 
   private openAncientMapOverlay(): void {
+    this.hud.closeAllHudDrawers();
     if (this.rosterOverlay.isOpen()) this.rosterOverlay.close();
     if (this.craftOverlay.isOpen()) this.craftOverlay.close();
     this.ancientMap.open(this.buildAncientMapSnapshot());
   }
 
   private openRosterOverlay(focusCharId?: string): void {
+    this.hud.closeAllHudDrawers();
     if (this.ancientMap.isOpen()) this.ancientMap.close();
     if (this.craftOverlay.isOpen()) this.craftOverlay.close();
     const resolvedId =
@@ -8783,6 +8787,7 @@ export class Game {
         worldLastCombatNotice: this.worldLastCombatNotice,
         settingsOpen: this.hud.isSettingsOpen(),
         craftOpen: this.craftOverlay.isOpen(),
+        openHudDrawer: this.hud.getOpenHudDrawer(),
         visualSettings: { ...this.visualSettings },
         materials: this.saveStore.getMaterials(),
         elixirBonus: this.saveStore.getElixirBonus(),
@@ -8957,6 +8962,16 @@ export class Game {
         }
         if (action === 'closeSettings') {
           this.hud.closeSettings();
+          return true;
+        }
+        if (action === 'closeHudDrawers') {
+          this.hud.closeAllHudDrawers();
+          return true;
+        }
+        if (action.startsWith('toggleHudDrawer:')) {
+          const kind = action.slice('toggleHudDrawer:'.length);
+          if (kind !== 'world' && kind !== 'camp' && kind !== 'hud') return false;
+          this.hud.toggleHudDrawer(kind);
           return true;
         }
         if (action === 'openCraft' || action === 'openCraft:elixir' || action === 'openCraft:forge') {
@@ -9360,6 +9375,67 @@ export class Game {
             pass: commercialModesOk,
             detail: `tower=${TOWER_FLOORS.length}, rlChambers=${ROGUELIKE_CHAMBERS.length}, rlBlessings=${ROGUELIKE_BLESSINGS.length}, modes=[${Array.from(stageModesSeen).join(',')}]`,
           },
+        };
+      },
+      getTopHudMetrics: () => {
+        const readVisibleRect = (selector: string) => {
+          const el = document.querySelector<HTMLElement>(selector);
+          if (!el) return null;
+          let cur: HTMLElement | null = el;
+          while (cur && cur !== document.body) {
+            const st = window.getComputedStyle(cur);
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) return null;
+            cur = cur.parentElement;
+          }
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0.5 || r.height <= 0.5) return null;
+          return {
+            x: Number(r.x.toFixed(1)),
+            y: Number(r.y.toFixed(1)),
+            width: Number(r.width.toFixed(1)),
+            height: Number(r.height.toFixed(1)),
+            right: Number(r.right.toFixed(1)),
+            bottom: Number(r.bottom.toFixed(1)),
+          };
+        };
+        const rects = {
+          topLeftStack: readVisibleRect('.top-left-stack'),
+          heroCluster: readVisibleRect('.hero-cluster'),
+          minimapBox: readVisibleRect('#minimap-box'),
+          worldGuideCard: readVisibleRect('#world-guide-card'),
+          campPanel: readVisibleRect('#camp-panel'),
+          worldCornerDock: readVisibleRect('.world-corner-dock'),
+          campCornerDock: readVisibleRect('.camp-corner-dock'),
+          hudUtilRow: readVisibleRect('#hud-util-row'),
+          worldMenuDrawer: readVisibleRect('#world-menu-drawer'),
+          campMenuDrawer: readVisibleRect('#camp-menu-drawer'),
+          hudMenuDrawer: readVisibleRect('#hud-menu-drawer'),
+          objectivePill: readVisibleRect('#objective-text'),
+          bossBar: readVisibleRect('#boss-bar'),
+          comboSigilBar: readVisibleRect('#combo-sigil-bar'),
+          mobileNotifyPill: readVisibleRect('#mobile-notify-pill'),
+        };
+        const topLeftBottom = Math.max(
+          0,
+          rects.topLeftStack?.bottom ?? 0,
+          rects.heroCluster?.bottom ?? 0,
+          rects.minimapBox?.bottom ?? 0,
+          rects.worldGuideCard?.bottom ?? 0,
+          rects.campPanel?.bottom ?? 0,
+        );
+        const topRightBottom = Math.max(
+          0,
+          rects.worldCornerDock?.bottom ?? 0,
+          rects.campCornerDock?.bottom ?? 0,
+          rects.hudUtilRow?.bottom ?? 0,
+        );
+        return {
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          mode: this.mode,
+          openHudDrawer: this.hud.getOpenHudDrawer(),
+          topLeftBottom: Number(topLeftBottom.toFixed(1)),
+          topRightBottom: Number(topRightBottom.toFixed(1)),
+          rects,
         };
       },
     };

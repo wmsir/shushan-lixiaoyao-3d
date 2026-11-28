@@ -19,10 +19,10 @@ interface CutsceneState {
  * - Clamps camera Y above terrain height
  */
 export class CameraRig {
-  // Elevated oblique action camera angle (~30 deg pitch): crisp floor combat clarity over pillars/bridges + Shushan sky framing
-  private readonly baseOffset = new THREE.Vector3(0, 9.4, 13.4);
-  private readonly currentPos = new THREE.Vector3(0, 9.4, 13.4);
-  private readonly currentLook = new THREE.Vector3(0, 1.65, 0);
+  // Balanced heroic oblique action camera (~18.6 deg pitch): crisp floor combat clarity + top 18-25% open moonlit Xianxia sky & mountains
+  private readonly baseOffset = new THREE.Vector3(0, 5.1, 15.1);
+  private readonly currentPos = new THREE.Vector3(0, 7.1, 15.1);
+  private readonly currentLook = new THREE.Vector3(0, 2.0, 0);
   private readonly targetLook = new THREE.Vector3();
   private readonly targetPos = new THREE.Vector3();
 
@@ -55,7 +55,7 @@ export class CameraRig {
   snapTo(heroPos: THREE.Vector3): void {
     this.prevHeroZ = heroPos.z;
     this.forwardZBias = -0.85;
-    this.currentLook.set(heroPos.x, 1.65, heroPos.z + this.forwardZBias);
+    this.currentLook.set(heroPos.x, heroPos.y + 2.0, heroPos.z + this.forwardZBias);
     this.currentPos.copy(this.currentLook).addScaledVector(this.baseOffset, this.zoomFactor);
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLook);
@@ -211,8 +211,8 @@ export class CameraRig {
     this.prevHeroZ = heroPos.z;
     this.forwardZBias = damp(this.forwardZBias, desiredForwardBias, 5.0, dt);
 
-    // Compute exact desired gameplay look & position (elevated pitch + targetLook.y = 1.65 keeps bridges/crossings clear)
-    this.targetLook.set(heroPos.x, 1.65, heroPos.z);
+    // Compute exact desired gameplay look & position (elevated targetLook.y = 2.0 reveals upper Xianxia sky & horizon)
+    this.targetLook.set(heroPos.x, heroPos.y + 2.0, heroPos.z);
     if (bossPos) {
       // Leash focus at most 3.0m toward Boss so Li Xiaoyao always stays near center
       const dx = bossPos.x - heroPos.x;

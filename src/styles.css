@@ -8734,3 +8734,796 @@ body,
     transform: translate(-50%, 0);
   }
 }
+
+/* ==================== v1.67 Zero Top-Screen Obstruction Mobile HUD ==================== */
+
+/* Base / Desktop: keep full-width desktop bars identical via display:contents pass-through */
+.boss-bar:not(.visible) {
+  display: none;
+}
+
+.stage-mod-bar:empty {
+  display: none;
+}
+
+.combo-sigil-bar {
+  display: none;
+}
+
+.combo-sigil-bar.active,
+.combo-sigil-bar:has(.sigil-slot.filled),
+.combo-sigil-bar:has(.combo-ult-btn.visible) {
+  display: flex;
+}
+
+.world-menu-drawer,
+.world-corner-dock,
+.camp-menu-drawer,
+.camp-corner-dock,
+.hud-menu-drawer {
+  display: contents;
+}
+
+.world-top-info,
+.camp-top-info {
+  order: 0;
+  margin-right: auto;
+}
+
+#btn-world-map,
+#btn-camp-map {
+  order: 1;
+}
+
+.world-top-actions,
+.camp-top-actions {
+  order: 2;
+}
+
+#btn-camp-depart {
+  order: 3;
+}
+
+.hud-menu-toggle-btn,
+.hud-corner-pause-btn,
+.mobile-drawer-only,
+.minimap-mini-tag {
+  display: none;
+}
+
+/* Strict hidden-HUD & hidden-overlay pointer isolation */
+#game-hud:not(.visible),
+#game-hud:not(.visible) *,
+#world-hud:not(.visible),
+#world-hud:not(.visible) *,
+#camp-hud:not(.visible),
+#camp-hud:not(.visible) * {
+  pointer-events: none !important;
+}
+
+/* Mobile Unified Zero-Obstruction Corner HUD (Portrait 390x844, Landscape 844x390 & Touch Devices) */
+@media (hover: none), (max-width: 960px), (max-height: 520px) {
+  /* 1. Far Top-Left Single Compact Horizontal Micro-Capsule (<= 42px tall, bottom edge <= 48px) */
+  #app .top-left-stack,
+  #app.mobile-mode .top-left-stack,
+  #app.world-mode .top-left-stack,
+  #app.camp-mode .top-left-stack {
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+    left: max(6px, env(safe-area-inset-left));
+    top: max(6px, env(safe-area-inset-top));
+    right: auto;
+    z-index: 27;
+  }
+
+  /* 42x42 Circular Jade Mini-Radar Button (Tap to Open Ancient Scroll Map) */
+  #app #minimap-box,
+  #app.mobile-mode #minimap-box {
+    position: relative;
+    order: -1;
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    max-width: 42px;
+    max-height: 42px;
+    padding: 0;
+    gap: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 35% 30%, rgba(14, 34, 48, 0.88), rgba(6, 12, 22, 0.92));
+    border: 1.5px solid rgba(76, 217, 208, 0.74);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.56), inset 0 0 8px rgba(76, 217, 208, 0.24);
+  }
+
+  #app #minimap-box .minimap-head,
+  #app #minimap-box .minimap-expand-hint {
+    display: none !important;
+  }
+
+  #app #minimap-canvas,
+  #app.mobile-mode #minimap-canvas {
+    width: 39px;
+    height: 39px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+  }
+
+  #app #minimap-box .minimap-mini-tag {
+    display: block;
+    position: absolute;
+    bottom: 1px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0 4px;
+    border-radius: 999px;
+    background: rgba(5, 11, 20, 0.84);
+    border: 0.5px solid rgba(223, 192, 117, 0.48);
+    font-family: var(--font-serif);
+    font-size: 7.5px;
+    line-height: 1.25;
+    letter-spacing: 0.04em;
+    color: var(--gold-bright);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* Ultra-Slim 108x38 Hero Vitality Capsule */
+  #app .hero-cluster,
+  #app.mobile-mode .hero-cluster {
+    width: 108px;
+    min-width: 108px;
+    max-width: 112px;
+    padding: 2.5px 6px;
+    border-radius: 10px;
+    background: rgba(6, 12, 22, 0.56);
+    border: 1px solid rgba(223, 192, 117, 0.28);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.36);
+    backdrop-filter: blur(4px);
+    gap: 1.5px;
+  }
+
+  #app .hero-cluster .hero-seal,
+  #app.mobile-mode .hero-cluster .hero-seal,
+  #app .hero-cluster .bar-label,
+  #app .hero-cluster #hud-realm-name,
+  #app .hero-cluster .hero-sub-sep,
+  #app .hero-cluster #hud-blessing-pill {
+    display: none !important;
+  }
+
+  #app .hero-cluster .hero-nameplate {
+    gap: 0;
+    margin-bottom: 0;
+    width: 100%;
+  }
+
+  #app .hero-cluster .hero-name-col {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    width: 100%;
+    gap: 4px;
+    line-height: 1.05;
+  }
+
+  #app .hero-cluster .hero-name-row {
+    min-width: 0;
+  }
+
+  #app .hero-cluster .hero-name-col strong,
+  #app.mobile-mode .hero-cluster .hero-name-col strong {
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  #app .hero-cluster .hero-sub {
+    display: inline;
+    font-size: 9px;
+    line-height: 1.05;
+    flex-shrink: 0;
+  }
+
+  #app .hero-cluster .hero-sub b {
+    font-size: 9.5px;
+    color: var(--gold-bright);
+  }
+
+  #app .hero-cluster .bar-row {
+    gap: 0;
+  }
+
+  #app .hero-cluster .bar-track {
+    height: 9.5px;
+    clip-path: none;
+    border-radius: 4px;
+    border-color: rgba(223, 192, 117, 0.36);
+    box-shadow: none;
+  }
+
+  #app .hero-cluster .bar-row.compact .bar-track {
+    height: 3.5px;
+    border-radius: 999px;
+    border: none;
+    background: rgba(6, 11, 18, 0.74);
+  }
+
+  #app .hero-cluster .bar-value {
+    font-size: 8px;
+    line-height: 1;
+    letter-spacing: 0.01em;
+  }
+
+  #app .hero-cluster .ally-mini {
+    margin-top: 2px;
+    padding-top: 2px;
+  }
+
+  #app .hero-cluster .ally-mini span {
+    font-size: 8.5px;
+    margin-bottom: 1px;
+  }
+
+  #app .hero-cluster .ally-track {
+    height: 3.5px;
+  }
+
+  /* 2. Eliminate Full-Width World & Camp Top Bars -> Corner-Anchored 3-Pill Dock (<= 30px tall) */
+  #app #world-top-bar.world-top-bar,
+  #app #camp-top-bar.camp-top-bar {
+    position: fixed;
+    top: max(6px, env(safe-area-inset-top));
+    right: max(6px, env(safe-area-inset-right));
+    left: auto;
+    width: auto;
+    max-width: none;
+    padding: 0;
+    gap: 0;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    pointer-events: none;
+    z-index: 32;
+  }
+
+  #app .world-corner-dock,
+  #app .camp-corner-dock {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    pointer-events: none;
+  }
+
+  #world-hud.visible .world-corner-dock,
+  #camp-hud.visible .camp-corner-dock {
+    pointer-events: auto;
+  }
+
+  #app .hud-menu-toggle-btn,
+  #app .hud-corner-pause-btn,
+  #app .mobile-drawer-only {
+    display: inline-flex;
+  }
+
+  #world-hud .world-corner-dock .util-btn,
+  #camp-hud .camp-corner-dock .util-btn,
+  #camp-hud .camp-corner-dock .camp-depart-btn,
+  #game-hud #hud-util-row > .util-btn {
+    order: 0;
+    height: 29px;
+    min-height: 29px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    background: rgba(7, 14, 25, 0.62);
+    border: 1px solid rgba(223, 192, 117, 0.42);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(6px);
+  }
+
+  #world-hud .world-corner-dock .world-map-btn,
+  #camp-hud .camp-corner-dock .world-map-btn,
+  #game-hud #hud-util-row .hud-map-btn {
+    border-color: rgba(76, 217, 208, 0.56);
+    color: #bffcf6;
+    background: rgba(8, 28, 38, 0.68);
+  }
+
+  #app .hud-menu-toggle-btn[aria-expanded="true"],
+  #app .hud-menu-toggle-btn.active {
+    border-color: var(--gold-bright);
+    color: #fff8db;
+    background: rgba(112, 78, 24, 0.88);
+    box-shadow: 0 0 12px rgba(242, 204, 106, 0.42);
+  }
+
+  #camp-hud .camp-corner-dock .camp-depart-btn,
+  #camp-hud .camp-corner-dock #btn-camp-depart {
+    min-width: 0 !important;
+    width: auto;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, rgba(164, 116, 36, 0.88), rgba(92, 58, 16, 0.94));
+    border-color: rgba(247, 225, 162, 0.72);
+    color: #fff6d6;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Strict Top-Right Non-Overlap: Single 29px Row in World, Camp & Battle */
+  #app .top-right-stack,
+  #app.mobile-mode .top-right-stack {
+    top: max(6px, env(safe-area-inset-top));
+    right: max(6px, env(safe-area-inset-right));
+    gap: 5px;
+    z-index: 30;
+  }
+
+  #app #hud-util-row {
+    gap: 3px;
+    align-items: center;
+  }
+
+  #app.world-mode .top-right-stack .util-row,
+  #app.camp-mode .top-right-stack .util-row {
+    display: none !important;
+  }
+
+  #app.world-mode .top-right-stack,
+  #app.camp-mode .top-right-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 36px);
+    right: max(6px, env(safe-area-inset-right));
+    gap: 4px;
+  }
+
+  #app.world-mode .combo-box.visible {
+    position: static;
+    top: auto;
+    right: auto;
+  }
+
+  /* 3. Collapsible Slide-Down Top-Right Corner Popover Drawers (.menu-open) */
+  #app #world-menu-drawer,
+  #app #camp-menu-drawer,
+  #app #hud-menu-drawer {
+    display: none;
+    pointer-events: none;
+  }
+
+  #world-hud.visible #world-menu-drawer.menu-open,
+  #world-hud.visible .world-top-bar.menu-open #world-menu-drawer,
+  #camp-hud.visible #camp-menu-drawer.menu-open,
+  #camp-hud.visible .camp-top-bar.menu-open #camp-menu-drawer {
+    position: fixed;
+    top: calc(max(6px, env(safe-area-inset-top)) + 36px);
+    right: max(6px, env(safe-area-inset-right));
+    width: 184px;
+    max-width: calc(100vw - 16px);
+    padding: 8px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(10, 20, 34, 0.94), rgba(6, 12, 22, 0.97));
+    border: 1px solid rgba(223, 192, 117, 0.5);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 242, 204, 0.16);
+    backdrop-filter: blur(12px);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    z-index: 38;
+    pointer-events: auto;
+  }
+
+  #game-hud.visible #hud-menu-drawer.menu-open,
+  #game-hud.visible .top-right-stack.menu-open #hud-menu-drawer,
+  #game-hud.visible #hud-util-row.menu-open #hud-menu-drawer {
+    position: fixed;
+    top: calc(max(6px, env(safe-area-inset-top)) + 36px);
+    right: max(6px, env(safe-area-inset-right));
+    width: 140px;
+    padding: 7px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(10, 20, 34, 0.94), rgba(6, 12, 22, 0.97));
+    border: 1px solid rgba(223, 192, 117, 0.5);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 242, 204, 0.16);
+    backdrop-filter: blur(12px);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    z-index: 38;
+    pointer-events: auto;
+  }
+
+  #app #world-menu-drawer .world-top-info,
+  #app #camp-menu-drawer .camp-top-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    width: 100%;
+    margin-right: 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(223, 192, 117, 0.22);
+    flex-wrap: wrap;
+  }
+
+  #app #world-menu-drawer .world-region-badge,
+  #app #camp-menu-drawer .camp-sanctuary-badge {
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #app #world-menu-drawer .world-progress-pill {
+    font-size: 9.5px;
+    padding: 1px 6px;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  #app #camp-menu-drawer .realm-badge,
+  #app #camp-menu-drawer .jade-badge,
+  #app #camp-menu-drawer .camp-meal-badge {
+    font-size: 9.5px;
+    padding: 1px 6px;
+  }
+
+  #app #world-menu-drawer .world-top-actions,
+  #app #camp-menu-drawer .camp-top-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    width: 100%;
+    overflow: visible;
+    justify-content: stretch;
+  }
+
+  #app #world-menu-drawer .util-btn,
+  #app #camp-menu-drawer .util-btn,
+  #app #hud-menu-drawer .util-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 31px;
+    padding: 4px 4px;
+    border-radius: 8px;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  #app .world-tp-drawer {
+    top: calc(max(6px, env(safe-area-inset-top)) + 38px);
+    right: max(6px, env(safe-area-inset-right));
+    width: min(224px, calc(100vw - 16px));
+    z-index: 39;
+  }
+
+  /* 4. Ultra-Slim Non-Obstructive #world-guide-card Docked Tightly Under Top-Left Micro-Capsule */
+  #app .world-guide-card,
+  #app.world-mode .world-guide-card {
+    left: max(6px, env(safe-area-inset-left));
+    right: auto;
+    top: calc(max(6px, env(safe-area-inset-top)) + 46px);
+    width: 196px;
+    max-width: min(210px, calc(100vw - 16px));
+    padding: 6px 8px;
+    border-radius: 10px;
+    background: rgba(7, 14, 24, 0.84);
+    border: 1px solid rgba(223, 192, 117, 0.36);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(6px);
+    z-index: 27;
+  }
+
+  #app .world-guide-card.collapsed,
+  #app.world-mode .world-guide-card.collapsed {
+    width: auto;
+    max-width: 170px;
+    height: 26px;
+    min-height: 26px;
+    max-height: 26px;
+    padding: 2px 5px;
+    border-radius: 999px;
+    background: rgba(7, 14, 24, 0.56);
+    border-color: rgba(223, 192, 117, 0.32);
+    display: flex;
+    align-items: center;
+  }
+
+  #app .world-guide-card.collapsed .world-guide-head {
+    width: 100%;
+    height: 20px;
+    gap: 3px;
+  }
+
+  #app .world-guide-card.collapsed .world-guide-mini-goal {
+    font-size: 9.5px;
+    max-width: 78px;
+    line-height: 1.1;
+  }
+
+  #app .world-guide-card.collapsed .world-mini-nav-btn,
+  #app .world-guide-card.collapsed .world-policy-btn {
+    height: 18px;
+    padding: 0 4px;
+    font-size: 9px;
+  }
+
+  #app .world-guide-card.collapsed #btn-world-guide-toggle {
+    width: 18px;
+    height: 18px;
+    font-size: 9.5px;
+  }
+
+  /* 5. Camp Panel Docked Cleanly Under Top-Left Micro-Capsule (Collapsed by Default on Mobile) */
+  #app .camp-panel {
+    left: max(6px, env(safe-area-inset-left));
+    right: auto;
+    top: calc(max(6px, env(safe-area-inset-top)) + 46px);
+    bottom: auto;
+    width: min(286px, calc(100vw - 12px));
+    max-height: calc(100dvh - 110px);
+    overflow-y: auto;
+    padding: 6px 8px;
+    border-radius: 10px;
+    background: rgba(7, 14, 24, 0.86);
+    z-index: 27;
+  }
+
+  #app .camp-panel.collapsed {
+    width: 166px;
+    max-width: 168px;
+    height: 28px;
+    min-height: 28px;
+    padding: 3px 5px;
+    border-radius: 999px;
+    background: rgba(7, 14, 24, 0.58);
+    overflow: hidden;
+    gap: 0;
+    justify-content: center;
+  }
+
+  #app .camp-panel.collapsed .camp-panel-head {
+    gap: 3px;
+  }
+
+  #app .camp-panel.collapsed .camp-panel-tabs {
+    gap: 3px;
+  }
+
+  #app .camp-panel.collapsed .camp-tab {
+    padding: 2px 4px;
+    font-size: 9.5px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  #app .camp-panel.collapsed .camp-collapse-btn {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  /* 6. Stage Battle Slim Translucent Top-Center Objective Pill & Slim Boss Bar */
+  #app .objective-pill {
+    height: 20px;
+    line-height: 18px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    opacity: 0.82;
+    background: rgba(7, 14, 24, 0.52);
+    border: 1px solid rgba(223, 192, 117, 0.26);
+    backdrop-filter: blur(4px);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #app .boss-bar,
+  #app.mobile-mode .boss-bar {
+    padding: 3px 8px 4px;
+    border-radius: 8px;
+    background: rgba(10, 10, 18, 0.76);
+  }
+
+  #app .boss-bar-head {
+    margin-bottom: 2px;
+    gap: 5px;
+  }
+
+  #app .boss-name,
+  #app.mobile-mode .boss-name {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
+    margin-bottom: 0;
+  }
+
+  #app .boss-hp-track,
+  #app.mobile-mode .boss-hp-track {
+    height: 8px;
+  }
+
+  #app .boss-poise-track {
+    margin-top: 2px;
+    height: 3px;
+  }
+}
+
+/* Portrait-Specific (390x844) Zero-Obstruction Geometry & Bottom Toast Relocation */
+@media (max-width: 820px) and (orientation: portrait), (max-width: 560px) {
+  #camp-hud .camp-corner-dock .util-btn,
+  #game-hud #hud-util-row > .util-btn {
+    padding: 0 5.5px;
+    font-size: 9.5px;
+  }
+
+  #camp-hud .camp-corner-dock #btn-camp-depart {
+    min-width: 0 !important;
+    width: auto;
+    max-width: 54px;
+    padding: 0 6px;
+    font-size: 9.5px;
+    letter-spacing: 0;
+  }
+
+  /* Stage Battle Objective Pill Tucked Cleanly Between Top-Left (<=161px) & Top-Right (>=264px) */
+  #app .top-center-stack,
+  #app.mobile-mode .top-center-stack {
+    top: calc(max(6px, env(safe-area-inset-top)) + 4px);
+    left: 164px;
+    right: 135px;
+    width: auto;
+    min-width: 0;
+    transform: none;
+    align-items: center;
+    gap: 3px;
+  }
+
+  #app .objective-pill {
+    padding: 0 6px;
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+
+  #app .top-center-stack:has(.boss-bar.visible),
+  #app.mobile-mode .top-center-stack:has(.boss-bar.visible) {
+    top: calc(max(6px, env(safe-area-inset-top)) + 44px);
+    left: 12px;
+    right: 12px;
+    transform: none;
+    width: auto;
+  }
+
+  /* Relocate #mobile-notify-pill & #stage-banner OUT of Top Sky to Bottom-Center Above Controls */
+  #app #mobile-notify-pill,
+  #app.mobile-mode #mobile-notify-pill,
+  #app.world-mode #mobile-notify-pill {
+    top: auto;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 244px);
+    left: 50%;
+    transform: translate(-50%, 8px);
+    max-width: calc(100vw - 24px);
+    padding: 4px 12px;
+    font-size: 11px;
+    background: linear-gradient(180deg, rgba(10, 20, 34, 0.84), rgba(6, 12, 22, 0.9));
+    pointer-events: none;
+  }
+
+  #app #mobile-notify-pill.visible,
+  #app.mobile-mode #mobile-notify-pill.visible,
+  #app.world-mode #mobile-notify-pill.visible {
+    transform: translate(-50%, 0);
+  }
+
+  #app #stage-banner {
+    top: auto;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 296px);
+    padding: 5px 16px;
+  }
+
+  #app .combo-sigil-bar,
+  #app.mobile-mode .combo-sigil-bar,
+  #app.force-wheel .combo-sigil-bar {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 278px);
+    right: max(8px, env(safe-area-inset-right));
+  }
+
+  #app .camp-interact-btn,
+  #app.mobile-mode .camp-interact-btn,
+  #app .world-interact-btn {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 286px);
+  }
+}
+
+/* Landscape-Specific (844x390) Zero-Obstruction Geometry & Bottom Toast Relocation */
+@media (max-height: 520px) and (orientation: landscape) {
+  #app .world-guide-card.collapsed,
+  #app.world-mode .world-guide-card.collapsed {
+    max-width: 196px;
+  }
+
+  #app .world-guide-card.collapsed .world-guide-mini-goal {
+    max-width: 98px;
+  }
+
+  #app .top-center-stack,
+  #app.mobile-mode .top-center-stack {
+    top: max(6px, env(safe-area-inset-top));
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(296px, 36vw);
+    align-items: center;
+    gap: 3px;
+  }
+
+  /* Relocate #mobile-notify-pill & #stage-banner OUT of Top Sky to Bottom-Center Above Mount Bar */
+  #app #mobile-notify-pill,
+  #app.mobile-mode #mobile-notify-pill,
+  #app.world-mode #mobile-notify-pill {
+    top: auto;
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 46px);
+    left: 50%;
+    transform: translate(-50%, 8px);
+    max-width: min(306px, 40vw);
+    padding: 4px 12px;
+    font-size: 11px;
+    background: linear-gradient(180deg, rgba(10, 20, 34, 0.84), rgba(6, 12, 22, 0.9));
+    pointer-events: none;
+  }
+
+  #app #mobile-notify-pill.visible,
+  #app.mobile-mode #mobile-notify-pill.visible,
+  #app.world-mode #mobile-notify-pill.visible {
+    transform: translate(-50%, 0);
+  }
+
+  #app #stage-banner {
+    top: auto;
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 86px);
+    max-width: min(300px, 36vw);
+    padding: 5px 14px;
+  }
+
+  #app .camp-interact-btn,
+  #app.mobile-mode .camp-interact-btn,
+  #app .world-interact-btn {
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 84px);
+  }
+
+  #app #subtitle-banner,
+  #app.mobile-mode #subtitle-banner {
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 80px);
+  }
+}

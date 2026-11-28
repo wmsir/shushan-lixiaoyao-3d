@@ -5,18 +5,19 @@ import {
   createForgedSteelPbr,
   createLeatherPbr,
   createTalismanTexture,
-  createWovenClothPbr,
 } from './RealisticTextures';
 import {
   applyHumanSkinSss,
   applySilhouetteRim,
-  createAnatomicalHeadGeometry,
-  createCurvedHairCardGeo,
+  createAnimeEyeGeometrySet,
+  createAnimeFaceTexture,
+  createAnimeHairCapGeometry,
+  createAnimeHairSpikeGeo,
+  createAnimeHeadGeometry,
+  createAnimeIrisTexture,
+  createDonghuaSilkTexture,
   createEarGeometry,
-  createHairStrandAlphaTexture,
-  createSculptedHairLockGeo,
-  createSeamlessFaceAuxTexture,
-  createSeamlessFaceTexture,
+  type AnimeEyeRigGeometries,
   type SilhouetteRimHandle,
 } from './HumanSculpt';
 import {
@@ -26,34 +27,19 @@ import {
   createCurvedHanfuCollarGeo,
   createCurvedWarHornGeo,
   createCurvedWarPlumeGeo,
+  createDetailedMartialBootGroup,
+  createFlowingCoatTailGeo,
+  createFlushShoulderMantleGeo,
+  createInnerHanfuCollarGeo,
   createRealisticHandGroup,
   createSculptedPauldronGeo,
   createSculptedScabbardGroup,
+  createSculptedWaistSashGeo,
   createSeamlessLimbSkinnedMesh,
   createSeamlessTorsoSkinnedMesh,
   solveContinuousLimbBones,
 } from './SkinnedHumanBody';
 
-import heroFaceUrl from '../assets/hero-face.jpg';
-import heroFaceNrmUrl from '../assets/hero-face-nrm.jpg';
-import heroFaceRoughUrl from '../assets/hero-face-rough.jpg';
-import allyFaceUrl from '../assets/ally-face.jpg';
-import allyFaceNrmUrl from '../assets/ally-face-nrm.jpg';
-import allyFaceRoughUrl from '../assets/ally-face-rough.jpg';
-import vanguardFaceUrl from '../assets/vanguard-face.jpg';
-import vanguardFaceNrmUrl from '../assets/vanguard-face-nrm.jpg';
-import vanguardFaceRoughUrl from '../assets/vanguard-face-rough.jpg';
-import priestFaceUrl from '../assets/priest-face.jpg';
-import priestFaceNrmUrl from '../assets/priest-face-nrm.jpg';
-import priestFaceRoughUrl from '../assets/priest-face-rough.jpg';
-import eliteFaceUrl from '../assets/elite-face.jpg';
-import eliteFaceNrmUrl from '../assets/elite-face-nrm.jpg';
-import eliteFaceRoughUrl from '../assets/elite-face-rough.jpg';
-import bossFaceUrl from '../assets/boss-face.jpg';
-import bossFaceNrmUrl from '../assets/boss-face-nrm.jpg';
-import bossFaceRoughUrl from '../assets/boss-face-rough.jpg';
-import brocadeUrl from '../assets/hanfu-brocade.jpg';
-import brocadeNrmUrl from '../assets/hanfu-brocade-nrm.jpg';
 import shanwenUrl from '../assets/shanwen-armor.jpg';
 import shanwenNrmUrl from '../assets/shanwen-armor-nrm.jpg';
 import ironArmorUrl from '../assets/iron-armor.jpg';
@@ -136,13 +122,13 @@ const COUNTER_FRAMES: PoseFrame[] = [
   { t: 1.0, pelvisOffset: [0, -0.04, 0], torsoPitch: 0.08, torsoYaw: -0.25, torsoRoll: 0, headYaw: 0.15, rHand: [-0.36, 1.09, 0.25], lHand: [0.37, 1.13, 0.3], swordDir: [-0.4, 0.4, 0.8], rFoot: [-0.19, 0, -0.14], lFoot: [0.19, 0, 0.18] },
 ];
 
-// Honor-of-Kings style dramatic ~1.15s try-on sword flourish settling into an unobstructed heroic front showcase pose
+// Honor-of-Kings / Genshin style dramatic ~1.15s try-on sword flourish settling into a poised unobstructed front showcase stance
 const SHOWCASE_FLOURISH_FRAMES: PoseFrame[] = [
-  { t: 0.0, pelvisOffset: [0.02, -0.06, -0.02], torsoPitch: 0.07, torsoYaw: -0.34, torsoRoll: -0.04, headYaw: 0.30, rHand: [-0.44, 0.96, 0.22], lHand: [0.26, 1.24, 0.34], swordDir: [-0.62, -0.18, 0.76], rFoot: [-0.21, 0, -0.16], lFoot: [0.20, 0, 0.18] },
-  { t: 0.28, pelvisOffset: [-0.02, 0.01, 0.05], torsoPitch: -0.06, torsoYaw: 0.36, torsoRoll: 0.06, headYaw: -0.26, rHand: [0.44, 1.56, 0.38], lHand: [0.42, 1.16, 0.04], swordDir: [0.64, 0.68, 0.36], rFoot: [-0.19, 0, 0.14], lFoot: [0.21, 0, -0.08], curve: 'quart' },
-  { t: 0.56, pelvisOffset: [0.01, -0.04, 0.02], torsoPitch: 0.04, torsoYaw: -0.26, torsoRoll: -0.03, headYaw: 0.24, rHand: [-0.46, 1.32, 0.32], lHand: [0.24, 1.36, 0.36], swordDir: [-0.54, 0.72, 0.44], rFoot: [-0.19, 0, -0.10], lFoot: [0.19, 0, 0.15], curve: 'quart' },
-  { t: 0.84, pelvisOffset: [0, -0.02, 0], torsoPitch: 0.015, torsoYaw: -0.14, torsoRoll: 0, headYaw: 0.14, rHand: [-0.40, 1.07, 0.16], lHand: [0.31, 1.22, 0.26], swordDir: [-0.44, 0.50, 0.74], rFoot: [-0.18, 0, -0.08], lFoot: [0.18, 0, 0.13], curve: 'quart' },
-  { t: 1.0, pelvisOffset: [0, -0.02, 0], torsoPitch: 0.015, torsoYaw: -0.14, torsoRoll: 0, headYaw: 0.14, rHand: [-0.40, 1.07, 0.16], lHand: [0.31, 1.22, 0.26], swordDir: [-0.44, 0.50, 0.74], rFoot: [-0.18, 0, -0.08], lFoot: [0.18, 0, 0.13] },
+  { t: 0.0, pelvisOffset: [0.02, -0.05, -0.02], torsoPitch: 0.06, torsoYaw: -0.32, torsoRoll: -0.04, headYaw: 0.28, rHand: [-0.38, 0.96, 0.22], lHand: [0.24, 1.20, 0.30], swordDir: [-0.58, -0.18, 0.78], rFoot: [-0.19, 0, -0.14], lFoot: [0.18, 0, 0.16] },
+  { t: 0.28, pelvisOffset: [-0.02, 0.01, 0.05], torsoPitch: -0.05, torsoYaw: 0.34, torsoRoll: 0.05, headYaw: -0.24, rHand: [0.40, 1.54, 0.36], lHand: [0.36, 1.14, 0.06], swordDir: [0.62, 0.68, 0.38], rFoot: [-0.18, 0, 0.13], lFoot: [0.19, 0, -0.08], curve: 'quart' },
+  { t: 0.56, pelvisOffset: [0.01, -0.03, 0.02], torsoPitch: 0.03, torsoYaw: -0.24, torsoRoll: -0.03, headYaw: 0.22, rHand: [-0.40, 1.28, 0.30], lHand: [0.24, 1.30, 0.32], swordDir: [-0.50, 0.72, 0.46], rFoot: [-0.17, 0, -0.09], lFoot: [0.17, 0, 0.14], curve: 'quart' },
+  { t: 0.84, pelvisOffset: [0, -0.015, 0], torsoPitch: 0.012, torsoYaw: -0.11, torsoRoll: 0, headYaw: 0.11, rHand: [-0.30, 1.00, 0.18], lHand: [0.25, 1.14, 0.24], swordDir: [-0.34, 0.44, 0.83], rFoot: [-0.15, 0, -0.06], lFoot: [0.16, 0, 0.11], curve: 'quart' },
+  { t: 1.0, pelvisOffset: [0, -0.015, 0], torsoPitch: 0.012, torsoYaw: -0.11, torsoRoll: 0, headYaw: 0.11, rHand: [-0.30, 1.00, 0.18], lHand: [0.25, 1.14, 0.24], swordDir: [-0.34, 0.44, 0.83], rFoot: [-0.15, 0, -0.06], lFoot: [0.16, 0, 0.11] },
 ];
 
 function samplePoseFrames(frames: PoseFrame[], t: number): PoseFrame {
@@ -192,26 +178,6 @@ function createPleatedSkirtPanelGeo(arcAngle: number, topR: number, botR: number
   return geo;
 }
 
-function createMartialBootGeo(): THREE.BufferGeometry {
-  const shape = new THREE.Shape();
-  shape.moveTo(-0.043, -0.088);
-  shape.lineTo(0.043, -0.088);
-  shape.quadraticCurveTo(0.052, 0.025, 0.035, 0.118);
-  shape.quadraticCurveTo(0.0, 0.148, -0.035, 0.118);
-  shape.quadraticCurveTo(-0.052, 0.025, -0.043, -0.088);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.056,
-    bevelEnabled: true,
-    bevelThickness: 0.017,
-    bevelSize: 0.013,
-    bevelSegments: 3,
-  });
-  geo.rotateX(Math.PI / 2);
-  geo.translate(0, 0.036, 0.024);
-  geo.computeVertexNormals();
-  return geo;
-}
-
 function loadTex(url: string, srgb: boolean, repeat = 1): THREE.Texture {
   const tex = new THREE.TextureLoader().load(url, (loaded) => {
     const listeners = loaded.userData.__seamlessListeners as Array<() => void> | undefined;
@@ -252,16 +218,28 @@ let SHARED_ASSETS: {
   shadowTex: THREE.CanvasTexture;
   heroHead: THREE.BufferGeometry;
   bossHead: THREE.BufferGeometry;
+  heroHairCap: THREE.BufferGeometry;
+  bossHairCap: THREE.BufferGeometry;
+  heroEyeR: AnimeEyeRigGeometries;
+  heroEyeL: AnimeEyeRigGeometries;
+  bossEyeR: AnimeEyeRigGeometries;
+  bossEyeL: AnimeEyeRigGeometries;
   ear: THREE.BufferGeometry;
   neck: THREE.BufferGeometry;
   belt: THREE.CylinderGeometry;
+  heroWaistSash: THREE.BufferGeometry;
   frontSkirt: THREE.BufferGeometry;
   backSkirt: THREE.BufferGeometry;
   sideSkirt: THREE.BufferGeometry;
+  heroFrontCoat: THREE.BufferGeometry;
+  heroBackCoat: THREE.BufferGeometry;
+  heroSideCoat: THREE.BufferGeometry;
+  heroInnerCape: THREE.BufferGeometry;
   capePanel: THREE.BufferGeometry;
-  boot: THREE.BufferGeometry;
   pauldronArmor: THREE.BufferGeometry;
   pauldronCloth: THREE.BufferGeometry;
+  shoulderMantleHero: THREE.BufferGeometry;
+  innerCollarHero: THREE.BufferGeometry;
   collarHeroL: THREE.BufferGeometry;
   collarHeroR: THREE.BufferGeometry;
   strapHero: THREE.BufferGeometry;
@@ -270,50 +248,57 @@ let SHARED_ASSETS: {
   hornR: THREE.BufferGeometry;
   plumeShort: THREE.BufferGeometry;
   plumeLong: THREE.BufferGeometry;
-  hairCardLong: THREE.BufferGeometry;
-  hairCardMid: THREE.BufferGeometry;
-  hairCardTemple: THREE.BufferGeometry;
-  hairCardBang: THREE.BufferGeometry;
-  hairLockBangSweepL: THREE.BufferGeometry;
-  hairLockBangSweepR: THREE.BufferGeometry;
-  hairLockBangSideL: THREE.BufferGeometry;
-  hairLockBangSideR: THREE.BufferGeometry;
-  hairLockTempleL: THREE.BufferGeometry;
-  hairLockTempleR: THREE.BufferGeometry;
-  hairLockNape: THREE.BufferGeometry;
-  hairLockTailMain: THREE.BufferGeometry;
-  hairLockTailSideL: THREE.BufferGeometry;
-  hairLockTailSideR: THREE.BufferGeometry;
+  // Lush Volumetric 3D Sculpted Anime Hair Locks (ZERO wire needles, ZERO visor shelf!)
+  spikeBangCenter: THREE.BufferGeometry;
+  spikeBangCenterR: THREE.BufferGeometry;
+  spikeBangSweepL: THREE.BufferGeometry;
+  spikeBangSweepR: THREE.BufferGeometry;
+  spikeBangMidL: THREE.BufferGeometry;
+  spikeBangMidR: THREE.BufferGeometry;
+  spikeBangOuterL: THREE.BufferGeometry;
+  spikeBangOuterR: THREE.BufferGeometry;
+  spikeCheekLockL: THREE.BufferGeometry;
+  spikeCheekLockR: THREE.BufferGeometry;
+  spikeTempleLockL: THREE.BufferGeometry;
+  spikeTempleLockR: THREE.BufferGeometry;
+  spikeCrownTuftL: THREE.BufferGeometry;
+  spikeCrownTuftR: THREE.BufferGeometry;
+  spikeNape: THREE.BufferGeometry;
+  spikeTailCenter: THREE.BufferGeometry;
+  spikeTailMidL: THREE.BufferGeometry;
+  spikeTailMidR: THREE.BufferGeometry;
+  spikeTailOuterL: THREE.BufferGeometry;
+  spikeTailOuterR: THREE.BufferGeometry;
+  spikeTailUpperL: THREE.BufferGeometry;
+  spikeTailUpperR: THREE.BufferGeometry;
+  spikeEnemyLong: THREE.BufferGeometry;
+  spikeEnemyMid: THREE.BufferGeometry;
+  spikeBeardMain: THREE.BufferGeometry;
+  spikeMustacheL: THREE.BufferGeometry;
+  spikeMustacheR: THREE.BufferGeometry;
   silkRibbonSeg: THREE.BufferGeometry;
-  hairDark: ReturnType<typeof createHairStrandAlphaTexture>;
-  hairSilver: ReturnType<typeof createHairStrandAlphaTexture>;
-  heroFaceTex: THREE.Texture;
-  heroFaceNrm: THREE.Texture;
-  heroFaceRough: THREE.Texture;
-  allyFaceTex: THREE.Texture;
-  allyFaceNrm: THREE.Texture;
-  allyFaceRough: THREE.Texture;
-  vanguardFaceTex: THREE.Texture;
-  vanguardFaceNrm: THREE.Texture;
-  vanguardFaceRough: THREE.Texture;
-  priestFaceTex: THREE.Texture;
-  priestFaceNrm: THREE.Texture;
-  priestFaceRough: THREE.Texture;
-  eliteFaceTex: THREE.Texture;
-  eliteFaceNrm: THREE.Texture;
-  eliteFaceRough: THREE.Texture;
-  bossFaceTex: THREE.Texture;
-  bossFaceNrm: THREE.Texture;
-  bossFaceRough: THREE.Texture;
-  brocadeTex: THREE.Texture;
-  brocadeNrm: THREE.Texture;
+  // Clean stylized 3D Donghua / Anime Face & Iris Textures (ZERO photo JPG stickers!)
+  heroFaceTex: THREE.CanvasTexture;
+  allyFaceTex: THREE.CanvasTexture;
+  elderFaceTex: THREE.CanvasTexture;
+  vanguardFaceTex: THREE.CanvasTexture;
+  eliteFaceTex: THREE.CanvasTexture;
+  bossFaceTex: THREE.CanvasTexture;
+  irisBySkin: Record<string, THREE.CanvasTexture>;
+  irisAlly: THREE.CanvasTexture;
+  irisVanguard: THREE.CanvasTexture;
+  irisElder: THREE.CanvasTexture;
+  irisElite: THREE.CanvasTexture;
+  irisBoss: THREE.CanvasTexture;
+  // Smooth Donghua Silk & Armor PBR textures
+  donghuaSilkInner: ReturnType<typeof createDonghuaSilkTexture>;
+  donghuaSilkBrocade: ReturnType<typeof createDonghuaSilkTexture>;
   shanwenTex: THREE.Texture;
   shanwenNrm: THREE.Texture;
   ironArmorTex: THREE.Texture;
   ironArmorNrm: THREE.Texture;
   steelPbr: ReturnType<typeof createForgedSteelPbr>;
   leatherPbr: ReturnType<typeof createLeatherPbr>;
-  heroClothLinen: ReturnType<typeof createWovenClothPbr>;
   talismanTex: THREE.CanvasTexture;
 } | null = null;
 
@@ -330,97 +315,112 @@ function getSharedAssets() {
     sctx.fillStyle = sg;
     sctx.fillRect(0, 0, 64, 64);
 
-    // Sculpted anatomical neck with muscular sternocleidomastoid flare into trapezius (never pinched!)
+    // Smooth slender anime neck extending deep (-0.088) inside the upper chest cavity so ZERO hollow neck slit can EVER appear!
     const neckPts = [
-      new THREE.Vector2(0.072, -0.015),
-      new THREE.Vector2(0.061, 0.025),
-      new THREE.Vector2(0.058, 0.065),
-      new THREE.Vector2(0.060, 0.105),
+      new THREE.Vector2(0.078, -0.088),
+      new THREE.Vector2(0.068, -0.032),
+      new THREE.Vector2(0.056, 0.018),
+      new THREE.Vector2(0.050, 0.066),
+      new THREE.Vector2(0.054, 0.118),
     ];
-    const neckGeo = new THREE.LatheGeometry(neckPts, 20);
+    const neckGeo = new THREE.LatheGeometry(neckPts, 24);
     neckGeo.computeVertexNormals();
 
     SHARED_ASSETS = {
       shadow: new THREE.CircleGeometry(0.66, 24),
       shadowTex: new THREE.CanvasTexture(sc),
-      heroHead: createAnatomicalHeadGeometry({
-        faceSpanX: 0.184,
-        faceSpanY: 0.242,
-        uvCenterY: 0.535,
-        jawStrength: 1.0,
-        browDepth: 0.96,
-        seamlessEdgeUv: true,
-      }),
-      bossHead: createAnatomicalHeadGeometry({
-        faceSpanX: 0.266,
-        faceSpanY: 0.288,
-        uvCenterY: 0.518,
-        jawStrength: 1.28,
-        browDepth: 1.38,
-        seamlessEdgeUv: false,
-      }),
+      heroHead: createAnimeHeadGeometry({ variant: 'hero', jawStrength: 1.0, browDepth: 0.90 }),
+      bossHead: createAnimeHeadGeometry({ variant: 'boss', jawStrength: 1.18, browDepth: 1.24 }),
+      heroHairCap: createAnimeHairCapGeometry({ variant: 'hero', volumeLift: 0.0135 }),
+      bossHairCap: createAnimeHairCapGeometry({ variant: 'boss', volumeLift: 0.014 }),
+      heroEyeR: createAnimeEyeGeometrySet(-1, { variant: 'hero', fierce: false }),
+      heroEyeL: createAnimeEyeGeometrySet(1, { variant: 'hero', fierce: false }),
+      bossEyeR: createAnimeEyeGeometrySet(-1, { variant: 'boss', fierce: true }),
+      bossEyeL: createAnimeEyeGeometrySet(1, { variant: 'boss', fierce: true }),
       ear: createEarGeometry(),
       neck: neckGeo,
-      belt: new THREE.CylinderGeometry(0.182, 0.194, 0.105, 24),
+      belt: new THREE.CylinderGeometry(0.180, 0.192, 0.105, 24),
+      heroWaistSash: createSculptedWaistSashGeo(0.98),
       frontSkirt: createPleatedSkirtPanelGeo(1.06, 0.194, 0.305, 0.66),
       backSkirt: createPleatedSkirtPanelGeo(1.48, 0.198, 0.36, 0.74),
       sideSkirt: createPleatedSkirtPanelGeo(0.86, 0.192, 0.295, 0.6),
+      heroFrontCoat: createFlowingCoatTailGeo(0.92, 0.164, 0.250, 0.60, 'frontV'),
+      heroBackCoat: createFlowingCoatTailGeo(1.56, 0.174, 0.338, 0.62, 'backSwallowtail'),
+      heroSideCoat: createFlowingCoatTailGeo(0.94, 0.162, 0.242, 0.54, 'sideSplit'),
+      heroInnerCape: createFlowingCoatTailGeo(1.26, 0.158, 0.312, 0.78, 'backSwallowtail'),
       capePanel: createPleatedSkirtPanelGeo(1.46, 0.25, 0.56, 1.28),
-      boot: createMartialBootGeo(),
       pauldronArmor: createSculptedPauldronGeo(true),
       pauldronCloth: createSculptedPauldronGeo(false),
-      collarHeroL: createCurvedHanfuCollarGeo(1.0, -1),
-      collarHeroR: createCurvedHanfuCollarGeo(1.0, 1),
-      strapHero: createCurvedCrossStrapGeo(1.0, -1),
-      strapVanguard: createCurvedCrossStrapGeo(1.07, 1),
+      shoulderMantleHero: createFlushShoulderMantleGeo(0.98),
+      innerCollarHero: createInnerHanfuCollarGeo(0.98),
+      collarHeroL: createCurvedHanfuCollarGeo(0.98, -1),
+      collarHeroR: createCurvedHanfuCollarGeo(0.98, 1),
+      strapHero: createCurvedCrossStrapGeo(0.98, -1),
+      strapVanguard: createCurvedCrossStrapGeo(1.06, 1),
       hornL: createCurvedWarHornGeo(-1),
       hornR: createCurvedWarHornGeo(1),
       plumeShort: createCurvedWarPlumeGeo(0.22),
       plumeLong: createCurvedWarPlumeGeo(0.32),
-      hairCardLong: createCurvedHairCardGeo(0.45, 0.088, 0.16, 0.022),
-      hairCardMid: createCurvedHairCardGeo(0.26, 0.068, 0.085, 0.014),
-      hairCardTemple: createCurvedHairCardGeo(0.21, 0.044, -0.015, 0.018),
-      hairCardBang: createCurvedHairCardGeo(0.095, 0.042, 0.016, 0.008),
-      hairLockBangSweepL: createSculptedHairLockGeo(0.086, 0.028, 0.022, -0.036),
-      hairLockBangSweepR: createSculptedHairLockGeo(0.074, 0.026, 0.022, 0.032),
-      hairLockBangSideL: createSculptedHairLockGeo(0.114, 0.024, 0.015, -0.018),
-      hairLockBangSideR: createSculptedHairLockGeo(0.114, 0.024, 0.015, 0.018),
-      hairLockTempleL: createSculptedHairLockGeo(0.165, 0.021, 0.012, 0.008),
-      hairLockTempleR: createSculptedHairLockGeo(0.165, 0.021, 0.012, -0.008),
-      hairLockNape: createSculptedHairLockGeo(0.175, 0.042, 0.022, 0.0),
-      hairLockTailMain: createSculptedHairLockGeo(0.41, 0.056, 0.076, 0.0),
-      hairLockTailSideL: createSculptedHairLockGeo(0.35, 0.042, 0.068, 0.032),
-      hairLockTailSideR: createSculptedHairLockGeo(0.35, 0.042, 0.068, -0.032),
-      silkRibbonSeg: createSilkRibbonSegGeo(0.023, 0.108),
-      hairDark: createHairStrandAlphaTexture('#131112', '#26211e', '#463d37'),
-      hairSilver: createHairStrandAlphaTexture('#25252b', '#565964', '#9aa0ae'),
-      heroFaceTex: createSeamlessFaceTexture(loadTex(heroFaceUrl, true, 1), '#c89575'),
-      heroFaceNrm: createSeamlessFaceAuxTexture(loadTex(heroFaceNrmUrl, false, 1), '#8080ff'),
-      heroFaceRough: createSeamlessFaceAuxTexture(loadTex(heroFaceRoughUrl, false, 1), '#b8b8b8'),
-      allyFaceTex: createSeamlessFaceTexture(loadTex(allyFaceUrl, true, 1), '#c89575'),
-      allyFaceNrm: createSeamlessFaceAuxTexture(loadTex(allyFaceNrmUrl, false, 1), '#8080ff'),
-      allyFaceRough: createSeamlessFaceAuxTexture(loadTex(allyFaceRoughUrl, false, 1), '#b8b8b8'),
-      vanguardFaceTex: loadTex(vanguardFaceUrl, true, 1),
-      vanguardFaceNrm: loadTex(vanguardFaceNrmUrl, false, 1),
-      vanguardFaceRough: loadTex(vanguardFaceRoughUrl, false, 1),
-      priestFaceTex: loadTex(priestFaceUrl, true, 1),
-      priestFaceNrm: loadTex(priestFaceNrmUrl, false, 1),
-      priestFaceRough: loadTex(priestFaceRoughUrl, false, 1),
-      eliteFaceTex: loadTex(eliteFaceUrl, true, 1),
-      eliteFaceNrm: loadTex(eliteFaceNrmUrl, false, 1),
-      eliteFaceRough: loadTex(eliteFaceRoughUrl, false, 1),
-      bossFaceTex: loadTex(bossFaceUrl, true, 1),
-      bossFaceNrm: loadTex(bossFaceNrmUrl, false, 1),
-      bossFaceRough: loadTex(bossFaceRoughUrl, false, 1),
-      brocadeTex: loadTex(brocadeUrl, true, 2),
-      brocadeNrm: loadTex(brocadeNrmUrl, false, 2),
+      // Lush fuller layered 3D anime hair locks calibrated flush to heroHairCap (grazing sword-brows cleanly, ZERO eye occlusion!)
+      spikeBangCenter: createAnimeHairSpikeGeo(0.088, 0.034, 0.016, 0.032, -0.010, 0.05),
+      spikeBangCenterR: createAnimeHairSpikeGeo(0.082, 0.030, 0.015, 0.032, 0.016, -0.05),
+      spikeBangSweepL: createAnimeHairSpikeGeo(0.096, 0.046, 0.020, 0.030, -0.038, -0.10),
+      spikeBangSweepR: createAnimeHairSpikeGeo(0.092, 0.044, 0.020, 0.030, 0.036, 0.10),
+      spikeBangMidL: createAnimeHairSpikeGeo(0.112, 0.046, 0.020, 0.028, -0.026, -0.08),
+      spikeBangMidR: createAnimeHairSpikeGeo(0.108, 0.044, 0.020, 0.028, 0.026, 0.08),
+      spikeBangOuterL: createAnimeHairSpikeGeo(0.136, 0.048, 0.022, 0.024, -0.016, -0.06),
+      spikeBangOuterR: createAnimeHairSpikeGeo(0.136, 0.048, 0.022, 0.024, 0.016, 0.06),
+      // Fuller soft cheek-framing side locks (长鬓发 — NOT skinny wire needles!)
+      spikeCheekLockL: createAnimeHairSpikeGeo(0.184, 0.042, 0.022, 0.012, 0.024, 0.06),
+      spikeCheekLockR: createAnimeHairSpikeGeo(0.184, 0.042, 0.022, 0.012, -0.024, -0.06),
+      spikeTempleLockL: createAnimeHairSpikeGeo(0.168, 0.048, 0.024, 0.008, 0.012, -0.04),
+      spikeTempleLockR: createAnimeHairSpikeGeo(0.168, 0.048, 0.024, 0.008, -0.012, 0.04),
+      spikeCrownTuftL: createAnimeHairSpikeGeo(0.078, 0.032, 0.016, -0.026, -0.024, -0.08),
+      spikeCrownTuftR: createAnimeHairSpikeGeo(0.074, 0.030, 0.016, -0.024, 0.022, 0.08),
+      // Lush overlapping nape curtain & rich flowing ponytail locks
+      spikeNape: createAnimeHairSpikeGeo(0.188, 0.068, 0.028, 0.016, 0.0, 0),
+      spikeTailCenter: createAnimeHairSpikeGeo(0.46, 0.084, 0.042, 0.086, 0.0, 0),
+      spikeTailMidL: createAnimeHairSpikeGeo(0.41, 0.068, 0.034, 0.074, 0.034, 0.12),
+      spikeTailMidR: createAnimeHairSpikeGeo(0.41, 0.068, 0.034, 0.074, -0.034, -0.12),
+      spikeTailOuterL: createAnimeHairSpikeGeo(0.35, 0.056, 0.028, 0.056, 0.050, 0.18),
+      spikeTailOuterR: createAnimeHairSpikeGeo(0.35, 0.056, 0.028, 0.056, -0.050, -0.18),
+      spikeTailUpperL: createAnimeHairSpikeGeo(0.29, 0.054, 0.028, 0.092, 0.022, 0.10),
+      spikeTailUpperR: createAnimeHairSpikeGeo(0.29, 0.054, 0.028, 0.092, -0.022, -0.10),
+      spikeEnemyLong: createAnimeHairSpikeGeo(0.42, 0.066, 0.030, 0.082, 0.0, 0),
+      spikeEnemyMid: createAnimeHairSpikeGeo(0.24, 0.056, 0.026, 0.042, 0.0, 0),
+      spikeBeardMain: createAnimeHairSpikeGeo(0.145, 0.036, 0.018, 0.024, 0.0, 0),
+      spikeMustacheL: createAnimeHairSpikeGeo(0.058, 0.016, 0.010, 0.010, -0.030, 0),
+      spikeMustacheR: createAnimeHairSpikeGeo(0.058, 0.016, 0.010, 0.010, 0.030, 0),
+      silkRibbonSeg: createSilkRibbonSegGeo(0.022, 0.108),
+      // Clean stylized 3D Donghua face textures
+      heroFaceTex: createAnimeFaceTexture('hero'),
+      allyFaceTex: createAnimeFaceTexture('ally'),
+      elderFaceTex: createAnimeFaceTexture('elder'),
+      vanguardFaceTex: createAnimeFaceTexture('vanguard'),
+      eliteFaceTex: createAnimeFaceTexture('elite'),
+      bossFaceTex: createAnimeFaceTexture('boss'),
+      // Deeply saturated jewel-like 256x256 3D anime iris textures (ZERO grey-white washout!)
+      irisBySkin: {
+        skin_xiaoyao: createAnimeIrisTexture('#0e7c94', '#2ce8f8', '#08141c'),
+        skin_shuangxue: createAnimeIrisTexture('#1c68c8', '#74e4ff', '#09152b'),
+        skin_chiyan: createAnimeIrisTexture('#b41c14', '#ff9e28', '#1a0608'),
+        skin_zixiao: createAnimeIrisTexture('#6428c8', '#d490ff', '#120826'),
+        skin_jinwu: createAnimeIrisTexture('#c2720c', '#ffe84c', '#1c1004'),
+      },
+      irisAlly: createAnimeIrisTexture('#12806a', '#48f0c8', '#081a16'),
+      irisVanguard: createAnimeIrisTexture('#c26c10', '#ffe066', '#1c1004'),
+      irisElder: createAnimeIrisTexture('#7638d8', '#cca0ff', '#140826'),
+      irisElite: createAnimeIrisTexture('#d41a1a', '#ffa23c', '#200406'),
+      irisBoss: createAnimeIrisTexture('#e0142c', '#ffce50', '#1c0206'),
+      // Clean stylized Donghua silk/brocade + forged armor textures
+      donghuaSilkInner: createDonghuaSilkTexture('inner'),
+      donghuaSilkBrocade: createDonghuaSilkTexture('brocade'),
       shanwenTex: loadTex(shanwenUrl, true, 2),
       shanwenNrm: loadTex(shanwenNrmUrl, false, 2),
       ironArmorTex: loadTex(ironArmorUrl, true, 2),
       ironArmorNrm: loadTex(ironArmorNrmUrl, false, 2),
       steelPbr: createForgedSteelPbr(),
       leatherPbr: createLeatherPbr('#241b16'),
-      heroClothLinen: createWovenClothPbr('#cfc8bc', '#9c9890', false, true),
       talismanTex: createTalismanTexture(),
     };
   }
@@ -460,8 +460,8 @@ export class CharacterRig {
 
   private readonly rHandGroup: THREE.Group;
   private readonly lHandGroup: THREE.Group;
-  private readonly rFootMesh: THREE.Mesh;
-  private readonly lFootMesh: THREE.Mesh;
+  private readonly rFootMesh: THREE.Object3D;
+  private readonly lFootMesh: THREE.Object3D;
 
   private readonly ribbonSegs: THREE.Mesh[][] = [];
   private readonly skirtPanels: THREE.Object3D[] = [];
@@ -472,6 +472,7 @@ export class CharacterRig {
   private weaponEdgeMat?: THREE.MeshStandardMaterial;
   private guardCrystalMat?: THREE.MeshPhysicalMaterial;
   private bossRelicEmberMat?: THREE.MeshStandardMaterial;
+  private bossEyeMat?: THREE.MeshStandardMaterial;
   private readonly bossRimHandles: SilhouetteRimHandle[] = [];
   private bossArmorMat?: THREE.MeshStandardMaterial;
   private bossTrimMat?: THREE.MeshStandardMaterial;
@@ -486,6 +487,10 @@ export class CharacterRig {
   private readonly skinBronzeMat?: THREE.MeshStandardMaterial;
   private readonly heroHairMat?: THREE.MeshPhysicalMaterial;
   private readonly heroHairBaseMat?: THREE.MeshPhysicalMaterial;
+  private heroEyeGroupL?: THREE.Group;
+  private heroEyeGroupR?: THREE.Group;
+  private heroIrisMat?: THREE.MeshStandardMaterial;
+  private heroBrowMat?: THREE.MeshStandardMaterial;
   private heroPonytailGroup?: THREE.Group;
   private readonly heroCrownVariants: Partial<Record<string, THREE.Group>> = {};
   private readonly heroSkinOrnaments: Partial<Record<string, THREE.Group>> = {};
@@ -560,9 +565,11 @@ export class CharacterRig {
 
     const isHeroLike = archetype === 'xiaoyao' || archetype === 'ally';
     const isBossOrElite = archetype === 'boss' || archetype === 'elite';
-    this.shoulderX = archetype === 'boss' ? 0.272 : archetype === 'elite' ? 0.252 : isHeroLike ? 0.232 : 0.242;
-    this._shoulderLocalR.set(-this.shoulderX, 0.455, 0.0);
-    this._shoulderLocalL.set(this.shoulderX, 0.455, 0.0);
+    // Natural sloping Donghua shoulder sockets nested cleanly inside the trapezius-deltoid mantle (ZERO protruding marshmallow tops!)
+    this.shoulderX = archetype === 'boss' ? 0.270 : archetype === 'elite' ? 0.248 : isHeroLike ? 0.194 : 0.236;
+    const shoulderY = isHeroLike ? 0.398 : 0.452;
+    this._shoulderLocalR.set(-this.shoulderX, shoulderY, 0.0);
+    this._shoulderLocalL.set(this.shoulderX, shoulderY, 0.0);
 
     this.root.add(this.bodyGroup);
     this.bodyGroup.scale.setScalar(this.scale);
@@ -619,117 +626,204 @@ export class CharacterRig {
     this.torsoRig = createSeamlessTorsoSkinnedMesh(torsoStyle, torsoMat);
     this.pelvis.add(this.torsoRig.mesh);
 
-    // Sculpted Waist Belt & Ornate Cast-Bronze Clasp
-    const belt = new THREE.Mesh(assets.belt, palette.leather);
-    belt.scale.set(1.06, 1, 0.80);
-    belt.position.y = 0.04;
-    this.pelvis.add(belt);
+    // Sculpted Waist Sash (锦缎腰封) + Seamless Dark Pelvis Connector + Flowing Layered Donghua Coat-Tails
+    if (isHeroLike || archetype === 'caster') {
+      // Solid dark-indigo pelvis/hip connector sealing hips into thighs cleanly (ZERO white pelvis corners below sash!)
+      const pelvisBrief = new THREE.Mesh(new THREE.SphereGeometry(0.158, 22, 14), palette.pants);
+      pelvisBrief.scale.set(1.02, 0.72, 0.76);
+      pelvisBrief.position.set(0, -0.058, 0);
+      pelvisBrief.castShadow = true;
+      this.pelvis.add(pelvisBrief);
 
-    const buckleBase = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.045, 0.022, 16), palette.bronze);
-    buckleBase.rotation.x = Math.PI / 2;
-    buckleBase.scale.set(1.12, 0.92, 0.72);
-    buckleBase.position.set(0, 0.04, 0.156);
-    this.pelvis.add(buckleBase);
+      const waistSash = new THREE.Mesh(assets.heroWaistSash, palette.trim);
+      waistSash.castShadow = true;
+      waistSash.receiveShadow = true;
+      this.pelvis.add(waistSash);
 
-    const sashCord = new THREE.Mesh(new THREE.TorusGeometry(0.182, 0.016, 10, 26), palette.accent);
-    sashCord.rotation.x = Math.PI / 2;
-    sashCord.scale.set(1.04, 0.80, 1);
-    sashCord.position.y = 0.008;
-    this.pelvis.add(sashCord);
+      // Crisp top & bottom gold-trimmed silk sash piping rims
+      const sashTopRim = new THREE.Mesh(new THREE.TorusGeometry(0.156, 0.0062, 8, 28), palette.bronze);
+      sashTopRim.rotation.x = Math.PI / 2;
+      sashTopRim.scale.set(1.01, 0.78, 1);
+      sashTopRim.position.y = 0.122;
+      const sashBotRim = new THREE.Mesh(new THREE.TorusGeometry(0.172, 0.0062, 8, 28), palette.bronze);
+      sashBotRim.rotation.x = Math.PI / 2;
+      sashBotRim.scale.set(1.01, 0.78, 1);
+      sashBotRim.position.y = -0.032;
+      this.pelvis.add(sashTopRim, sashBotRim);
 
-    // Draped Pleated Robe Coat-Tails / Lamellar War Tassets
-    const frontSkirt = new THREE.Mesh(assets.frontSkirt, palette.robeOuter);
-    frontSkirt.position.set(0, 0.005, 0);
-    frontSkirt.castShadow = true;
-    this.pelvis.add(frontSkirt);
-    this.skirtPanels.push(frontSkirt);
+      // Sleek woven accent waist-knot cord & twin hanging front tassels
+      const accentWrap = new THREE.Mesh(new THREE.TorusGeometry(0.164, 0.009, 8, 28), palette.accent);
+      accentWrap.rotation.x = Math.PI / 2;
+      accentWrap.scale.set(1.02, 0.79, 1);
+      accentWrap.position.y = 0.045;
+      this.pelvis.add(accentWrap);
 
-    const backSkirt = new THREE.Mesh(assets.backSkirt, palette.robeOuter);
-    backSkirt.rotation.y = Math.PI;
-    backSkirt.position.set(0, 0.005, 0);
-    backSkirt.castShadow = true;
-    this.pelvis.add(backSkirt);
-    this.skirtPanels.push(backSkirt);
+      // Ornate carved Celadon-Jade & Gold Waist Clasp (玉带扣)
+      const claspFrame = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.039, 0.018, 16), palette.bronze);
+      claspFrame.rotation.x = Math.PI / 2;
+      claspFrame.scale.set(1.18, 0.88, 0.72);
+      claspFrame.position.set(0, 0.045, 0.136);
+      const claspJade = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.022, 0),
+        new THREE.MeshPhysicalMaterial({
+          color: archetype === 'caster' ? '#9c68ff' : '#58c4b2',
+          emissive: new THREE.Color(archetype === 'caster' ? '#4a2096' : '#18524a'),
+          emissiveIntensity: 0.28,
+          roughness: 0.16,
+          clearcoat: 0.9,
+        }),
+      );
+      claspJade.scale.set(1.05, 0.88, 0.42);
+      claspJade.position.set(0, 0.045, 0.146);
+      this.pelvis.add(claspFrame, claspJade);
 
-    const leftSkirt = new THREE.Mesh(assets.sideSkirt, palette.robeInner);
-    leftSkirt.rotation.y = Math.PI / 2;
-    leftSkirt.position.set(0, 0.005, 0);
-    leftSkirt.castShadow = true;
-    this.pelvis.add(leftSkirt);
-    this.skirtPanels.push(leftSkirt);
+      // Twin hanging braided silk waist cords with gold tassel beads
+      for (const s of [-1, 1]) {
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.0052, 0.0038, 0.160, 8), palette.accent);
+        cord.position.set(s * 0.024, -0.056, 0.140);
+        cord.rotation.set(-0.08, 0, s * -0.10);
+        const bead = new THREE.Mesh(new THREE.SphereGeometry(0.0088, 8, 6), palette.bronze);
+        bead.position.set(s * 0.034, -0.134, 0.146);
+        const tasselEnd = new THREE.Mesh(new THREE.ConeGeometry(0.0095, 0.055, 8), palette.accent);
+        tasselEnd.position.set(s * 0.037, -0.168, 0.148);
+        this.pelvis.add(cord, bead, tasselEnd);
+      }
 
-    const rightSkirt = new THREE.Mesh(assets.sideSkirt, palette.robeInner);
-    rightSkirt.rotation.y = -Math.PI / 2;
-    rightSkirt.position.set(0, 0.005, 0);
-    rightSkirt.castShadow = true;
-    this.pelvis.add(rightSkirt);
-    this.skirtPanels.push(rightSkirt);
+      // Softly Curved Multi-Layered Flowing Donghua Hanfu Coat-Tails (tucked seamlessly inside waist sash!)
+      const frontCoat = new THREE.Mesh(assets.heroFrontCoat, palette.robeOuter);
+      frontCoat.position.set(0, -0.016, 0);
+      frontCoat.castShadow = true;
+      this.pelvis.add(frontCoat);
+      this.skirtPanels.push(frontCoat);
+
+      const backCoat = new THREE.Mesh(assets.heroBackCoat, palette.robeOuter);
+      backCoat.rotation.y = Math.PI;
+      backCoat.position.set(0, -0.014, 0);
+      backCoat.castShadow = true;
+      this.pelvis.add(backCoat);
+      this.skirtPanels.push(backCoat);
+
+      const leftCoat = new THREE.Mesh(assets.heroSideCoat, palette.robeOuter);
+      leftCoat.rotation.y = Math.PI / 2;
+      leftCoat.position.set(0, -0.016, 0);
+      leftCoat.castShadow = true;
+      this.pelvis.add(leftCoat);
+      this.skirtPanels.push(leftCoat);
+
+      const rightCoat = new THREE.Mesh(assets.heroSideCoat, palette.robeOuter);
+      rightCoat.rotation.y = -Math.PI / 2;
+      rightCoat.position.set(0, -0.016, 0);
+      rightCoat.castShadow = true;
+      this.pelvis.add(rightCoat);
+      this.skirtPanels.push(rightCoat);
+
+      // Longer Flowing Mist-Silk Inner Back Swallowtail Layer peeking gracefully BELOW outer brocade coat!
+      if (isHeroLike) {
+        const innerCape = new THREE.Mesh(assets.heroInnerCape, palette.robeInner);
+        innerCape.rotation.y = Math.PI;
+        innerCape.position.set(0, -0.018, 0.008);
+        innerCape.castShadow = true;
+        this.pelvis.add(innerCape);
+        this.capeMesh = innerCape;
+      }
+    } else {
+      const belt = new THREE.Mesh(assets.belt, palette.leather);
+      belt.scale.set(1.06, 1, 0.80);
+      belt.position.y = 0.04;
+      this.pelvis.add(belt);
+
+      const buckleBase = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.045, 0.022, 16), palette.bronze);
+      buckleBase.rotation.x = Math.PI / 2;
+      buckleBase.scale.set(1.12, 0.92, 0.72);
+      buckleBase.position.set(0, 0.04, 0.156);
+      this.pelvis.add(buckleBase);
+
+      const sashCord = new THREE.Mesh(new THREE.TorusGeometry(0.182, 0.016, 10, 26), palette.accent);
+      sashCord.rotation.x = Math.PI / 2;
+      sashCord.scale.set(1.04, 0.80, 1);
+      sashCord.position.y = 0.008;
+      this.pelvis.add(sashCord);
+
+      const frontSkirt = new THREE.Mesh(assets.frontSkirt, palette.robeOuter);
+      frontSkirt.position.set(0, 0.005, 0);
+      frontSkirt.castShadow = true;
+      this.pelvis.add(frontSkirt);
+      this.skirtPanels.push(frontSkirt);
+
+      const backSkirt = new THREE.Mesh(assets.backSkirt, palette.robeOuter);
+      backSkirt.rotation.y = Math.PI;
+      backSkirt.position.set(0, 0.005, 0);
+      backSkirt.castShadow = true;
+      this.pelvis.add(backSkirt);
+      this.skirtPanels.push(backSkirt);
+
+      const leftSkirt = new THREE.Mesh(assets.sideSkirt, palette.robeInner);
+      leftSkirt.rotation.y = Math.PI / 2;
+      leftSkirt.position.set(0, 0.005, 0);
+      leftSkirt.castShadow = true;
+      this.pelvis.add(leftSkirt);
+      this.skirtPanels.push(leftSkirt);
+
+      const rightSkirt = new THREE.Mesh(assets.sideSkirt, palette.robeInner);
+      rightSkirt.rotation.y = -Math.PI / 2;
+      rightSkirt.position.set(0, 0.005, 0);
+      rightSkirt.castShadow = true;
+      this.pelvis.add(rightSkirt);
+      this.skirtPanels.push(rightSkirt);
+    }
 
     // Upper Torso Attachment Group (locked to chestBone pivot at y = 0.09)
     this.torso.position.set(0, 0.09, 0);
     this.pelvis.add(this.torso);
 
-    // Form-Fitting Curved Hanfu Cross-Collar Lapels (交领右衽) for cloth characters
+    // Tailored FLUSH Two-Layer V-Shaped Hanfu Cross-Collar + Cloud-Shoulder Mantle (ZERO floating bar, ZERO protruding flaps, ZERO bulbous domes!)
     if (isHeroLike || archetype === 'caster') {
-      const collarL = new THREE.Mesh(assets.collarHeroL, palette.trim);
+      const innerVCollar = new THREE.Mesh(assets.innerCollarHero, palette.robeInner);
+      innerVCollar.position.y = -0.09;
+      const collarL = new THREE.Mesh(assets.collarHeroL, palette.secondary);
       collarL.position.y = -0.09;
-      const collarR = new THREE.Mesh(assets.collarHeroR, palette.trim);
+      const collarR = new THREE.Mesh(assets.collarHeroR, palette.secondary);
       collarR.position.y = -0.09;
-      this.torso.add(collarL, collarR);
+      // Sleek continuous Xianxia cloud-shoulder mantle (云肩) hugging shoulders & upper back seamlessly!
+      const shoulderMantle = new THREE.Mesh(assets.shoulderMantleHero, palette.secondary);
+      shoulderMantle.position.y = -0.09;
+      shoulderMantle.castShadow = true;
+      this.torso.add(innerVCollar, collarL, collarR, shoulderMantle);
     }
 
-    // Sculpted Curved Shoulder Pauldrons / Draped Hanfu Shoulder Yokes
-    for (const side of [-1, 1]) {
-      const sh = new THREE.Mesh(
-        isHeroLike ? assets.pauldronCloth : assets.pauldronArmor,
-        isHeroLike ? palette.secondary : palette.armor,
-      );
-      if (isHeroLike) {
-        sh.scale.set(0.92, 0.85, 0.94);
-        sh.position.set(side * 0.215, 0.458, 0.0);
-        sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.18);
-      } else if (archetype === 'boss') {
-        sh.scale.set(1.42, 1.18, 1.32);
-        sh.position.set(side * 0.272, 0.478, 0.0);
-        sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.24);
-      } else if (archetype === 'elite') {
-        sh.scale.set(1.24, 1.04, 1.18);
-        sh.position.set(side * 0.252, 0.468, 0.0);
-        sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.22);
-      } else {
-        sh.scale.set(1.06, 0.94, 1.04);
-        sh.position.set(side * 0.236, 0.46, 0.0);
-        sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.2);
+    // Sculpted War Pauldrons for Armored Enemies/Bosses ONLY (Hero/Ally use flush Hanfu cloud-shoulder mantle above!)
+    if (!isHeroLike && archetype !== 'caster') {
+      for (const side of [-1, 1]) {
+        const sh = new THREE.Mesh(assets.pauldronArmor, palette.armor);
+        if (archetype === 'boss') {
+          sh.scale.set(1.42, 1.18, 1.32);
+          sh.position.set(side * 0.270, 0.478, 0.0);
+          sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.24);
+        } else if (archetype === 'elite') {
+          sh.scale.set(1.24, 1.04, 1.18);
+          sh.position.set(side * 0.248, 0.468, 0.0);
+          sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.22);
+        } else {
+          sh.scale.set(1.06, 0.94, 1.04);
+          sh.position.set(side * 0.232, 0.46, 0.0);
+          sh.rotation.set(0, side > 0 ? 0 : Math.PI, side * -0.2);
+        }
+        sh.castShadow = true;
+        this.torso.add(sh);
       }
-      sh.castShadow = true;
-      this.torso.add(sh);
     }
 
     this.weaponBackMount.position.set(0.04, 0.39, -0.175);
     this.weaponBackMount.rotation.set(0.1, 0, -2.52);
     this.torso.add(this.weaponBackMount);
 
-    // Anatomically Proportioned Head Mounted Seamlessly Above Sculpted Neck Root
-    this.head.position.set(0, isHeroLike ? 0.524 : 0.512, 0.01);
+    // Stylized 3D Donghua / Anime Head Mounted Seamlessly Above Solid Sealed Neck Base
+    this.head.position.set(0, isHeroLike ? 0.502 : 0.508, 0.006);
     this.torso.add(this.head);
     this.buildHeadDetails(archetype, palette, assets);
 
-    // Tailored Collar / Lowered Forged Iron Gorget (cleanly seals torso linen top at y=0.520 so smooth warm skin neck shows above!)
-    if (isHeroLike || archetype === 'caster') {
-      const innerCollar = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.064, 0.080, 0.028, 22, 1, true),
-        palette.primary,
-      );
-      innerCollar.position.set(0, 0.504, 0.008);
-      this.torso.add(innerCollar);
-      const outerCollar = new THREE.Mesh(
-        new THREE.TorusGeometry(0.075, 0.010, 10, 24),
-        palette.secondary,
-      );
-      outerCollar.rotation.x = Math.PI / 2 + 0.14;
-      outerCollar.position.set(0, 0.520, 0.012);
-      this.torso.add(outerCollar);
-    } else {
+    // Armored Iron Gorget ONLY for armored enemies/bosses (Hero/Ally use seamless tailored V-collar above!)
+    if (!isHeroLike && archetype !== 'caster') {
       const gorget = new THREE.Mesh(
         new THREE.CylinderGeometry(0.084, 0.122, 0.068, 22),
         palette.armor,
@@ -911,14 +1005,14 @@ export class CharacterRig {
 
     // Continuous Seamless SkinnedMesh Arms & Legs (ZERO floating shoulder/elbow/knee sphere seams!)
     const upperArmMat = isHeroLike ? palette.primary : archetype === 'caster' ? palette.robeOuter : palette.armor;
-    const foreArmMat = isHeroLike ? palette.leather : archetype === 'caster' ? palette.secondary : palette.armor;
-    const lowerLegMat = isBossOrElite ? palette.armor : palette.leather;
+    const foreArmMat = isHeroLike ? palette.trim : archetype === 'caster' ? palette.secondary : palette.armor;
+    const lowerLegMat = isHeroLike ? palette.bootMat : isBossOrElite ? palette.armor : palette.leather;
 
     const armSpec = {
       kind: 'arm' as const,
       upperLen: this.upperArmLen,
       lowerLen: this.foreArmLen,
-      topCapRadius: isBossOrElite ? 0.088 : 0.072,
+      topCapRadius: isBossOrElite ? 0.088 : 0.062,
       upperRadii: isBossOrElite
         ? ([
             [0.086, 0.0],
@@ -927,10 +1021,10 @@ export class CharacterRig {
             [0.064, 1.0],
           ] as Array<[number, number]>)
         : ([
-            [0.072, 0.0],
-            [0.068, 0.42],
-            [0.061, 0.86],
-            [0.056, 1.0],
+            [0.062, 0.0],
+            [0.061, 0.40],
+            [0.056, 0.85],
+            [0.052, 1.0],
           ] as Array<[number, number]>),
       lowerRadii: isBossOrElite
         ? ([
@@ -940,21 +1034,21 @@ export class CharacterRig {
             [0.044, 1.0],
           ] as Array<[number, number]>)
         : ([
-            [0.056, 0.0],
-            [0.058, 0.24],
-            [0.048, 0.72],
+            [0.052, 0.0],
+            [0.055, 0.24],
+            [0.046, 0.74],
             [0.039, 1.0],
           ] as Array<[number, number]>),
-      splitT: 0.56,
+      splitT: 0.54,
       clothFolds: isHeroLike || archetype === 'caster',
-      cuffRidge: 0.009,
+      cuffRidge: 0.010,
     };
 
     const legSpec = {
       kind: 'leg' as const,
       upperLen: this.thighLen,
       lowerLen: this.shinLen,
-      topCapRadius: isBossOrElite ? 0.104 : 0.092,
+      topCapRadius: isBossOrElite ? 0.104 : 0.090,
       upperRadii: isBossOrElite
         ? ([
             [0.102, 0.0],
@@ -963,10 +1057,10 @@ export class CharacterRig {
             [0.074, 1.0],
           ] as Array<[number, number]>)
         : ([
-            [0.092, 0.0],
-            [0.088, 0.35],
-            [0.074, 0.82],
-            [0.064, 1.0],
+            [0.090, 0.0],
+            [0.084, 0.36],
+            [0.071, 0.82],
+            [0.062, 1.0],
           ] as Array<[number, number]>),
       lowerRadii: isBossOrElite
         ? ([
@@ -976,14 +1070,14 @@ export class CharacterRig {
             [0.048, 1.0],
           ] as Array<[number, number]>)
         : ([
-            [0.064, 0.0],
-            [0.066, 0.3],
+            [0.062, 0.0],
+            [0.065, 0.30],
             [0.054, 0.76],
-            [0.044, 1.0],
+            [0.046, 1.0],
           ] as Array<[number, number]>),
-      splitT: 0.54,
-      clothFolds: true,
-      cuffRidge: 0.008,
+      splitT: 0.53,
+      clothFolds: false,
+      cuffRidge: 0.010,
     };
 
     this.rArmRig = createSeamlessLimbSkinnedMesh(armSpec, upperArmMat, foreArmMat);
@@ -992,15 +1086,58 @@ export class CharacterRig {
     this.lLegRig = createSeamlessLimbSkinnedMesh(legSpec, palette.pants, lowerLegMat);
     this.bodyGroup.add(this.rArmRig.mesh, this.lArmRig.mesh, this.rLegRig.mesh, this.lLegRig.mesh);
 
-    // Anatomically Sculpted Rounded Hands & Martial Leather Boots
-    const handMat = isHeroLike || archetype === 'caster' ? palette.skin : isBossOrElite ? palette.armor : palette.leather;
-    this.rHandGroup = createRealisticHandGroup(handMat, 'grip');
-    this.lHandGroup = createRealisticHandGroup(handMat, isHeroLike ? 'swordFinger' : 'grip');
+    // Mount Gold-Trimmed Xianxia Arm Bracer Cuffs & Knee-High Martial Boot Guards directly to elbow/knee bones!
+    if (isHeroLike) {
+      const bracerTopRimGeo = new THREE.TorusGeometry(0.062, 0.0062, 8, 20);
+      const bracerCrestGeo = new THREE.OctahedronGeometry(0.013, 0);
+      for (const armRig of [this.rArmRig, this.lArmRig]) {
+        const cuffRim = new THREE.Mesh(bracerTopRimGeo, palette.bronze);
+        cuffRim.rotation.x = Math.PI / 2;
+        cuffRim.position.set(0, -0.028, 0);
+        const crest = new THREE.Mesh(bracerCrestGeo, palette.bronze);
+        crest.scale.set(0.85, 1.45, 0.45);
+        crest.position.set(0, -0.105, -0.056);
+        armRig.midBone.add(cuffRim, crest);
+      }
 
-    this.rFootMesh = new THREE.Mesh(assets.boot, palette.leather);
-    this.lFootMesh = new THREE.Mesh(assets.boot, palette.leather);
-    this.rFootMesh.castShadow = true;
-    this.lFootMesh.castShadow = true;
+      const bootCollarGeo = new THREE.TorusGeometry(0.068, 0.0068, 8, 22);
+      const kneePlateGeo = new THREE.SphereGeometry(0.044, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.52);
+      const shinStrapGeo = new THREE.TorusGeometry(0.060, 0.0046, 6, 18);
+      for (const legRig of [this.rLegRig, this.lLegRig]) {
+        const bootRim = new THREE.Mesh(bootCollarGeo, palette.bronze);
+        bootRim.rotation.x = Math.PI / 2;
+        bootRim.position.set(0, -0.026, 0);
+
+        const kneeGuard = new THREE.Mesh(kneePlateGeo, palette.bronze);
+        kneeGuard.rotation.x = Math.PI / 2;
+        kneeGuard.scale.set(0.95, 0.48, 1.15);
+        kneeGuard.position.set(0, -0.012, 0.056);
+
+        const shinStrap = new THREE.Mesh(shinStrapGeo, palette.trim);
+        shinStrap.rotation.x = Math.PI / 2;
+        shinStrap.position.set(0, -0.165, 0);
+
+        legRig.midBone.add(bootRim, kneeGuard, shinStrap);
+      }
+    }
+
+    // Properly Proportioned Sculpted Anime Hands (with gold-rimmed martial bracer cuffs) & Detailed Martial Boots
+    const handMat = isHeroLike || archetype === 'caster' ? palette.skin : isBossOrElite ? palette.armor : palette.leather;
+    this.rHandGroup = createRealisticHandGroup(
+      handMat,
+      'grip',
+      isHeroLike ? palette.bronze : undefined,
+      isHeroLike ? palette.trim : undefined,
+    );
+    this.lHandGroup = createRealisticHandGroup(
+      handMat,
+      isHeroLike ? 'swordFinger' : 'grip',
+      isHeroLike ? palette.bronze : undefined,
+      isHeroLike ? palette.trim : undefined,
+    );
+
+    this.rFootMesh = createDetailedMartialBootGroup(lowerLegMat, palette.trim, palette.bronze);
+    this.lFootMesh = createDetailedMartialBootGroup(lowerLegMat, palette.trim, palette.bronze);
     this.bodyGroup.add(this.rHandGroup, this.lHandGroup, this.rFootMesh, this.lFootMesh);
 
     this.bodyGroup.add(this.weaponHandMount);
@@ -1015,182 +1152,204 @@ export class CharacterRig {
     assets: ReturnType<typeof getSharedAssets>,
   ) {
     const bronze = new THREE.MeshStandardMaterial({
-      color: '#a8874e',
-      roughness: 0.36,
-      metalness: 0.86,
+      color: '#cfa85a',
+      emissive: new THREE.Color('#382608'),
+      emissiveIntensity: 0.10,
+      roughness: 0.28,
+      metalness: 0.88,
     });
     const leather = new THREE.MeshStandardMaterial({
       map: assets.leatherPbr.map,
       bumpMap: assets.leatherPbr.bumpMap,
-      bumpScale: 0.045,
+      bumpScale: 0.025,
       roughnessMap: assets.leatherPbr.roughnessMap,
-      roughness: 0.82,
-      metalness: 0.08,
+      color: '#2b221f',
+      roughness: 0.68,
+      metalness: 0.12,
     });
 
-    const indigoBrocade = new THREE.MeshPhysicalMaterial({
-      map: assets.brocadeTex,
-      normalMap: assets.brocadeNrm,
-      normalScale: new THREE.Vector2(0.95, 0.95),
-      roughness: 0.84,
-      metalness: 0.06,
-      sheen: 0.38,
-      sheenColor: new THREE.Color('#5a7490'),
-      sheenRoughness: 0.78,
+    // Clean, smooth Donghua Silk Brocade (tints vividly across all 5 Hero Skins — ZERO dark muddy photo noise!)
+    const donghuaBrocade = new THREE.MeshPhysicalMaterial({
+      map: assets.donghuaSilkBrocade.map,
+      bumpMap: assets.donghuaSilkBrocade.bumpMap,
+      bumpScale: 0.010,
+      color: new THREE.Color('#2c5476'),
+      roughness: 0.64,
+      metalness: 0.08,
+      sheen: 0.50,
+      sheenColor: new THREE.Color('#74b4d8'),
+      sheenRoughness: 0.54,
       side: THREE.DoubleSide,
     });
 
     const shanwenArmor = new THREE.MeshStandardMaterial({
       map: assets.shanwenTex,
       normalMap: assets.shanwenNrm,
-      normalScale: new THREE.Vector2(1.25, 1.25),
-      roughness: 0.42,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      roughness: 0.40,
       metalness: 0.78,
       color: new THREE.Color('#c2bec6'),
       side: THREE.DoubleSide,
     });
 
-    const makeHairMat = (hairTex: ReturnType<typeof createHairStrandAlphaTexture>, rough = 0.56) =>
-      new THREE.MeshStandardMaterial({
-        map: hairTex.map,
-        alphaMap: hairTex.alphaMap,
-        bumpMap: hairTex.bumpMap,
-        bumpScale: 0.018,
-        alphaTest: 0.22,
+    // Silky glossy 3D Anime Hair material (soft anime "angel ring" sheen without harsh white back-ridge blowout!)
+    const makeAnimeHairMat = (colorHex = '#1b1d26', sheenHex = '#647698', rough = 0.38) =>
+      new THREE.MeshPhysicalMaterial({
+        color: colorHex,
         roughness: rough,
         metalness: 0.08,
+        sheen: 0.52,
+        sheenColor: new THREE.Color(sheenHex),
+        sheenRoughness: 0.42,
+        clearcoat: 0.14,
+        clearcoatRoughness: 0.36,
         side: THREE.DoubleSide,
       });
 
-    const makeGlossyHeroHairMat = (colorHex = '#161314', sheenHex = '#4c433e') =>
+    const makeAnimeHairBaseMat = (colorHex = '#161820', sheenHex = '#526282', rough = 0.38) =>
       new THREE.MeshPhysicalMaterial({
         color: colorHex,
-        roughness: 0.40,
-        metalness: 0.06,
-        sheen: 0.55,
+        roughness: rough,
+        metalness: 0.09,
+        sheen: 0.66,
         sheenColor: new THREE.Color(sheenHex),
-        sheenRoughness: 0.44,
+        sheenRoughness: 0.40,
         clearcoat: 0.22,
-        clearcoatRoughness: 0.36,
+        clearcoatRoughness: 0.32,
+        side: THREE.DoubleSide,
       });
 
-    const makeGlossyHeroHairBaseMat = (colorHex = '#141112', sheenHex = '#403835') =>
-      new THREE.MeshPhysicalMaterial({
-        color: colorHex,
-        roughness: 0.46,
-        metalness: 0.05,
-        sheen: 0.48,
-        sheenColor: new THREE.Color(sheenHex),
-        sheenRoughness: 0.48,
-      });
-
-    const makeSkinMat = (
-      neckHex: string,
+    // Clean, luminous cel-inspired Donghua Anime Skin (100% seamless across face, ears, neck & hands!)
+    const makeAnimeSkinMat = (
+      skinHex: string,
       sssHex: string,
       sssStrength: number,
       opts?: { sheen?: number; sheenColor?: string; emissive?: string; emissiveIntensity?: number; roughness?: number },
     ) =>
       applyHumanSkinSss(
         new THREE.MeshPhysicalMaterial({
-          color: neckHex,
-          roughness: opts?.roughness ?? 0.64,
+          color: skinHex,
+          roughness: opts?.roughness ?? 0.62,
           metalness: 0.0,
-          sheen: opts?.sheen ?? 0.14,
-          sheenColor: new THREE.Color(opts?.sheenColor ?? '#c4886c'),
-          sheenRoughness: 0.74,
-          emissive: new THREE.Color(opts?.emissive ?? '#140a06'),
-          emissiveIntensity: opts?.emissiveIntensity ?? 0.04,
+          sheen: opts?.sheen ?? 0.22,
+          sheenColor: new THREE.Color(opts?.sheenColor ?? '#ffe0cc'),
+          sheenRoughness: 0.68,
+          emissive: new THREE.Color(opts?.emissive ?? '#382018'),
+          emissiveIntensity: opts?.emissiveIntensity ?? 0.14,
         }),
         sssHex,
         sssStrength,
       );
 
-    const makeFaceMat = (
-      map: THREE.Texture,
-      nrm: THREE.Texture,
-      rough: THREE.Texture,
-      normalScale: number,
+    const makeAnimeFaceMat = (
+      faceMap: THREE.Texture,
       sssHex: string,
       sssStrength: number,
-      opts?: { roughness?: number; sheen?: number; sheenColor?: string; emissive?: string; emissiveIntensity?: number },
+      opts?: { sheen?: number; sheenColor?: string; emissive?: string; emissiveIntensity?: number; roughness?: number },
     ) =>
       applyHumanSkinSss(
         new THREE.MeshPhysicalMaterial({
-          map,
-          normalMap: nrm,
-          normalScale: new THREE.Vector2(normalScale, normalScale),
-          roughnessMap: rough,
-          roughness: opts?.roughness ?? 0.92, // multiplied by anatomical roughnessMap
+          map: faceMap,
+          color: '#ffffff',
+          roughness: opts?.roughness ?? 0.62,
           metalness: 0.0,
-          sheen: opts?.sheen ?? 0.12,
-          sheenColor: new THREE.Color(opts?.sheenColor ?? '#d29a82'),
-          sheenRoughness: 0.74,
-          emissive: new THREE.Color(opts?.emissive ?? '#1a0e09'),
-          emissiveIntensity: opts?.emissiveIntensity ?? 0.04,
+          sheen: opts?.sheen ?? 0.22,
+          sheenColor: new THREE.Color(opts?.sheenColor ?? '#ffe0cc'),
+          sheenRoughness: 0.68,
+          emissive: new THREE.Color(opts?.emissive ?? '#382018'),
+          emissiveIntensity: opts?.emissiveIntensity ?? 0.14,
         }),
         sssHex,
         sssStrength,
       );
+
+    const heroBootMat = new THREE.MeshStandardMaterial({
+      color: '#364056',
+      emissive: new THREE.Color('#121828'),
+      emissiveIntensity: 0.18,
+      roughness: 0.46,
+      metalness: 0.18,
+    });
 
     if (archetype === 'xiaoyao') {
       const heroBronze = bronze.clone();
       const heroPrimary = applySilhouetteRim(
         new THREE.MeshPhysicalMaterial({
-          map: assets.heroClothLinen.map,
-          bumpMap: assets.heroClothLinen.bumpMap,
-          bumpScale: 0.04,
-          roughness: 0.88,
+          map: assets.donghuaSilkInner.map,
+          bumpMap: assets.donghuaSilkInner.bumpMap,
+          bumpScale: 0.012,
+          color: '#e2dccf',
+          roughness: 0.78,
           metalness: 0.02,
           sheen: 0.24,
-          sheenColor: new THREE.Color('#ded6c8'),
-          sheenRoughness: 0.84,
+          sheenColor: new THREE.Color('#ece6da'),
+          sheenRoughness: 0.72,
+          side: THREE.DoubleSide,
         }),
         '#6ad8e8',
-        0.2,
-        3.1,
+        0.16,
+        3.2,
       );
-      applySilhouetteRim(indigoBrocade, '#5ecae0', 0.3, 2.9);
+      applySilhouetteRim(donghuaBrocade, '#5ecae0', 0.22, 3.0);
       return {
         primary: heroPrimary,
-        secondary: indigoBrocade,
-        robeOuter: indigoBrocade,
+        secondary: donghuaBrocade,
+        robeOuter: donghuaBrocade,
         robeInner: new THREE.MeshPhysicalMaterial({
-          map: assets.heroClothLinen.map,
-          bumpMap: assets.heroClothLinen.bumpMap,
-          bumpScale: 0.038,
-          roughness: 0.9,
+          map: assets.donghuaSilkInner.map,
+          bumpMap: assets.donghuaSilkInner.bumpMap,
+          bumpScale: 0.008,
+          color: '#d4dce4',
+          roughness: 0.78,
           metalness: 0.02,
+          sheen: 0.24,
+          sheenColor: new THREE.Color('#e4eef4'),
           side: THREE.DoubleSide,
         }),
         armor: leather,
         accent: new THREE.MeshPhysicalMaterial({
-          color: '#6e1e1c',
-          roughness: 0.8,
+          color: '#8e2224',
+          roughness: 0.58,
           metalness: 0.04,
-          sheen: 0.28,
-          sheenColor: new THREE.Color('#9e3e38'),
+          sheen: 0.48,
+          sheenColor: new THREE.Color('#d85652'),
           side: THREE.DoubleSide,
         }),
-        trim: new THREE.MeshStandardMaterial({ color: '#1a2a3c', roughness: 0.8, metalness: 0.08 }),
+        trim: new THREE.MeshStandardMaterial({
+          color: '#253d56',
+          emissive: new THREE.Color('#0c1826'),
+          emissiveIntensity: 0.14,
+          roughness: 0.50,
+          metalness: 0.16,
+          side: THREE.DoubleSide,
+        }),
         bronze: heroBronze,
         leather,
-        skin: makeSkinMat('#c89474', '#df653e', 0.36, {
+        bootMat: heroBootMat,
+        skin: makeAnimeSkinMat('#efc2a4', '#e06848', 0.24, {
           roughness: 0.64,
-          sheen: 0.15,
-          sheenColor: '#e6ae8f',
-          emissive: '#22120a',
-          emissiveIntensity: 0.07,
+          sheen: 0.16,
+          sheenColor: '#ffd2b4',
+          emissive: '#3e1e12',
+          emissiveIntensity: 0.10,
         }),
-        faceMat: makeFaceMat(assets.heroFaceTex, assets.heroFaceNrm, assets.heroFaceRough, 0.62, '#df653e', 0.36, {
-          roughness: 0.86,
-          sheen: 0.15,
-          sheenColor: '#e6ae8f',
-          emissive: '#22120a',
-          emissiveIntensity: 0.07,
+        faceMat: makeAnimeFaceMat(assets.heroFaceTex, '#e06848', 0.24, {
+          roughness: 0.64,
+          sheen: 0.16,
+          sheenColor: '#ffd2b4',
+          emissive: '#3e1e12',
+          emissiveIntensity: 0.10,
         }),
-        hair: makeGlossyHeroHairMat('#161314', '#4c433e'),
-        hairBase: makeGlossyHeroHairBaseMat('#141112', '#403835'),
-        pants: new THREE.MeshStandardMaterial({ color: '#1a2028', roughness: 0.9 }),
+        hair: makeAnimeHairMat('#191b24', '#5c729a', 0.34),
+        hairBase: makeAnimeHairBaseMat('#151720', '#4c6084', 0.38),
+        pants: new THREE.MeshPhysicalMaterial({
+          color: '#2c3e5e',
+          emissive: new THREE.Color('#0e1828'),
+          emissiveIntensity: 0.14,
+          roughness: 0.66,
+          sheen: 0.34,
+          sheenColor: new THREE.Color('#668ac0'),
+        }),
         weaponGlow: new THREE.MeshStandardMaterial({
           map: assets.steelPbr.map,
           color: '#cfdbe2',
@@ -1205,7 +1364,7 @@ export class CharacterRig {
     const ironArmor = new THREE.MeshStandardMaterial({
       map: assets.ironArmorTex,
       normalMap: assets.ironArmorNrm,
-      normalScale: new THREE.Vector2(1.3, 1.3),
+      normalScale: new THREE.Vector2(1.2, 1.2),
       roughness: 0.38,
       metalness: 0.74,
       color: new THREE.Color('#c8ced6'),
@@ -1213,23 +1372,25 @@ export class CharacterRig {
     });
 
     if (archetype === 'ally') {
-      const silverBrocade = indigoBrocade.clone();
-      silverBrocade.color.set('#7496ac');
-      applySilhouetteRim(silverBrocade, '#62dbb8', 0.3, 2.9);
+      const silverBrocade = donghuaBrocade.clone();
+      silverBrocade.color.set('#46768c');
+      silverBrocade.sheenColor.set('#88d2dc');
+      applySilhouetteRim(silverBrocade, '#62dbb8', 0.26, 2.9);
       const allyPrimary = applySilhouetteRim(
         new THREE.MeshPhysicalMaterial({
-          map: assets.heroClothLinen.map,
-          bumpMap: assets.heroClothLinen.bumpMap,
-          bumpScale: 0.04,
-          color: '#243244',
-          roughness: 0.86,
+          map: assets.donghuaSilkInner.map,
+          bumpMap: assets.donghuaSilkInner.bumpMap,
+          bumpScale: 0.010,
+          color: '#2d3f54',
+          roughness: 0.74,
           metalness: 0.04,
-          sheen: 0.28,
-          sheenColor: new THREE.Color('#7ca2b8'),
-          sheenRoughness: 0.8,
+          sheen: 0.34,
+          sheenColor: new THREE.Color('#80b4c8'),
+          sheenRoughness: 0.66,
+          side: THREE.DoubleSide,
         }),
         '#62dbb8',
-        0.24,
+        0.22,
         3.0,
       );
       return {
@@ -1237,40 +1398,46 @@ export class CharacterRig {
         secondary: silverBrocade,
         robeOuter: silverBrocade,
         robeInner: new THREE.MeshPhysicalMaterial({
-          map: assets.heroClothLinen.map,
-          color: '#c8d2dc',
-          roughness: 0.88,
+          map: assets.donghuaSilkInner.map,
+          color: '#cedce4',
+          roughness: 0.76,
           side: THREE.DoubleSide,
         }),
         armor: leather,
         accent: new THREE.MeshPhysicalMaterial({
-          color: '#1c5e58',
-          roughness: 0.78,
+          color: '#1e6e66',
+          roughness: 0.62,
           metalness: 0.04,
-          sheen: 0.28,
-          sheenColor: new THREE.Color('#4ca89c'),
+          sheen: 0.44,
+          sheenColor: new THREE.Color('#5cc4b6'),
           side: THREE.DoubleSide,
         }),
-        trim: new THREE.MeshStandardMaterial({ color: '#b4c2ce', roughness: 0.68, metalness: 0.2 }),
+        trim: new THREE.MeshStandardMaterial({
+          color: '#263e54',
+          roughness: 0.52,
+          metalness: 0.16,
+          side: THREE.DoubleSide,
+        }),
         bronze,
         leather,
-        skin: makeSkinMat('#c89474', '#df653e', 0.36, {
+        bootMat: heroBootMat,
+        skin: makeAnimeSkinMat('#eec4a8', '#de6a4c', 0.24, {
           roughness: 0.64,
-          sheen: 0.15,
-          sheenColor: '#e6ae8f',
-          emissive: '#22120a',
-          emissiveIntensity: 0.07,
+          sheen: 0.16,
+          sheenColor: '#ffd2b4',
+          emissive: '#3e1e12',
+          emissiveIntensity: 0.10,
         }),
-        faceMat: makeFaceMat(assets.allyFaceTex, assets.allyFaceNrm, assets.allyFaceRough, 0.62, '#df653e', 0.36, {
-          roughness: 0.86,
-          sheen: 0.15,
-          sheenColor: '#e6ae8f',
-          emissive: '#22120a',
-          emissiveIntensity: 0.07,
+        faceMat: makeAnimeFaceMat(assets.allyFaceTex, '#de6a4c', 0.24, {
+          roughness: 0.64,
+          sheen: 0.16,
+          sheenColor: '#ffd2b4',
+          emissive: '#3e1e12',
+          emissiveIntensity: 0.10,
         }),
-        hair: makeGlossyHeroHairMat('#15161c', '#454b58'),
-        hairBase: makeGlossyHeroHairBaseMat('#131418', '#3a3f4a'),
-        pants: new THREE.MeshStandardMaterial({ color: '#161d28', roughness: 0.9 }),
+        hair: makeAnimeHairMat('#171c28', '#52688a', 0.34),
+        hairBase: makeAnimeHairBaseMat('#131722', '#445878', 0.38),
+        pants: new THREE.MeshStandardMaterial({ color: '#263650', roughness: 0.72 }),
         weaponGlow: new THREE.MeshStandardMaterial({
           map: assets.steelPbr.map,
           color: '#cce0dc',
@@ -1287,8 +1454,8 @@ export class CharacterRig {
       const bladesmanAccent = applySilhouetteRim(
         new THREE.MeshPhysicalMaterial({
           color: '#6e1e18',
-          roughness: 0.78,
-          sheen: 0.3,
+          roughness: 0.72,
+          sheen: 0.36,
           sheenColor: new THREE.Color('#a44236'),
           side: THREE.DoubleSide,
         }),
@@ -1298,19 +1465,20 @@ export class CharacterRig {
       );
       return {
         primary: ironArmor,
-        secondary: new THREE.MeshStandardMaterial({ color: '#381c1d', roughness: 0.82, metalness: 0.14 }),
+        secondary: new THREE.MeshStandardMaterial({ color: '#381c1d', roughness: 0.78, metalness: 0.14 }),
         robeOuter: ironArmor,
-        robeInner: new THREE.MeshStandardMaterial({ color: '#2d1617', roughness: 0.88, side: THREE.DoubleSide }),
+        robeInner: new THREE.MeshStandardMaterial({ color: '#2d1617', roughness: 0.84, side: THREE.DoubleSide }),
         armor: ironArmor,
         accent: bladesmanAccent,
-        trim: new THREE.MeshStandardMaterial({ color: '#45201a', roughness: 0.76 }),
+        trim: new THREE.MeshStandardMaterial({ color: '#45201a', roughness: 0.72 }),
         bronze,
         leather,
-        skin: makeSkinMat('#573b2b', '#b84824', 0.3),
-        faceMat: makeFaceMat(assets.vanguardFaceTex, assets.vanguardFaceNrm, assets.vanguardFaceRough, 0.9, '#b84824', 0.32),
-        hair: makeHairMat(assets.hairDark, 0.66),
-        hairBase: new THREE.MeshStandardMaterial({ color: '#1a1514', roughness: 0.78 }),
-        pants: new THREE.MeshStandardMaterial({ color: '#1f1b1b', roughness: 0.9 }),
+        bootMat: leather,
+        skin: makeAnimeSkinMat('#d4a484', '#c8603a', 0.22, { emissive: '#2c160e', emissiveIntensity: 0.10 }),
+        faceMat: makeAnimeFaceMat(assets.vanguardFaceTex, '#c8603a', 0.22, { emissive: '#2c160e', emissiveIntensity: 0.10 }),
+        hair: makeAnimeHairMat('#1c1616', '#56423c', 0.38),
+        hairBase: makeAnimeHairBaseMat('#171212', '#463632', 0.42),
+        pants: new THREE.MeshStandardMaterial({ color: '#272224', roughness: 0.84 }),
         weaponGlow: new THREE.MeshStandardMaterial({
           map: assets.steelPbr.map,
           color: '#e0a888',
@@ -1333,8 +1501,8 @@ export class CharacterRig {
       const eliteAccent = applySilhouetteRim(
         new THREE.MeshPhysicalMaterial({
           color: '#6b1820',
-          roughness: 0.78,
-          sheen: 0.36,
+          roughness: 0.74,
+          sheen: 0.38,
           sheenColor: new THREE.Color('#c4424c'),
           side: THREE.DoubleSide,
         }),
@@ -1344,19 +1512,20 @@ export class CharacterRig {
       );
       return {
         primary: eliteArmor,
-        secondary: new THREE.MeshStandardMaterial({ color: '#44151b', roughness: 0.8, metalness: 0.2 }),
+        secondary: new THREE.MeshStandardMaterial({ color: '#44151b', roughness: 0.76, metalness: 0.2 }),
         robeOuter: eliteArmor,
-        robeInner: new THREE.MeshStandardMaterial({ color: '#331116', roughness: 0.86, side: THREE.DoubleSide }),
+        robeInner: new THREE.MeshStandardMaterial({ color: '#331116', roughness: 0.84, side: THREE.DoubleSide }),
         armor: eliteArmor,
         accent: eliteAccent,
-        trim: new THREE.MeshStandardMaterial({ color: '#782626', roughness: 0.66, metalness: 0.28 }),
+        trim: new THREE.MeshStandardMaterial({ color: '#782626', roughness: 0.64, metalness: 0.28 }),
         bronze,
         leather,
-        skin: makeSkinMat('#553428', '#b84226', 0.32),
-        faceMat: makeFaceMat(assets.eliteFaceTex, assets.eliteFaceNrm, assets.eliteFaceRough, 0.92, '#b84226', 0.34),
-        hair: makeHairMat(assets.hairDark, 0.62),
-        hairBase: new THREE.MeshStandardMaterial({ color: '#181414', roughness: 0.76 }),
-        pants: new THREE.MeshStandardMaterial({ color: '#1d171b', roughness: 0.88 }),
+        bootMat: eliteArmor,
+        skin: makeAnimeSkinMat('#c6aaa0', '#b84836', 0.22, { emissive: '#281212', emissiveIntensity: 0.11 }),
+        faceMat: makeAnimeFaceMat(assets.eliteFaceTex, '#b84836', 0.22, { emissive: '#281212', emissiveIntensity: 0.11 }),
+        hair: makeAnimeHairMat('#1e1519', '#783644', 0.36),
+        hairBase: makeAnimeHairBaseMat('#171014', '#602a36', 0.40),
+        pants: new THREE.MeshStandardMaterial({ color: '#261d24', roughness: 0.84 }),
         weaponGlow: new THREE.MeshStandardMaterial({
           map: assets.steelPbr.map,
           color: '#eab0a4',
@@ -1369,38 +1538,39 @@ export class CharacterRig {
     }
 
     if (archetype === 'caster') {
-      const casterBrocade = indigoBrocade.clone();
-      casterBrocade.color.set('#565268');
+      const casterBrocade = donghuaBrocade.clone();
+      casterBrocade.color.set('#4c4466');
       casterBrocade.emissive.set('#1a0e32');
       casterBrocade.emissiveIntensity = 0.16;
-      applySilhouetteRim(casterBrocade, '#9c60ff', 0.58, 2.5);
+      applySilhouetteRim(casterBrocade, '#9c60ff', 0.56, 2.5);
       const casterAccent = applySilhouetteRim(
         new THREE.MeshPhysicalMaterial({
           color: '#463760',
-          roughness: 0.78,
-          sheen: 0.3,
-          sheenColor: new THREE.Color('#8e74c0'),
+          roughness: 0.72,
+          sheen: 0.38,
+          sheenColor: new THREE.Color('#9c7cd8'),
           side: THREE.DoubleSide,
         }),
         '#b078ff',
-        0.48,
+        0.46,
         2.5,
       );
       return {
         primary: casterBrocade,
-        secondary: new THREE.MeshStandardMaterial({ color: '#292436', roughness: 0.84 }),
+        secondary: new THREE.MeshStandardMaterial({ color: '#332c48', roughness: 0.74, side: THREE.DoubleSide }),
         robeOuter: casterBrocade,
-        robeInner: new THREE.MeshStandardMaterial({ color: '#1f1b2a', roughness: 0.9, side: THREE.DoubleSide }),
+        robeInner: new THREE.MeshStandardMaterial({ color: '#28223a', roughness: 0.82, side: THREE.DoubleSide }),
         armor: casterBrocade,
         accent: casterAccent,
-        trim: new THREE.MeshStandardMaterial({ color: '#5e5274', roughness: 0.78 }),
+        trim: new THREE.MeshStandardMaterial({ color: '#564872', roughness: 0.68, side: THREE.DoubleSide }),
         bronze,
         leather,
-        skin: makeSkinMat('#5f4b44', '#a85a44', 0.28),
-        faceMat: makeFaceMat(assets.priestFaceTex, assets.priestFaceNrm, assets.priestFaceRough, 0.88, '#a85a44', 0.3),
-        hair: makeHairMat(assets.hairSilver, 0.64),
-        hairBase: new THREE.MeshStandardMaterial({ color: '#34353c', roughness: 0.76 }),
-        pants: new THREE.MeshStandardMaterial({ color: '#181822', roughness: 0.92 }),
+        bootMat: heroBootMat,
+        skin: makeAnimeSkinMat('#e2c5ae', '#c8765c', 0.20, { emissive: '#2c1c18', emissiveIntensity: 0.10 }),
+        faceMat: makeAnimeFaceMat(assets.elderFaceTex, '#c8765c', 0.20, { emissive: '#2c1c18', emissiveIntensity: 0.10 }),
+        hair: makeAnimeHairMat('#cfd4de', '#ffffff', 0.36),
+        hairBase: makeAnimeHairBaseMat('#b8beca', '#e6ecfa', 0.40),
+        pants: new THREE.MeshStandardMaterial({ color: '#242238', roughness: 0.84 }),
         weaponGlow: new THREE.MeshStandardMaterial({
           color: '#c8a8ff',
           emissive: new THREE.Color('#7838e8'),
@@ -1411,7 +1581,7 @@ export class CharacterRig {
       };
     }
 
-    // Boss: Live-action Fallen Warlord / Demon Sovereign in heavy Tang/Ming Shanwen Armor (山文甲)
+    // Boss: Stylized 3D Donghua Demon Sovereign in heavy Tang/Ming Shanwen Armor (山文甲)
     const bossArmor = shanwenArmor.clone();
     bossArmor.color.set('#cfc6cf');
     bossArmor.emissive.set('#220a10');
@@ -1420,11 +1590,11 @@ export class CharacterRig {
     const bossAccent = applySilhouetteRim(
       new THREE.MeshPhysicalMaterial({
         color: '#5a161e',
-        roughness: 0.82,
+        roughness: 0.78,
         metalness: 0.04,
-        sheen: 0.36,
+        sheen: 0.40,
         sheenColor: new THREE.Color('#a6323e'),
-        sheenRoughness: 0.74,
+        sheenRoughness: 0.70,
         side: THREE.DoubleSide,
       }),
       '#ff3848',
@@ -1435,19 +1605,20 @@ export class CharacterRig {
 
     return {
       primary: bossArmor,
-      secondary: new THREE.MeshStandardMaterial({ color: '#4a1820', roughness: 0.78, metalness: 0.22 }),
+      secondary: new THREE.MeshStandardMaterial({ color: '#4a1820', roughness: 0.74, metalness: 0.22 }),
       robeOuter: bossArmor,
-      robeInner: new THREE.MeshStandardMaterial({ color: '#3c131b', roughness: 0.84, side: THREE.DoubleSide }),
+      robeInner: new THREE.MeshStandardMaterial({ color: '#3c131b', roughness: 0.82, side: THREE.DoubleSide }),
       armor: bossArmor,
       accent: bossAccent,
-      trim: new THREE.MeshStandardMaterial({ color: '#78222a', roughness: 0.66, metalness: 0.32 }),
+      trim: new THREE.MeshStandardMaterial({ color: '#78222a', roughness: 0.64, metalness: 0.32 }),
       bronze,
       leather,
-      skin: makeSkinMat('#7c726c', '#9e3e28', 0.28),
-      faceMat: makeFaceMat(assets.bossFaceTex, assets.bossFaceNrm, assets.bossFaceRough, 0.95, '#9e3e28', 0.28),
-      hair: makeHairMat(assets.hairSilver, 0.6),
-      hairBase: new THREE.MeshStandardMaterial({ color: '#242329', roughness: 0.74 }),
-      pants: new THREE.MeshStandardMaterial({ color: '#1f1b26', roughness: 0.82 }),
+      bootMat: bossArmor,
+      skin: makeAnimeSkinMat('#c2b4c0', '#a8444e', 0.22, { emissive: '#261420', emissiveIntensity: 0.10 }),
+      faceMat: makeAnimeFaceMat(assets.bossFaceTex, '#a8444e', 0.22, { emissive: '#261420', emissiveIntensity: 0.10 }),
+      hair: makeAnimeHairMat('#aeb2c2', '#eef2ff', 0.34),
+      hairBase: makeAnimeHairBaseMat('#8d92a4', '#d8def0', 0.38),
+      pants: new THREE.MeshStandardMaterial({ color: '#262130', roughness: 0.78 }),
       weaponGlow: new THREE.MeshStandardMaterial({
         map: assets.steelPbr.map,
         color: '#e8a296',
@@ -1465,14 +1636,14 @@ export class CharacterRig {
     assets: ReturnType<typeof getSharedAssets>,
   ): void {
     const neck = new THREE.Mesh(assets.neck, palette.skin);
-    neck.position.y = 0.02;
+    neck.position.y = 0.025;
     this.head.add(neck);
 
     const isHeroLike = archetype === 'xiaoyao' || archetype === 'ally';
-    // Heroic handsome cinema proportions (1.07 for hero/ally eliminates pinhead silhouette!)
-    const headScale = isHeroLike ? 1.07 : archetype === 'boss' || archetype === 'elite' ? 0.92 : 0.95;
+    // Balanced 6.8-7.0-head compact Donghua / Genshin Hero head scale
+    const headScale = isHeroLike ? 1.09 : archetype === 'boss' || archetype === 'elite' ? 0.96 : 0.98;
     const headGeo = isHeroLike ? assets.heroHead : assets.bossHead;
-    const skullY = isHeroLike ? 0.146 : 0.148;
+    const skullY = isHeroLike ? 0.150 : 0.150;
     const skull = new THREE.Mesh(headGeo, palette.faceMat);
     skull.scale.setScalar(headScale);
     skull.position.y = skullY;
@@ -1482,13 +1653,115 @@ export class CharacterRig {
 
     for (const s of [-1, 1]) {
       const ear = new THREE.Mesh(assets.ear, palette.skin);
-      ear.scale.setScalar(headScale * (isHeroLike ? 0.94 : 1.0));
-      ear.position.set(s * (isHeroLike ? 0.085 : 0.081) * headScale, skullY - 0.002, -0.008 * headScale);
+      ear.scale.setScalar(headScale * (isHeroLike ? 0.90 : 0.96));
+      ear.position.set(s * (isHeroLike ? 0.088 : 0.090) * headScale, skullY - 0.012 * headScale, -0.008 * headScale);
       ear.rotation.y = s * 0.28;
       this.head.add(ear);
     }
 
-    const addLayeredHairCascade = (
+    // Shared True 3D Sculpted Anime Eyes & Heroic 3D Sword Brows builder (conformal to skull surface!)
+    const mountAnimeEyes = (
+      eyeSetR: AnimeEyeRigGeometries,
+      eyeSetL: AnimeEyeRigGeometries,
+      irisTex: THREE.Texture,
+      opts: {
+        scleraHex: string;
+        scleraEmissive: string;
+        irisEmissiveIntensity: number;
+        lashHex: string;
+        browHex: string;
+        foldHex: string;
+        trackHeroRefs?: boolean;
+        trackBossEyeMat?: boolean;
+      },
+    ) => {
+      const scleraMat = new THREE.MeshStandardMaterial({
+        color: opts.scleraHex,
+        emissive: new THREE.Color(opts.scleraEmissive),
+        emissiveIntensity: 0.10,
+        roughness: 0.34,
+        metalness: 0.0,
+      });
+      const irisMat = new THREE.MeshStandardMaterial({
+        map: irisTex,
+        color: '#e4ecf0',
+        emissiveMap: irisTex,
+        emissive: new THREE.Color('#ffffff'),
+        emissiveIntensity: opts.irisEmissiveIntensity,
+        roughness: 0.22,
+        metalness: 0.04,
+        transparent: true,
+        alphaTest: 0.06,
+      });
+      const corneaMat = new THREE.MeshPhysicalMaterial({
+        color: '#ffffff',
+        roughness: 0.02,
+        metalness: 0.0,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.02,
+        transparent: true,
+        opacity: 0.15,
+        depthWrite: false,
+      });
+      const lashMat = new THREE.MeshStandardMaterial({
+        color: opts.lashHex,
+        roughness: 0.42,
+        metalness: 0.05,
+      });
+      const foldMat = new THREE.MeshStandardMaterial({
+        color: opts.foldHex,
+        roughness: 0.65,
+        metalness: 0.0,
+      });
+      const browMat = new THREE.MeshStandardMaterial({
+        color: opts.browHex,
+        roughness: 0.44,
+        metalness: 0.06,
+      });
+
+      if (opts.trackHeroRefs) {
+        this.heroIrisMat = irisMat;
+        this.heroBrowMat = browMat;
+      }
+      if (opts.trackBossEyeMat) {
+        this.bossEyeMat = irisMat;
+      }
+
+      const eyesContainer = new THREE.Group();
+      eyesContainer.position.y = skullY;
+      eyesContainer.scale.setScalar(headScale);
+      this.head.add(eyesContainer);
+
+      const pairs: Array<{ set: AnimeEyeRigGeometries; isLeft: boolean }> = [
+        { set: eyeSetR, isLeft: false },
+        { set: eyeSetL, isLeft: true },
+      ];
+      for (const { set, isLeft } of pairs) {
+        const eyeGrp = new THREE.Group();
+        eyeGrp.name = isLeft ? 'animeEyeL' : 'animeEyeR';
+        eyeGrp.position.copy(set.center);
+
+        const scleraMesh = new THREE.Mesh(set.sclera, scleraMat);
+        const irisMesh = new THREE.Mesh(set.iris, irisMat);
+        const corneaMesh = new THREE.Mesh(set.cornea, corneaMat);
+        const upperLashMesh = new THREE.Mesh(set.upperLash, lashMat);
+        const lowerLashMesh = new THREE.Mesh(set.lowerLash, lashMat);
+        const foldMesh = new THREE.Mesh(set.eyelidFold, foldMat);
+        eyeGrp.add(scleraMesh, irisMesh, corneaMesh, upperLashMesh, lowerLashMesh, foldMesh);
+        eyesContainer.add(eyeGrp);
+
+        // 3D Sculpted Sword Eyebrow sits directly in eyesContainer (stays poised while eyes blink!)
+        const browMesh = new THREE.Mesh(set.brow, browMat);
+        eyesContainer.add(browMesh);
+
+        if (opts.trackHeroRefs) {
+          if (isLeft) this.heroEyeGroupL = eyeGrp;
+          else this.heroEyeGroupR = eyeGrp;
+        }
+      }
+    };
+
+    const addVolumetricBackMane = (
       hairMat: THREE.Material,
       count: number,
       arcSpan: number,
@@ -1499,145 +1772,113 @@ export class CharacterRig {
       for (let i = 0; i < count; i++) {
         const t = count > 1 ? i / (count - 1) - 0.5 : 0;
         const ang = t * arcSpan;
-        const card = new THREE.Mesh(useLong ? assets.hairCardLong : assets.hairCardMid, hairMat);
-        card.scale.setScalar(headScale * (0.94 + Math.abs(Math.cos(i * 2.1)) * 0.14));
-        card.position.set(Math.sin(ang) * 0.082 * headScale, yBase, zBack - Math.cos(ang) * 0.022);
-        card.rotation.set(0.22 + Math.abs(t) * 0.08, ang, t * 0.12);
-        this.head.add(card);
+        const spike = new THREE.Mesh(useLong ? assets.spikeEnemyLong : assets.spikeEnemyMid, hairMat);
+        spike.scale.setScalar(headScale * (0.94 + Math.cos(t * 2.2) * 0.12));
+        spike.position.set(Math.sin(ang) * 0.084 * headScale, yBase, zBack - Math.cos(ang) * 0.022 * headScale);
+        spike.rotation.set(0.20 + Math.abs(t) * 0.06, ang + Math.PI, t * 0.14);
+        spike.castShadow = true;
+        this.head.add(spike);
       }
     };
 
     if (isHeroLike) {
-      // 1. 3D Glossy Cornea Catchlight Lenses aligned over full-width irises (ultra-clear, never cloudy/milky!)
-      const corneaMat = new THREE.MeshPhysicalMaterial({
-        color: '#0d0907',
-        roughness: 0.02,
-        metalness: 0.0,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.02,
-        transparent: true,
-        opacity: 0.14,
-        depthWrite: false,
-      });
-      const glintMat = new THREE.MeshBasicMaterial({
-        color: '#fff8ec',
-        transparent: true,
-        opacity: 0.65,
-        depthWrite: false,
-      });
-      const corneaGeo = new THREE.SphereGeometry(0.0108 * headScale, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.42);
-      corneaGeo.rotateX(Math.PI * 0.5);
-      const glintGeo = new THREE.SphereGeometry(0.0017 * headScale, 8, 6);
-      const eyeY = skullY + 0.014 * headScale;
-      for (const side of [-1, 1]) {
-        const eyeGloss = new THREE.Mesh(corneaGeo, corneaMat);
-        eyeGloss.name = side < 0 ? 'eyeGlossR' : 'eyeGlossL';
-        eyeGloss.scale.set(1.06, 0.68, 0.28);
-        eyeGloss.position.set(side * 0.0355 * headScale, eyeY, 0.0858 * headScale);
-        eyeGloss.rotation.set(0, side * 0.24, 0);
-        this.head.add(eyeGloss);
-
-        const glint = new THREE.Mesh(glintGeo, glintMat);
-        glint.position.set((side * 0.0355 + 0.0028) * headScale, eyeY + 0.0020 * headScale, 0.0894 * headScale);
-        this.head.add(glint);
-      }
-
-      // 2. Elevated Sculpted Hair Crown Dome revealing a clean open forehead & natural hairline (no bowl-cut!)
-      const crown = new THREE.Mesh(
-        new THREE.SphereGeometry(0.0985 * headScale, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.52),
-        palette.hairBase,
+      // 1. TRUE 3D Sculpted Expressive Anime Eyes (sleek 丹凤剑目, deeply saturated ocean-teal iris — ZERO bleach-out!)
+      mountAnimeEyes(
+        assets.heroEyeR,
+        assets.heroEyeL,
+        archetype === 'xiaoyao' ? assets.irisBySkin.skin_xiaoyao : assets.irisAlly,
+        {
+          scleraHex: '#f6f2ee',
+          scleraEmissive: '#282224',
+          irisEmissiveIntensity: 0.16,
+          lashHex: '#121018',
+          browHex: '#181620',
+          foldHex: '#ab7864',
+          trackHeroRefs: archetype === 'xiaoyao',
+        },
       );
-      crown.scale.set(0.955, 1.03, 1.12);
-      crown.position.set(0, skullY + 0.034 * headScale, -0.016 * headScale);
-      crown.rotation.x = -0.34;
-      crown.castShadow = true;
-      this.head.add(crown);
 
-      // Smooth occipital volume fill so side/back 360° silhouette looks lush & seamless
-      const backCranium = new THREE.Mesh(
-        new THREE.SphereGeometry(0.091 * headScale, 20, 14),
-        palette.hairBase,
-      );
-      backCranium.scale.set(0.92, 0.96, 0.94);
-      backCranium.position.set(0, skullY + 0.014 * headScale, -0.030 * headScale);
-      this.head.add(backCranium);
+      // 2. 100% SEALED 3D Anime Hair Cap (wraps down behind ears & nape to vy=-0.84 — ZERO white bald patches in 360°!)
+      const hairCap = new THREE.Mesh(assets.heroHairCap, palette.hairBase);
+      hairCap.scale.setScalar(headScale);
+      hairCap.position.y = skullY;
+      hairCap.castShadow = true;
+      hairCap.receiveShadow = true;
+      this.head.add(hairCap);
 
-      // 3. Open 3:7 Parted Xianxia Curtain Bangs (sweeping diagonally outward, leaving forehead & brows open & handsome!)
-      const bangConfigs: Array<{
+      // 3. 14 Lush Overlapping Sculpted 3D Anime Bang, Temple & Cheek Locks (Genshin Xiao / HoK Li Bai style!)
+      const animeSpikeConfigs: Array<{
         geo: THREE.BufferGeometry;
         pos: [number, number, number];
         rot: [number, number, number];
         scale: number;
       }> = [
-        // Wide open 3:7 side-part above brows — diagonal outward sweep instead of horizontal bowl-cut
-        { geo: assets.hairLockBangSweepL, pos: [-0.032, 0.114, 0.068], rot: [-0.26, -0.30, -0.46], scale: 0.96 },
-        { geo: assets.hairLockBangSweepR, pos: [0.038, 0.114, 0.066], rot: [-0.26, 0.34, 0.50], scale: 0.92 },
-        { geo: assets.hairLockBangSweepL, pos: [-0.064, 0.100, 0.052], rot: [-0.18, -0.62, -0.26], scale: 0.94 },
-        { geo: assets.hairLockBangSweepR, pos: [0.064, 0.100, 0.052], rot: [-0.18, 0.62, 0.26], scale: 0.94 },
-        { geo: assets.hairLockBangSideL, pos: [-0.082, 0.078, 0.026], rot: [-0.08, -0.92, -0.08], scale: 0.96 },
-        { geo: assets.hairLockBangSideR, pos: [0.082, 0.078, 0.026], rot: [-0.08, 0.92, 0.08], scale: 0.96 },
+        // Sweeping lush layered M-part forehead bangs rooted flush inside hair cap & grazing cleanly above sword-brows!
+        { geo: assets.spikeBangCenter, pos: [-0.006, 0.084, 0.070], rot: [0.02, -0.04, -0.05], scale: 0.98 },
+        { geo: assets.spikeBangCenterR, pos: [0.014, 0.084, 0.069], rot: [0.02, 0.08, 0.06], scale: 0.95 },
+        { geo: assets.spikeBangSweepL, pos: [-0.024, 0.082, 0.066], rot: [0.02, -0.22, -0.12], scale: 1.04 },
+        { geo: assets.spikeBangSweepR, pos: [0.026, 0.082, 0.065], rot: [0.02, 0.24, 0.14], scale: 1.02 },
+        { geo: assets.spikeBangMidL, pos: [-0.044, 0.076, 0.058], rot: [0.02, -0.44, -0.08], scale: 1.04 },
+        { geo: assets.spikeBangMidR, pos: [0.044, 0.076, 0.058], rot: [0.02, 0.44, 0.08], scale: 1.04 },
+        { geo: assets.spikeBangOuterL, pos: [-0.064, 0.066, 0.045], rot: [0.02, -0.68, -0.06], scale: 1.04 },
+        { geo: assets.spikeBangOuterR, pos: [0.064, 0.066, 0.045], rot: [0.02, 0.68, 0.06], scale: 1.04 },
+        // Fuller lush cheek-hugging Donghua side-locks (长鬓发 framing jawline softly — ZERO wire needles!)
+        { geo: assets.spikeCheekLockL, pos: [-0.080, 0.052, 0.032], rot: [0.02, -0.92, 0.02], scale: 1.02 },
+        { geo: assets.spikeCheekLockR, pos: [0.080, 0.052, 0.032], rot: [0.02, 0.92, -0.02], scale: 1.02 },
+        // Thick temple & behind-ear sealing locks bridging cheek locks seamlessly into back nape hair!
+        { geo: assets.spikeTempleLockL, pos: [-0.090, 0.044, 0.004], rot: [0.02, -1.32, 0.02], scale: 1.04 },
+        { geo: assets.spikeTempleLockR, pos: [0.090, 0.044, 0.004], rot: [0.02, 1.32, -0.02], scale: 1.04 },
+        // Windswept anime crown volume tufts
+        { geo: assets.spikeCrownTuftL, pos: [-0.024, 0.106, 0.014], rot: [-0.46, -0.45, -0.30], scale: 0.96 },
+        { geo: assets.spikeCrownTuftR, pos: [0.026, 0.105, 0.012], rot: [-0.44, 0.48, 0.32], scale: 0.94 },
       ];
-      for (const cfg of bangConfigs) {
-        const lock = new THREE.Mesh(cfg.geo, palette.hair);
-        lock.scale.setScalar(headScale * cfg.scale);
-        lock.position.set(cfg.pos[0] * headScale, skullY + cfg.pos[1] * headScale, cfg.pos[2] * headScale);
-        lock.rotation.set(cfg.rot[0], cfg.rot[1], cfg.rot[2]);
-        lock.castShadow = true;
-        this.head.add(lock);
+      for (const cfg of animeSpikeConfigs) {
+        const spike = new THREE.Mesh(cfg.geo, palette.hair);
+        spike.scale.setScalar(headScale * cfg.scale);
+        spike.position.set(cfg.pos[0] * headScale, skullY + cfg.pos[1] * headScale, cfg.pos[2] * headScale);
+        spike.rotation.set(cfg.rot[0], cfg.rot[1], cfg.rot[2]);
+        spike.castShadow = true;
+        this.head.add(spike);
       }
 
-      // 4. Sleek Cheek-Framing Sculpted Temple Locks (鬓发 tucked cleanly beside temples & ears)
-      for (const side of [-1, 1]) {
-        const templeGeo = side < 0 ? assets.hairLockTempleL : assets.hairLockTempleR;
-        const innerLock = new THREE.Mesh(templeGeo, palette.hair);
-        innerLock.scale.setScalar(headScale * 0.92);
-        innerLock.position.set(side * 0.085 * headScale, skullY + 0.058 * headScale, 0.022 * headScale);
-        innerLock.rotation.set(-0.04, side * 0.98, side * 0.06);
-        innerLock.castShadow = true;
-
-        const outerLock = new THREE.Mesh(templeGeo, palette.hair);
-        outerLock.scale.setScalar(headScale * 0.98);
-        outerLock.position.set(side * 0.090 * headScale, skullY + 0.048 * headScale, -0.002 * headScale);
-        outerLock.rotation.set(-0.02, side * 1.28, side * 0.04);
-        outerLock.castShadow = true;
-        this.head.add(innerLock, outerLock);
-      }
-
-      // 5. Layered Nape Hair Locks hugging the back of the neck cleanly
-      for (let i = 0; i < 7; i++) {
-        const t = i / 6 - 0.5;
-        const ang = t * 1.65;
-        const napeLock = new THREE.Mesh(assets.hairLockNape, palette.hair);
-        napeLock.scale.setScalar(headScale * (0.94 + Math.cos(t * 2.2) * 0.1));
+      // 4. Lush Overlapping Sculpted Volumetric Nape Curtain wrapping back skull seamlessly down to collar
+      for (let i = 0; i < 8; i++) {
+        const t = i / 7 - 0.5;
+        const ang = t * 1.95;
+        const napeLock = new THREE.Mesh(assets.spikeNape, palette.hair);
+        napeLock.scale.setScalar(headScale * (0.96 + Math.cos(t * 2.1) * 0.10));
         napeLock.position.set(
-          Math.sin(ang) * 0.082 * headScale,
-          skullY + 0.036 * headScale,
+          Math.sin(ang) * 0.088 * headScale,
+          skullY + 0.016 * headScale,
           (-0.072 - Math.cos(ang) * 0.028) * headScale,
         );
-        napeLock.rotation.set(0.16, ang + Math.PI, t * 0.14);
+        napeLock.rotation.set(0.14, ang + Math.PI, t * 0.12);
+        napeLock.castShadow = true;
         this.head.add(napeLock);
       }
 
-      // 6. Sculpted High Martial Topknot Hair Bun + Smooth Layered Flowing Ponytail (offset -Z to clear scabbard!)
-      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.036 * headScale, 16, 12), palette.hairBase);
-      bun.scale.set(0.95, 1.14, 0.95);
-      bun.position.set(0, skullY + 0.122 * headScale, -0.064 * headScale);
+      // 5. High Martial Topknot Bun + Lush 7-Ribbon Overlapping Volumetric Ponytail
+      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.039 * headScale, 16, 12), palette.hairBase);
+      bun.scale.set(0.96, 1.14, 0.96);
+      bun.position.set(0, skullY + 0.108 * headScale, -0.068 * headScale);
       bun.castShadow = true;
       this.head.add(bun);
 
       const ponytailGroup = new THREE.Group();
-      ponytailGroup.position.set(0, skullY + 0.108 * headScale, -0.098 * headScale);
+      ponytailGroup.position.set(0, skullY + 0.098 * headScale, -0.100 * headScale);
       const tailSpecs: Array<{
         geo: THREE.BufferGeometry;
         pos: [number, number, number];
         rot: [number, number, number];
         scale: number;
       }> = [
-        { geo: assets.hairLockTailMain, pos: [0, 0.004, -0.008], rot: [0.18, Math.PI, 0], scale: 1.06 },
-        { geo: assets.hairLockTailSideL, pos: [-0.018, 0.0, -0.004], rot: [0.20, Math.PI + 0.24, 0.08], scale: 0.98 },
-        { geo: assets.hairLockTailSideR, pos: [0.018, 0.0, -0.004], rot: [0.20, Math.PI - 0.24, -0.08], scale: 0.98 },
-        { geo: assets.hairLockTailSideL, pos: [-0.026, -0.006, 0.004], rot: [0.15, Math.PI + 0.44, 0.14], scale: 0.88 },
-        { geo: assets.hairLockTailSideR, pos: [0.026, -0.006, 0.004], rot: [0.15, Math.PI - 0.44, -0.14], scale: 0.88 },
+        { geo: assets.spikeTailCenter, pos: [0, 0.006, -0.008], rot: [0.18, Math.PI, 0], scale: 1.06 },
+        { geo: assets.spikeTailMidL, pos: [-0.017, 0.002, -0.005], rot: [0.22, Math.PI + 0.22, 0.07], scale: 1.02 },
+        { geo: assets.spikeTailMidR, pos: [0.017, 0.002, -0.005], rot: [0.22, Math.PI - 0.22, -0.07], scale: 1.02 },
+        { geo: assets.spikeTailOuterL, pos: [-0.026, -0.004, 0.004], rot: [0.16, Math.PI + 0.40, 0.12], scale: 0.95 },
+        { geo: assets.spikeTailOuterR, pos: [0.026, -0.004, 0.004], rot: [0.16, Math.PI - 0.40, -0.12], scale: 0.95 },
+        { geo: assets.spikeTailUpperL, pos: [-0.010, 0.010, -0.012], rot: [0.32, Math.PI + 0.14, 0.05], scale: 0.96 },
+        { geo: assets.spikeTailUpperR, pos: [0.010, 0.010, -0.012], rot: [0.32, Math.PI - 0.14, -0.05], scale: 0.96 },
       ];
       for (const ts of tailSpecs) {
         const lock = new THREE.Mesh(ts.geo, palette.hair);
@@ -1652,9 +1893,9 @@ export class CharacterRig {
         this.heroPonytailGroup = ponytailGroup;
       }
 
-      // 7. Per-Skin 3D Headpiece Crowns mounted regally on the Topknot
+      // 6. Per-Skin 3D Headpiece Crowns mounted regally on the Topknot
       const crownMount = new THREE.Group();
-      crownMount.position.set(0, skullY + 0.124 * headScale, -0.058 * headScale);
+      crownMount.position.set(0, skullY + 0.110 * headScale, -0.062 * headScale);
       crownMount.scale.setScalar(headScale);
       this.head.add(crownMount);
       if (archetype === 'xiaoyao') {
@@ -1668,19 +1909,19 @@ export class CharacterRig {
         crownMount.add(allyClasp, allyPin);
       }
 
-      // 8. Sleek Woven Cloth Headband + Natural Gravity-Draped Twin Silk Ribbons (hanging smoothly downward behind shoulders!)
+      // 7. Slim Sleek Silk Forehead Ribbon nestled organically inside the upper hair crown (NOT a stiff plastic hoop!)
       const band = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.0945 * headScale, 0.0955 * headScale, 0.014, 28, 1, true),
+        new THREE.CylinderGeometry(0.100 * headScale, 0.101 * headScale, 0.010, 28, 1, true),
         palette.accent,
       );
-      band.scale.set(0.935, 1, 1.12);
-      band.position.set(0, skullY + 0.077 * headScale, -0.010 * headScale);
-      band.rotation.x = -0.22;
+      band.scale.set(0.985, 1, 1.07);
+      band.position.set(0, skullY + 0.064 * headScale, -0.010 * headScale);
+      band.rotation.x = -0.24;
       this.head.add(band);
 
-      const knot = new THREE.Mesh(new THREE.SphereGeometry(0.012 * headScale, 10, 8), palette.accent);
+      const knot = new THREE.Mesh(new THREE.SphereGeometry(0.011 * headScale, 10, 8), palette.accent);
       knot.scale.set(1.22, 0.76, 0.72);
-      knot.position.set(0, skullY + 0.054 * headScale, -0.105 * headScale);
+      knot.position.set(0, skullY + 0.044 * headScale, -0.108 * headScale);
       this.head.add(knot);
 
       for (const side of [-1, 1]) {
@@ -1690,7 +1931,7 @@ export class CharacterRig {
           const seg = new THREE.Mesh(assets.silkRibbonSeg, palette.accent);
           if (i === 0) {
             seg.scale.setScalar(headScale);
-            seg.position.set(side * 0.017 * headScale, skullY + 0.052 * headScale, -0.108 * headScale);
+            seg.position.set(side * 0.017 * headScale, skullY + 0.042 * headScale, -0.111 * headScale);
           } else {
             seg.scale.set(0.88, 1, 1);
             seg.position.set(0, -0.102, 0);
@@ -1702,120 +1943,184 @@ export class CharacterRig {
         this.ribbonSegs.push(chain);
       }
     } else if (archetype === 'bladesman') {
+      // Fierce 3D Donghua warrior eyes & brows
+      mountAnimeEyes(assets.bossEyeR, assets.bossEyeL, assets.irisVanguard, {
+        scleraHex: '#f0e2d2',
+        scleraEmissive: '#382010',
+        irisEmissiveIntensity: 0.65,
+        lashHex: '#181010',
+        browHex: '#201614',
+        foldHex: '#8a5c46',
+      });
+
+      const hairCap = new THREE.Mesh(assets.bossHairCap, palette.hairBase);
+      hairCap.scale.setScalar(headScale * 0.99);
+      hairCap.position.y = skullY;
+      this.head.add(hairCap);
+
       const helm = new THREE.Mesh(
-        new THREE.SphereGeometry(0.104 * headScale, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
+        new THREE.SphereGeometry(0.108 * headScale, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
         palette.armor,
       );
-      helm.scale.set(0.97, 1.02, 1.12);
-      helm.position.set(0, 0.194, -0.012);
+      helm.scale.set(0.98, 1.02, 1.12);
+      helm.position.set(0, skullY + 0.044 * headScale, -0.010 * headScale);
       helm.rotation.x = -0.18;
       this.head.add(helm);
 
-      const brim = new THREE.Mesh(new THREE.TorusGeometry(0.102 * headScale, 0.011, 10, 26), palette.bronze);
+      const brim = new THREE.Mesh(new THREE.TorusGeometry(0.106 * headScale, 0.011, 10, 26), palette.bronze);
       brim.rotation.x = Math.PI / 2 - 0.16;
-      brim.scale.set(0.95, 1.1, 1);
-      brim.position.set(0, 0.214, -0.008);
+      brim.scale.set(0.96, 1.10, 1);
+      brim.position.set(0, skullY + 0.064 * headScale, -0.008 * headScale);
       this.head.add(brim);
 
       const finial = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.022, 0.072, 12), palette.bronze);
-      finial.position.set(0, 0.308, -0.024);
+      finial.position.set(0, skullY + 0.160 * headScale, -0.024 * headScale);
       this.head.add(finial);
 
       const plume = new THREE.Mesh(assets.plumeShort, palette.accent);
-      plume.position.set(0, 0.335, -0.026);
+      plume.position.set(0, skullY + 0.188 * headScale, -0.026 * headScale);
       this.head.add(plume);
 
       for (const s of [-1, 1]) {
-        const flap = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.016, 0.024, 0.115, 10),
-          palette.armor,
-        );
+        const flap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.024, 0.115, 10), palette.armor);
         flap.scale.set(0.45, 1, 1.6);
-        flap.position.set(s * 0.094 * headScale, 0.142, -0.024);
+        flap.position.set(s * 0.098 * headScale, skullY - 0.006 * headScale, -0.024 * headScale);
         flap.rotation.z = s * 0.12;
         this.head.add(flap);
       }
-      addLayeredHairCascade(palette.hair, 5, 1.1, 0.188, -0.088, false);
+      addVolumetricBackMane(palette.hair, 5, 1.2, skullY + 0.036 * headScale, -0.088 * headScale, false);
     } else if (archetype === 'caster') {
-      const hairDome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.096 * headScale, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.56),
-        palette.hairBase,
-      );
-      hairDome.scale.set(0.95, 1.02, 1.14);
-      hairDome.position.set(0, 0.174, -0.018);
-      hairDome.rotation.x = -0.2;
-      this.head.add(hairDome);
+      // Mystic Elder Daoist glowing violet 3D anime eyes, sweeping silver brows & sculpted 3D Daoist beard!
+      mountAnimeEyes(assets.bossEyeR, assets.bossEyeL, assets.irisElder, {
+        scleraHex: '#f2ecfa',
+        scleraEmissive: '#2c1e48',
+        irisEmissiveIntensity: 0.78,
+        lashHex: '#241c30',
+        browHex: '#cfd4e2',
+        foldHex: '#a4867c',
+      });
+
+      const hairCap = new THREE.Mesh(assets.bossHairCap, palette.hairBase);
+      hairCap.scale.setScalar(headScale);
+      hairCap.position.y = skullY;
+      this.head.add(hairCap);
+
+      // Sculpted volumetric silver Daoist goatee & drooping mustache
+      const beard = new THREE.Mesh(assets.spikeBeardMain, palette.hair);
+      beard.scale.setScalar(headScale);
+      beard.position.set(0, skullY - 0.094 * headScale, 0.072 * headScale);
+      beard.rotation.x = 0.08;
+      const mustL = new THREE.Mesh(assets.spikeMustacheL, palette.hair);
+      mustL.scale.setScalar(headScale);
+      mustL.position.set(-0.014 * headScale, skullY - 0.056 * headScale, 0.084 * headScale);
+      mustL.rotation.set(0.10, -0.25, -0.35);
+      const mustR = new THREE.Mesh(assets.spikeMustacheR, palette.hair);
+      mustR.scale.setScalar(headScale);
+      mustR.position.set(0.014 * headScale, skullY - 0.056 * headScale, 0.084 * headScale);
+      mustR.rotation.set(0.10, 0.25, 0.35);
+      this.head.add(beard, mustL, mustR);
 
       const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.048, 0.105, 12), palette.bronze);
-      crown.position.set(0, 0.285, -0.028);
+      crown.position.set(0, skullY + 0.138 * headScale, -0.028 * headScale);
       this.head.add(crown);
       const hairpin = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.22, 8), palette.bronze);
       hairpin.rotation.z = Math.PI / 2;
-      hairpin.position.set(0, 0.292, -0.028);
+      hairpin.position.set(0, skullY + 0.146 * headScale, -0.028 * headScale);
       this.head.add(hairpin);
 
-      addLayeredHairCascade(palette.hair, 7, 1.45, 0.218, -0.082, true);
+      addVolumetricBackMane(palette.hair, 7, 1.55, skullY + 0.052 * headScale, -0.086 * headScale, true);
     } else if (archetype === 'elite') {
-      const hairDome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.098 * headScale, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.56),
-        palette.hairBase,
-      );
-      hairDome.scale.set(0.97, 1.03, 1.14);
-      hairDome.position.set(0, 0.176, -0.018);
-      hairDome.rotation.x = -0.22;
-      this.head.add(hairDome);
+      // Intense glowing crimson-flame 3D demon-general eyes & fierce furrowed brows
+      mountAnimeEyes(assets.bossEyeR, assets.bossEyeL, assets.irisElite, {
+        scleraHex: '#2c161a',
+        scleraEmissive: '#3e1014',
+        irisEmissiveIntensity: 0.96,
+        lashHex: '#12080a',
+        browHex: '#221418',
+        foldHex: '#6c4448',
+      });
 
-      const warCrown = new THREE.Mesh(new THREE.TorusGeometry(0.1 * headScale, 0.013, 10, 26), palette.bronze);
+      const hairCap = new THREE.Mesh(assets.bossHairCap, palette.hairBase);
+      hairCap.scale.setScalar(headScale);
+      hairCap.position.y = skullY;
+      this.head.add(hairCap);
+
+      for (const s of [-1, 1]) {
+        const bang = new THREE.Mesh(s < 0 ? assets.spikeBangOuterL : assets.spikeBangOuterR, palette.hair);
+        bang.scale.setScalar(headScale * 1.06);
+        bang.position.set(s * 0.056 * headScale, skullY + 0.098 * headScale, 0.058 * headScale);
+        bang.rotation.set(-0.12, s * 0.54, s * 0.16);
+        this.head.add(bang);
+      }
+
+      const warCrown = new THREE.Mesh(new THREE.TorusGeometry(0.104 * headScale, 0.013, 10, 26), palette.bronze);
       warCrown.rotation.x = Math.PI / 2 - 0.15;
       warCrown.scale.set(0.95, 1.13, 1);
-      warCrown.position.set(0, 0.218, -0.006);
+      warCrown.position.set(0, skullY + 0.070 * headScale, -0.006 * headScale);
       this.head.add(warCrown);
 
       const crest = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.036, 0.105, 12), palette.armor);
-      crest.position.set(0, 0.294, -0.032);
+      crest.position.set(0, skullY + 0.148 * headScale, -0.032 * headScale);
       this.head.add(crest);
 
       const crimsonPlume = new THREE.Mesh(assets.plumeLong, palette.accent);
-      crimsonPlume.position.set(0, 0.332, -0.036);
+      crimsonPlume.position.set(0, skullY + 0.186 * headScale, -0.036 * headScale);
       this.head.add(crimsonPlume);
 
-      addLayeredHairCascade(palette.hair, 7, 1.4, 0.22, -0.082, true);
+      addVolumetricBackMane(palette.hair, 7, 1.5, skullY + 0.055 * headScale, -0.086 * headScale, true);
     } else {
-      // BOSS: Grounded Live-Action Ancient Warlord Crown + Sculpted Curved Ribbed War-Horns + Layered Silver-Iron Hair
-      const hairDome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.098 * headScale, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.56),
-        palette.hairBase,
-      );
-      hairDome.scale.set(0.98, 1.03, 1.15);
-      hairDome.position.set(0, 0.176, -0.018);
-      hairDome.rotation.x = -0.22;
-      this.head.add(hairDome);
+      // BOSS: Stylized 3D Donghua Demon Sovereign — molten ruby-gold glowing 3D eyes, volumetric silver mane & ribbed war-horns!
+      mountAnimeEyes(assets.bossEyeR, assets.bossEyeL, assets.irisBoss, {
+        scleraHex: '#1c1018',
+        scleraEmissive: '#380a16',
+        irisEmissiveIntensity: 1.12,
+        lashHex: '#10080e',
+        browHex: '#8d92a8',
+        foldHex: '#6c5a6c',
+        trackBossEyeMat: true,
+      });
 
-      const diadem = new THREE.Mesh(new THREE.TorusGeometry(0.1 * headScale, 0.013, 10, 26), palette.bronze);
+      const hairCap = new THREE.Mesh(assets.bossHairCap, palette.hairBase);
+      hairCap.scale.setScalar(headScale);
+      hairCap.position.y = skullY;
+      this.head.add(hairCap);
+
+      // Fierce swept silver Demon Sovereign forehead spikes framing the diadem
+      for (const s of [-1, 1]) {
+        const frontLock = new THREE.Mesh(s < 0 ? assets.spikeBangSweepL : assets.spikeBangSweepR, palette.hair);
+        frontLock.scale.setScalar(headScale * 1.12);
+        frontLock.position.set(s * 0.042 * headScale, skullY + 0.108 * headScale, 0.068 * headScale);
+        frontLock.rotation.set(-0.14, s * 0.42, s * 0.22);
+        const sideLock = new THREE.Mesh(s < 0 ? assets.spikeCheekLockL : assets.spikeCheekLockR, palette.hair);
+        sideLock.scale.setScalar(headScale * 1.06);
+        sideLock.position.set(s * 0.084 * headScale, skullY + 0.068 * headScale, 0.026 * headScale);
+        sideLock.rotation.set(-0.04, s * 0.96, s * -0.06);
+        this.head.add(frontLock, sideLock);
+      }
+
+      const diadem = new THREE.Mesh(new THREE.TorusGeometry(0.104 * headScale, 0.013, 10, 26), palette.bronze);
       diadem.rotation.x = Math.PI / 2 - 0.14;
-      diadem.scale.set(0.94, 1.14, 1);
-      diadem.position.set(0, 0.22, -0.006);
+      diadem.scale.set(0.95, 1.14, 1);
+      diadem.position.set(0, skullY + 0.072 * headScale, -0.006 * headScale);
       this.head.add(diadem);
 
       const topCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.04, 0.12, 12), palette.bronze);
-      topCrown.position.set(0, 0.3, -0.036);
+      topCrown.position.set(0, skullY + 0.154 * headScale, -0.036 * headScale);
       this.head.add(topCrown);
 
-      // Restrained dark-blood obsidian brow stone (zero cartoon glow or LED eyeball spheres!)
       const rubyMat = new THREE.MeshPhysicalMaterial({
-        color: '#6b1218',
-        emissive: new THREE.Color('#280609'),
-        emissiveIntensity: 0.25,
-        roughness: 0.18,
-        metalness: 0.25,
-        clearcoat: 0.85,
+        color: '#a81624',
+        emissive: new THREE.Color('#680c16'),
+        emissiveIntensity: 0.58,
+        roughness: 0.14,
+        metalness: 0.22,
+        clearcoat: 0.92,
       });
-      const centerGem = new THREE.Mesh(new THREE.SphereGeometry(0.013, 12, 10), rubyMat);
-      centerGem.scale.set(0.85, 1.25, 0.55);
-      centerGem.position.set(0, 0.228, 0.094);
+      const centerGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.015 * headScale, 0), rubyMat);
+      centerGem.scale.set(0.85, 1.35, 0.55);
+      centerGem.position.set(0, skullY + 0.078 * headScale, 0.098 * headScale);
       this.head.add(centerGem);
 
-      // Sculpted Curved Ribbed War-Horns with root-to-tip bone/antique-bronze gradient catching moonlight!
       const hornMat = new THREE.MeshStandardMaterial({
         map: assets.ironArmorTex,
         normalMap: assets.ironArmorNrm,
@@ -1826,13 +2131,13 @@ export class CharacterRig {
         metalness: 0.52,
       });
       const hornL = new THREE.Mesh(assets.hornL, hornMat);
-      hornL.position.set(-0.078, 0.225, -0.015);
+      hornL.position.set(-0.078 * headScale, skullY + 0.076 * headScale, -0.015 * headScale);
       const hornR = new THREE.Mesh(assets.hornR, hornMat);
-      hornR.position.set(0.078, 0.225, -0.015);
+      hornR.position.set(0.078 * headScale, skullY + 0.076 * headScale, -0.015 * headScale);
       this.head.add(hornL, hornR);
 
-      // Wild layered iron-grey shoulder hair cascade
-      addLayeredHairCascade(palette.hair, 9, 1.65, 0.224, -0.084, true);
+      // Wild sculpted volumetric silver-iron shoulder mane
+      addVolumetricBackMane(palette.hair, 9, 1.75, skullY + 0.058 * headScale, -0.088 * headScale, true);
     }
   }
 
@@ -2283,25 +2588,28 @@ export class CharacterRig {
     }
 
     // Chest Heart-Mirror Guard (护心镜)
-    const mirrorBezel = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.010, 10, 26), trimMat);
-    mirrorBezel.position.set(0, 0.34, 0.156);
+    const mirrorBezel = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.0095, 10, 26), trimMat);
+    mirrorBezel.position.set(0, 0.34, 0.146);
     const mirrorDome = new THREE.Mesh(
-      new THREE.SphereGeometry(0.066, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42),
+      new THREE.SphereGeometry(0.062, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42),
       plateMat,
     );
     mirrorDome.rotation.x = Math.PI / 2;
     mirrorDome.scale.set(1, 0.34, 1);
-    mirrorDome.position.set(0, 0.34, 0.150);
-    const mirrorCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.016, 0), trimMat);
+    mirrorDome.position.set(0, 0.34, 0.140);
+    const mirrorCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.015, 0), trimMat);
     mirrorCore.scale.set(0.92, 1.12, 0.62);
-    mirrorCore.position.set(0, 0.34, 0.172);
+    mirrorCore.position.set(0, 0.34, 0.162);
     armorGroup.add(mirrorBezel, mirrorDome, mirrorCore);
 
-    // Armored Collar Filigree Ring
-    const collarRim = new THREE.Mesh(new THREE.TorusGeometry(0.080, 0.0075, 8, 24), trimMat);
-    collarRim.rotation.x = Math.PI / 2 + 0.14;
-    collarRim.position.set(0, 0.510, 0.012);
-    armorGroup.add(collarRim);
+    // Sleek V-collar armor clasps sitting flush on the tailored Hanfu lapels (zero floating neck torus!)
+    for (const side of [-1, 1]) {
+      const clasp = new THREE.Mesh(new THREE.OctahedronGeometry(0.014, 0), trimMat);
+      clasp.scale.set(1.2, 0.72, 0.45);
+      clasp.position.set(side * 0.068, 0.452, 0.118);
+      clasp.rotation.z = side * -0.52;
+      armorGroup.add(clasp);
+    }
 
     armorGroup.visible = false;
     this.torso.add(armorGroup);
@@ -2595,6 +2903,9 @@ export class CharacterRig {
     if (this.archetype === 'boss') {
       this.weaponGlowMat.emissive.set(active ? '#e0242c' : '#b02230');
       this.weaponGlowMat.emissiveIntensity = active ? 1.38 : 0.68;
+      if (this.bossEyeMat) {
+        this.bossEyeMat.emissiveIntensity = active ? 1.68 : 1.12;
+      }
       if (this.bossRelicEmberMat) {
         this.bossRelicEmberMat.emissive.set(active ? '#e6302a' : '#b6282e');
         this.bossRelicEmberMat.emissiveIntensity = active ? 1.32 : 0.72;
@@ -2790,70 +3101,95 @@ export class CharacterRig {
               ? 'skin_jinwu'
               : 'skin_xiaoyao');
     this.activeHeroSkinId = resolvedSkinId;
+    const assets = getSharedAssets();
 
-    if (this.skinPrimaryMat) this.skinPrimaryMat.color.set(skin.primaryHex);
-    if (this.skinRobeInnerMat) this.skinRobeInnerMat.color.set(skin.robeInnerHex);
+    // Clean vibrant Donghua silk coloring: default skin_xiaoyao uses warm ivory-celadon + Shu-Mountain celadon-indigo
+    const isDefaultXiaoyaoHex =
+      resolvedSkinId === 'skin_xiaoyao' &&
+      skin.primaryHex.toLowerCase() === '#ffffff' &&
+      skin.secondaryHex.toLowerCase() === '#ffffff';
+    if (this.skinPrimaryMat) {
+      this.skinPrimaryMat.color.set(isDefaultXiaoyaoHex ? '#e2dccf' : skin.primaryHex);
+    }
+    if (this.skinRobeInnerMat) {
+      this.skinRobeInnerMat.color.set(isDefaultXiaoyaoHex ? '#d4dce4' : skin.robeInnerHex);
+    }
     if (this.skinSecondaryMat) {
-      this.skinSecondaryMat.color.set(skin.secondaryHex);
-      this.skinSecondaryMat.sheenColor.set(skin.sheenHex);
-      this.skinSecondaryMat.metalness = 0.06;
-      this.skinSecondaryMat.roughness = 0.84;
+      this.skinSecondaryMat.color.set(isDefaultXiaoyaoHex ? '#2d5c84' : skin.secondaryHex);
+      this.skinSecondaryMat.sheenColor.set(isDefaultXiaoyaoHex ? '#78b8dc' : skin.sheenHex);
+      this.skinSecondaryMat.metalness = 0.08;
+      this.skinSecondaryMat.roughness = 0.64;
     }
     if (this.skinAccentMat) {
       this.skinAccentMat.color.set(skin.accentHex);
       this.skinAccentMat.sheenColor.set(skin.sheenHex);
     }
     if (this.skinTrimMat) {
-      this.skinTrimMat.color.set(skin.trimHex);
+      this.skinTrimMat.color.set(isDefaultXiaoyaoHex ? '#253d56' : skin.trimHex);
       this.skinTrimMat.emissive.set('#000000');
       this.skinTrimMat.emissiveIntensity = 0;
     }
     if (this.skinBronzeMat) this.skinBronzeMat.color.set(skin.bronzeHex);
 
-    // Per-skin dynamic hair tint, sheen, 3D headpiece crown & signature floating back/shoulder ornaments
+    // Per-skin dynamic jewel 3D Anime Iris Texture swap!
+    if (this.heroIrisMat) {
+      const irisTex = assets.irisBySkin[resolvedSkinId] ?? assets.irisBySkin.skin_xiaoyao;
+      if (this.heroIrisMat.map !== irisTex) {
+        this.heroIrisMat.map = irisTex;
+        this.heroIrisMat.emissiveMap = irisTex;
+        this.heroIrisMat.needsUpdate = true;
+      }
+    }
+
+    // Per-skin silky Donghua hair tint, angel-ring sheen, harmonized 3D eyebrows, crowns & back ornaments
     const hairPalette: Record<
       string,
-      { main: string; base: string; sheen: string; emissive: string; emissiveInt: number; rough: number }
+      { main: string; base: string; sheen: string; brow: string; emissive: string; emissiveInt: number; rough: number }
     > = {
       skin_shuangxue: {
-        main: '#b9cce0',
-        base: '#9db2c8',
-        sheen: '#dceeff',
-        emissive: '#101d2e',
-        emissiveInt: 0.05,
-        rough: 0.44,
+        main: '#d4e4f4',
+        base: '#bdd2e8',
+        sheen: '#ffffff',
+        brow: '#687e96',
+        emissive: '#16283e',
+        emissiveInt: 0.08,
+        rough: 0.34,
       },
       skin_chiyan: {
-        main: '#261418',
-        base: '#1c0f12',
-        sheen: '#8e303a',
-        emissive: '#1e0608',
-        emissiveInt: 0.08,
-        rough: 0.38,
+        main: '#2a1218',
+        base: '#1f0d12',
+        sheen: '#c8444e',
+        brow: '#2c1418',
+        emissive: '#22060a',
+        emissiveInt: 0.09,
+        rough: 0.32,
       },
       skin_zixiao: {
-        main: '#1c1734',
-        base: '#151128',
-        sheen: '#866ad8',
-        emissive: '#140b2c',
-        emissiveInt: 0.09,
-        rough: 0.38,
+        main: '#22193d',
+        base: '#191230',
+        sheen: '#a682ff',
+        brow: '#261c44',
+        emissive: '#160c32',
+        emissiveInt: 0.10,
+        rough: 0.32,
       },
       skin_jinwu: {
-        main: '#221b12',
-        base: '#19140d',
-        sheen: '#c4963c',
-        emissive: '#1a1004',
-        emissiveInt: 0.08,
-        rough: 0.36,
+        main: '#261d12',
+        base: '#1d160d',
+        sheen: '#eab850',
+        brow: '#2a1f12',
+        emissive: '#1e1204',
+        emissiveInt: 0.09,
+        rough: 0.30,
       },
       skin_xiaoyao: {
-        main: '#161314',
-        base: '#131011',
-        sheen: '#4c433e',
-        emissive: '#000000',
-        emissiveInt: 0,
-        rough: 0.40,
+        main: '#1b1d26',
+        base: '#161820',
+        sheen: '#66789c',
+        brow: '#1e1c24',
+        emissive: '#080b14',
+        emissiveInt: 0.04,
+        rough: 0.34,
       },
     };
     const hp = hairPalette[resolvedSkinId] ?? hairPalette.skin_xiaoyao;
@@ -2868,7 +3204,10 @@ export class CharacterRig {
       this.heroHairBaseMat.color.set(hp.base);
       this.heroHairBaseMat.sheenColor.set(hp.sheen);
       this.heroHairBaseMat.emissive.set(hp.emissive);
-      this.heroHairBaseMat.emissiveIntensity = hp.emissiveInt * 0.75;
+      this.heroHairBaseMat.emissiveIntensity = hp.emissiveInt * 0.78;
+    }
+    if (this.heroBrowMat) {
+      this.heroBrowMat.color.set(hp.brow);
     }
     for (const [id, crownGrp] of Object.entries(this.heroCrownVariants)) {
       if (crownGrp) crownGrp.visible = id === resolvedSkinId;
@@ -3032,28 +3371,30 @@ export class CharacterRig {
     }
 
     let pelX = 0;
-    let pelY = -0.03 + Math.sin(elapsed * 2.5) * 0.016;
+    let pelY = -0.025 + Math.sin(elapsed * 2.3) * 0.014;
     let pelZ = 0;
-    let tPitch = 0.06;
-    let tYaw = -0.22;
+    let tPitch = 0.04;
+    let tYaw = -0.16;
     let tRoll = 0;
-    let hYaw = 0.16;
-    let rHand: [number, number, number] = [-0.36, 1.09 + Math.sin(elapsed * 2.5) * 0.018, 0.25];
-    let lHand: [number, number, number] = [0.37, 1.13 - Math.sin(elapsed * 2.5) * 0.016, 0.3];
-    let swordDir: [number, number, number] = [-0.38, 0.42, 0.82];
-    let rFoot: [number, number, number] = [-0.18, 0, -0.12];
-    let lFoot: [number, number, number] = [0.18, 0, 0.16];
+    let hYaw = 0.14;
+    // Poised Donghua swordsman combat stance (relaxed athletic arms, ZERO wide A-pose!)
+    let rHand: [number, number, number] = [-0.29, 1.03 + Math.sin(elapsed * 2.3) * 0.015, 0.24];
+    let lHand: [number, number, number] = [0.27, 1.14 - Math.sin(elapsed * 2.3) * 0.014, 0.28];
+    let swordDir: [number, number, number] = [-0.30, 0.44, 0.84];
+    let rFoot: [number, number, number] = [-0.16, 0, -0.09];
+    let lFoot: [number, number, number] = [0.16, 0, 0.13];
     let drinking = false;
 
     if (pose === 'idle') {
-      tPitch = 0.02;
-      tYaw = 0;
-      hYaw = Math.sin(elapsed * 0.9) * 0.07;
-      rHand = [-0.32, 1.01 + Math.sin(elapsed * 2.0) * 0.015, 0.1];
-      lHand = [0.34, 1.03 - Math.sin(elapsed * 2.0) * 0.015, 0.15];
-      swordDir = [-0.25, -0.5, 0.8];
-      rFoot = [-0.16, 0, 0];
-      lFoot = [0.16, 0, 0.03];
+      // Natural heroic swordsman lobby/camp idle — relaxed poised arms closer to body!
+      tPitch = 0.015;
+      tYaw = -0.08;
+      hYaw = 0.08 + Math.sin(elapsed * 0.85) * 0.055;
+      rHand = [-0.26, 0.94 + Math.sin(elapsed * 1.9) * 0.012, 0.12];
+      lHand = [0.25, 0.99 - Math.sin(elapsed * 1.9) * 0.012, 0.14];
+      swordDir = [-0.20, -0.58, 0.78];
+      rFoot = [-0.14, 0, -0.04];
+      lFoot = [0.15, 0, 0.07];
     } else if (pose === 'run') {
       const cyc = elapsed * (this.archetype === 'boss' ? 7.0 : 11.2);
       const stride = Math.sin(cyc);
@@ -3339,7 +3680,7 @@ export class CharacterRig {
       this._end,
     );
     solveContinuousLimbBones(this.rLegRig, this._rHip, this._mid, this._end, this._rPole, true);
-    this.rFootMesh.position.set(this._end.x, Math.max(0.036, this._end.y - 0.014), this._end.z + 0.02);
+    this.rFootMesh.position.set(this._end.x, Math.max(0.028, this._end.y - 0.014), this._end.z + 0.016);
 
     this._lTarget.set(lFoot[0], lFoot[1] + 0.045 + hoverY * 0.85, lFoot[2]);
     this._lPole.set(this._lHip.x + 0.06, this._lHip.y - 0.22, this._lHip.z + 0.58);
@@ -3353,7 +3694,26 @@ export class CharacterRig {
       this._end,
     );
     solveContinuousLimbBones(this.lLegRig, this._lHip, this._mid, this._end, this._lPole, true);
-    this.lFootMesh.position.set(this._end.x, Math.max(0.036, this._end.y - 0.014), this._end.z + 0.02);
+    this.lFootMesh.position.set(this._end.x, Math.max(0.028, this._end.y - 0.014), this._end.z + 0.016);
+
+    // Live Natural Anime Eye Blinking (smooth blink pulse every ~4.1s, wide open at elapsed=0..3.9s for clean previews!)
+    if (this.heroEyeGroupL && this.heroEyeGroupR) {
+      let eyeScaleY = 1.0;
+      if (pose === 'dead') {
+        eyeScaleY = 0.08;
+      } else if (pose === 'hit' || pose === 'stagger') {
+        eyeScaleY = 0.42;
+      } else {
+        const blinkCycle = elapsed % 4.1;
+        if (blinkCycle > 3.94 && blinkCycle < 4.09) {
+          const bp = (blinkCycle - 3.94) / 0.15;
+          const closed = Math.sin(bp * Math.PI);
+          eyeScaleY = Math.max(0.08, 1.0 - closed * 0.92);
+        }
+      }
+      this.heroEyeGroupL.scale.y = eyeScaleY;
+      this.heroEyeGroupR.scale.y = eyeScaleY;
+    }
 
     // Secondary Cloth Motion: natural gravity-draped twin silk ribbons hanging downward behind shoulders (never flipping above head!)
     this.ribbonPhase += dt * (3.2 + moveSpeed * 1.15);
@@ -3385,11 +3745,14 @@ export class CharacterRig {
 
     const flapLift = clamp(moveSpeed * 0.055 + flourishWind * 0.25, 0, 0.36);
     if (this.skirtPanels.length === 4) {
-      this.skirtPanels[0].rotation.x = -0.04 - flapLift * 0.3;
-      this.skirtPanels[1].rotation.x = -0.06 - flapLift * 1.05;
+      // Front coat flares gently forward (-X); back outer brocade coat (Ry=PI) flares gently backward (+X) outside inner cape!
+      this.skirtPanels[0].rotation.x = -0.04 - flapLift * 0.28;
+      this.skirtPanels[1].rotation.x = 0.065 + flapLift * 0.72 + Math.sin(elapsed * 2.1) * 0.02;
     }
     if (this.capeMesh) {
-      this.capeMesh.rotation.x = -0.14 - flapLift * 0.85 + Math.sin(elapsed * 2.4) * 0.04;
+      const isHeroInnerCape = this.archetype === 'xiaoyao' || this.archetype === 'ally';
+      this.capeMesh.rotation.x =
+        (isHeroInnerCape ? 0.032 : 0.08) + flapLift * (isHeroInnerCape ? 0.64 : 0.78) + Math.sin(elapsed * 2.4) * 0.03;
     }
 
     if (this.archetype === 'xiaoyao') {

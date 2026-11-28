@@ -37,7 +37,7 @@
             <div class="title-top-bar">
               <div class="title-kicker">
                 <span class="title-kicker-en">SHUSHAN DEMON-LOCK COURT · 25 STAGES</span>
-                <span id="app-version-badge" class="version-pill">v1.66</span>
+                <span id="app-version-badge" class="version-pill">v1.67</span>
               </div>
               <div class="title-top-utils" aria-label="快捷入口">
                 <button id="btn-open-settings" class="title-util-pill settings-pill" type="button" title="美化与画质设置">⚙ 美化设置</button>
@@ -351,7 +351,7 @@
                   <strong id="hero-title-name">李逍遥</strong>
                   <span id="hud-blessing-pill" class="hud-blessing-pill"></span>
                 </div>
-                <span class="hero-sub"><span id="hud-realm-name">炼气初境</span> · 剑意 <b id="ult-pct">35%</b></span>
+                <span class="hero-sub"><span id="hud-realm-name">炼气初境</span><span class="hero-sub-sep"> · 剑意 </span><b id="ult-pct">35%</b></span>
               </div>
             </div>
             <div class="bar-row">
@@ -388,6 +388,7 @@
               <span id="minimap-pct">0%</span>
             </div>
             <canvas id="minimap-canvas" width="110" height="176"></canvas>
+            <span class="minimap-mini-tag" aria-hidden="true">舆图</span>
             <span id="minimap-expand-hint" class="minimap-expand-hint">点击展开舆图</span>
           </div>
         </div>
@@ -418,12 +419,15 @@
 
         <!-- Top-Right: Utility Actions, Online Room Badge & Combo Counter -->
         <div class="top-right-stack">
-          <div class="util-row">
+          <div id="hud-util-row" class="util-row">
             <button id="btn-lol-toggle" class="util-btn active-mode desktop-only" type="button" title="切换英雄联盟式右键移动 / 经典右键弹反">联盟鼠标</button>
             <button id="btn-wheel-toggle" class="util-btn desktop-only" type="button" title="切换手游王者轮盘 / 键鼠栏">轮盘</button>
             <button id="btn-hud-map" class="util-btn hud-map-btn" type="button" title="展开中国古代九州舆图">舆图</button>
-            <button id="btn-hud-roster" class="util-btn hud-roster-btn" type="button" title="查看角色物理属性与人物志">人物</button>
-            <button id="btn-mute" class="util-btn" type="button">音律</button>
+            <button id="btn-hud-menu-toggle" class="util-btn hud-menu-toggle-btn" type="button" aria-expanded="false" aria-controls="hud-menu-drawer" title="展开战斗辅助菜单">菜单☰</button>
+            <div id="hud-menu-drawer" class="hud-menu-drawer">
+              <button id="btn-hud-roster" class="util-btn hud-roster-btn" type="button" title="查看角色物理属性与人物志">人物</button>
+              <button id="btn-mute" class="util-btn" type="button">音律</button>
+            </div>
             <button id="btn-pause" class="util-btn" type="button">暂停</button>
           </div>
           <span id="mp-hud-badge" class="mp-hud-badge"></span>
@@ -497,21 +501,28 @@
 
       <!-- Open World Kyushu HUD (九州仙域 · 原神×传奇探索打宝) -->
       <section id="world-hud" aria-live="polite">
-        <div class="world-top-bar">
-          <div class="world-top-info">
-            <span id="world-region-name" class="world-region-badge">蜀山云台 · 九州枢纽</span>
-            <span id="world-progress-pill" class="world-progress-pill">锚点 0/4 · 宝箱 0/6 · 首领 0/4</span>
-            <span id="world-toast" class="shop-toast world-toast" role="status" aria-live="polite"></span>
+        <div id="world-top-bar" class="world-top-bar">
+          <div id="world-menu-drawer" class="world-menu-drawer">
+            <div class="world-top-info">
+              <span id="world-region-name" class="world-region-badge">蜀山云台 · 九州枢纽</span>
+              <span id="world-progress-pill" class="world-progress-pill">锚点 0/4 · 宝箱 0/6 · 首领 0/4</span>
+              <span id="world-toast" class="shop-toast world-toast" role="status" aria-live="polite"></span>
+            </div>
+            <div class="world-top-actions">
+              <button id="btn-world-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
+              <button id="btn-world-craft" class="util-btn craft-util-btn" type="button">炼丹</button>
+              <button id="btn-world-roster" class="util-btn world-roster-btn" type="button">群英属性</button>
+              <button id="btn-world-tp" class="util-btn world-tp-toggle" type="button">传送</button>
+              <button id="btn-world-respawn" class="util-btn" type="button">重召</button>
+              <button id="btn-world-camp" class="util-btn" type="button">剑庐</button>
+              <button id="btn-world-mute" class="util-btn mobile-drawer-only" type="button">音律</button>
+              <button id="btn-world-title" class="util-btn" type="button">大厅</button>
+            </div>
           </div>
-          <div class="world-top-actions">
-            <button id="btn-world-map" class="util-btn world-map-btn" type="button">九州舆图</button>
-            <button id="btn-world-roster" class="util-btn world-roster-btn" type="button">群英属性</button>
-            <button id="btn-world-craft" class="util-btn craft-util-btn" type="button">炼丹</button>
-            <button id="btn-world-tp" class="util-btn world-tp-toggle" type="button">传送</button>
-            <button id="btn-world-respawn" class="util-btn" type="button">重召</button>
-            <button id="btn-world-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
-            <button id="btn-world-camp" class="util-btn" type="button">剑庐</button>
-            <button id="btn-world-title" class="util-btn" type="button">大厅</button>
+          <div class="world-corner-dock">
+            <button id="btn-world-map" class="util-btn world-map-btn" type="button">舆图</button>
+            <button id="btn-world-menu-toggle" class="util-btn hud-menu-toggle-btn" type="button" aria-expanded="false" aria-controls="world-menu-drawer" title="展开九州功能菜单">菜单☰</button>
+            <button id="btn-world-pause" class="util-btn hud-corner-pause-btn" type="button" title="暂停菜单">暂停</button>
           </div>
         </div>
         <aside id="world-tp-drawer" class="world-tp-drawer">
@@ -545,21 +556,27 @@
       <!-- Walkable 3D Rest & Cultivation Camp HUD (云来剑庐) -->
       <section id="camp-hud" aria-live="polite">
         <div id="camp-top-bar" class="camp-top-bar">
-          <div class="camp-top-info">
-            <span class="camp-sanctuary-badge">云来剑庐 · 休憩练剑</span>
-            <span id="camp-realm-pill" class="realm-badge">引气入体 · 凡心</span>
-            <span id="camp-jade-pill" class="jade-badge">◆ 90 灵石</span>
-            <span id="camp-meal-badge" class="camp-meal-badge"></span>
-            <span id="camp-toast" class="shop-toast camp-toast" role="status" aria-live="polite"></span>
+          <div id="camp-menu-drawer" class="camp-menu-drawer">
+            <div class="camp-top-info">
+              <span class="camp-sanctuary-badge">云来剑庐 · 休憩练剑</span>
+              <span id="camp-realm-pill" class="realm-badge">引气入体 · 凡心</span>
+              <span id="camp-jade-pill" class="jade-badge">◆ 90 灵石</span>
+              <span id="camp-meal-badge" class="camp-meal-badge"></span>
+              <span id="camp-toast" class="shop-toast camp-toast" role="status" aria-live="polite"></span>
+            </div>
+            <div class="camp-top-actions">
+              <button id="btn-camp-world" class="util-btn camp-shop-btn" type="button">九州</button>
+              <button id="btn-camp-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
+              <button id="btn-camp-craft" class="util-btn craft-util-btn" type="button">炼丹</button>
+              <button id="btn-camp-roster" class="util-btn world-roster-btn" type="button">人物</button>
+              <button id="btn-camp-mute" class="util-btn mobile-drawer-only" type="button">音律</button>
+              <button id="btn-camp-title" class="util-btn" type="button">大厅</button>
+            </div>
           </div>
-          <div class="camp-top-actions">
+          <div class="camp-corner-dock">
             <button id="btn-camp-map" class="util-btn world-map-btn" type="button">舆图</button>
-            <button id="btn-camp-roster" class="util-btn world-roster-btn" type="button">人物</button>
-            <button id="btn-camp-craft" class="util-btn craft-util-btn" type="button">炼丹</button>
-            <button id="btn-camp-title" class="util-btn" type="button">大厅</button>
-            <button id="btn-camp-world" class="util-btn camp-shop-btn" type="button">九州</button>
-            <button id="btn-camp-shop" class="util-btn camp-shop-btn" type="button">藏宝阁</button>
             <button id="btn-camp-depart" class="xianxia-btn primary camp-depart-btn" type="button">启程 · 第 1 集</button>
+            <button id="btn-camp-menu-toggle" class="util-btn hud-menu-toggle-btn" type="button" aria-expanded="false" aria-controls="camp-menu-drawer" title="展开剑庐功能菜单">菜单☰</button>
           </div>
         </div>
 
@@ -645,7 +662,7 @@
         <div class="modal-card pause-modal-card">
           <div class="modal-head-row">
             <h2 class="modal-title">暂歇剑势</h2>
-            <span id="pause-version-badge" class="version-pill">v1.66</span>
+            <span id="pause-version-badge" class="version-pill">v1.67</span>
           </div>
           <div id="pause-combo-codex" class="combo-codex"></div>
           <p id="pause-desc" class="modal-desc">暂歇剑势，随时继续试剑。</p>
